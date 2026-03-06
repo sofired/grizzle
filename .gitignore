@@ -1,0 +1,26 @@
+# Binaries
+/g-rizzle
+*.exe
+*.test
+
+# Build artifacts
+/dist/
+/bin/
+
+# Go
+vendor/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Downloaded archives
+*.tar.gz
+*.zip
+
+# Session / scratch files
+SESSION_OUTPUT.md
+*.snapshot.json
