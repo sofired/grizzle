@@ -138,6 +138,12 @@ func (b *SelectBuilder) Offset(n int) *SelectBuilder {
 // Build renders the query to a SQL string and bound arg slice.
 func (b *SelectBuilder) Build(d dialect.Dialect) (string, []any) {
 	ctx := expr.NewBuildContext(d)
+	return b.buildWith(ctx), ctx.Args()
+}
+
+// buildWith renders the SELECT statement into an existing BuildContext.
+// This is called by Build and by subquery expressions to share parameter numbering.
+func (b *SelectBuilder) buildWith(ctx *expr.BuildContext) string {
 	var sb strings.Builder
 
 	// SELECT
@@ -149,8 +155,6 @@ func (b *SelectBuilder) Build(d dialect.Dialect) (string, []any) {
 			if i > 0 {
 				sb.WriteString(", ")
 			}
-			// Use the BuildContext to produce the quoted column reference.
-			// We call a small helper since SelectableColumn doesn't expose ToSQL directly.
 			sb.WriteString(selectColSQL(ctx, c))
 		}
 	}
@@ -158,10 +162,18 @@ func (b *SelectBuilder) Build(d dialect.Dialect) (string, []any) {
 	// FROM
 	if b.from != nil {
 		sb.WriteString(" FROM ")
-		sb.WriteString(ctx.Quote(b.from.GRizTableName()))
-		if b.from.GRizTableAlias() != b.from.GRizTableName() {
-			sb.WriteString(" AS ")
-			sb.WriteString(ctx.Quote(b.from.GRizTableAlias()))
+		if sq, ok := b.from.(*SubquerySource); ok {
+			// Subquery: (SELECT ...) AS alias — render into the same context.
+			sb.WriteString("(")
+			sb.WriteString(sq.sub.buildWith(ctx))
+			sb.WriteString(") AS ")
+			sb.WriteString(ctx.Quote(sq.alias))
+		} else {
+			sb.WriteString(ctx.Quote(b.from.GRizTableName()))
+			if b.from.GRizTableAlias() != b.from.GRizTableName() {
+				sb.WriteString(" AS ")
+				sb.WriteString(ctx.Quote(b.from.GRizTableAlias()))
+			}
 		}
 	}
 
@@ -214,10 +226,16 @@ func (b *SelectBuilder) Build(d dialect.Dialect) (string, []any) {
 		sb.WriteString(fmt.Sprintf(" OFFSET %d", b.offset))
 	}
 
-	return sb.String(), ctx.Args()
+	return sb.String()
 }
 
-// selectColSQL produces the quoted "table"."col" SQL fragment for a selectable column.
+// selectColSQL produces the SQL fragment for a selectable column.
+// For aggregate expressions (COUNT, SUM, …) that implement expr.Expression,
+// ToSQL is called directly so the aggregate function syntax is preserved.
+// For plain columns the standard quoted "table"."col" form is returned.
 func selectColSQL(ctx *expr.BuildContext, c expr.SelectableColumn) string {
+	if e, ok := c.(expr.Expression); ok {
+		return e.ToSQL(ctx)
+	}
 	return ctx.ColRef(c.TableName(), c.ColumnName())
 }

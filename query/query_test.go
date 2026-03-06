@@ -990,9 +990,192 @@ func whenString(ptr *string, f func(string) expr.Expression) expr.Expression {
 	return f(*ptr)
 }
 
+// -------------------------------------------------------------------
+// Subquery tests
+// -------------------------------------------------------------------
+
+func TestSubquery_Exists(t *testing.T) {
+	// EXISTS (SELECT * FROM realms WHERE realms.id = users.realm_id)
+	sub := query.Select().
+		From(ts.RealmsT).
+		Where(ts.RealmsT.ID.EQCol(ts.UsersT.RealmID))
+	assertSQL(t, "EXISTS subquery",
+		query.Select(ts.UsersT.ID).From(ts.UsersT).Where(query.Exists(sub)),
+		`SELECT "users"."id" FROM "users" WHERE EXISTS (SELECT * FROM "realms" WHERE "realms"."id" = "users"."realm_id")`,
+		nil,
+	)
+}
+
+func TestSubquery_NotExists(t *testing.T) {
+	sub := query.Select().
+		From(ts.RealmsT).
+		Where(ts.RealmsT.ID.EQCol(ts.UsersT.RealmID))
+	assertSQL(t, "NOT EXISTS subquery",
+		query.Select(ts.UsersT.ID).From(ts.UsersT).Where(query.NotExists(sub)),
+		`SELECT "users"."id" FROM "users" WHERE NOT EXISTS (SELECT * FROM "realms" WHERE "realms"."id" = "users"."realm_id")`,
+		nil,
+	)
+}
+
+func TestSubquery_In(t *testing.T) {
+	// SELECT id FROM users WHERE realm_id IN (SELECT id FROM realms WHERE ...)
+	sub := query.Select(ts.RealmsT.ID).From(ts.RealmsT).Where(ts.RealmsT.Name.EQ("acme"))
+	assertSQL(t, "col IN (subquery)",
+		query.Select(ts.UsersT.ID).From(ts.UsersT).
+			Where(query.SubqueryIn(ts.UsersT.RealmID, sub)),
+		`SELECT "users"."id" FROM "users" WHERE "users"."realm_id" IN (SELECT "realms"."id" FROM "realms" WHERE "realms"."name" = $1)`,
+		[]any{"acme"},
+	)
+}
+
+func TestSubquery_NotIn(t *testing.T) {
+	sub := query.Select(ts.RealmsT.ID).From(ts.RealmsT).Where(ts.RealmsT.Name.EQ("banned"))
+	assertSQL(t, "col NOT IN (subquery)",
+		query.Select(ts.UsersT.ID).From(ts.UsersT).
+			Where(query.SubqueryNotIn(ts.UsersT.RealmID, sub)),
+		`SELECT "users"."id" FROM "users" WHERE "users"."realm_id" NOT IN (SELECT "realms"."id" FROM "realms" WHERE "realms"."name" = $1)`,
+		[]any{"banned"},
+	)
+}
+
+func TestSubquery_SharedParams(t *testing.T) {
+	// Outer query has a param, inner query also has a param — numbers must not collide.
+	sub := query.Select(ts.RealmsT.ID).From(ts.RealmsT).Where(ts.RealmsT.Name.EQ("acme"))
+	assertSQL(t, "shared param numbering",
+		query.Select(ts.UsersT.ID).From(ts.UsersT).
+			Where(expr.And(
+				ts.UsersT.Enabled.EQ(true),
+				query.SubqueryIn(ts.UsersT.RealmID, sub),
+			)),
+		`SELECT "users"."id" FROM "users" WHERE ("users"."enabled" = $1 AND "users"."realm_id" IN (SELECT "realms"."id" FROM "realms" WHERE "realms"."name" = $2))`,
+		[]any{true, "acme"},
+	)
+}
+
+func TestSubquery_FromSubquery(t *testing.T) {
+	// SELECT * FROM (SELECT realm_id, COUNT(*) AS cnt FROM users GROUP BY realm_id) AS sub
+	inner := query.Select(ts.UsersT.RealmID, expr.Count().As("cnt")).
+		From(ts.UsersT).
+		GroupBy(ts.UsersT.RealmID)
+	sub := query.FromSubquery(inner, "sub")
+	assertSQL(t, "FROM subquery",
+		query.Select().From(sub),
+		`SELECT * FROM (SELECT "users"."realm_id", COUNT(*) AS "cnt" FROM "users" GROUP BY "users"."realm_id") AS "sub"`,
+		nil,
+	)
+}
+
+func TestSubquery_FromSubquery_SharedParams(t *testing.T) {
+	// Params in inner and outer query share numbering.
+	inner := query.Select(ts.UsersT.RealmID, expr.Count().As("cnt")).
+		From(ts.UsersT).
+		Where(ts.UsersT.Enabled.EQ(true)). // $1
+		GroupBy(ts.UsersT.RealmID)
+	sub := query.FromSubquery(inner, "sub")
+	outerQ := query.Select(ts.UsersT.RealmID).From(sub).
+		Where(ts.UsersT.Username.EQ("alice")) // $2
+	gotSQL, gotArgs := outerQ.Build(dialect.Postgres)
+	wantSQL := `SELECT "users"."realm_id" FROM (SELECT "users"."realm_id", COUNT(*) AS "cnt" FROM "users" WHERE "users"."enabled" = $1 GROUP BY "users"."realm_id") AS "sub" WHERE "users"."username" = $2`
+	if gotSQL != wantSQL {
+		t.Errorf("SQL mismatch\n got:  %s\nwant: %s", gotSQL, wantSQL)
+	}
+	if len(gotArgs) != 2 || fmt.Sprintf("%v", gotArgs[0]) != "true" || fmt.Sprintf("%v", gotArgs[1]) != "alice" {
+		t.Errorf("args mismatch: %v", gotArgs)
+	}
+}
+
 func whenBool(ptr *bool, f func(bool) expr.Expression) expr.Expression {
 	if ptr == nil {
 		return nil
 	}
 	return f(*ptr)
+}
+
+// -------------------------------------------------------------------
+// Aggregate function tests
+// -------------------------------------------------------------------
+
+func TestAgg_CountStar_InSelect(t *testing.T) {
+	assertSQL(t, "COUNT(*) in SELECT",
+		query.Select(expr.Count()).From(ts.UsersT),
+		`SELECT COUNT(*) FROM "users"`,
+		nil,
+	)
+}
+
+func TestAgg_CountStar_WithAlias(t *testing.T) {
+	assertSQL(t, "COUNT(*) AS cnt",
+		query.Select(expr.Count().As("cnt")).From(ts.UsersT),
+		`SELECT COUNT(*) AS "cnt" FROM "users"`,
+		nil,
+	)
+}
+
+func TestAgg_CountCol(t *testing.T) {
+	assertSQL(t, "COUNT(col)",
+		query.Select(expr.CountCol(ts.UsersT.Username)).From(ts.UsersT),
+		`SELECT COUNT("users"."username") FROM "users"`,
+		nil,
+	)
+}
+
+func TestAgg_CountDistinct(t *testing.T) {
+	assertSQL(t, "COUNT(DISTINCT col)",
+		query.Select(expr.CountDistinct(ts.UsersT.RealmID)).From(ts.UsersT),
+		`SELECT COUNT(DISTINCT "users"."realm_id") FROM "users"`,
+		nil,
+	)
+}
+
+func TestAgg_GroupByHaving(t *testing.T) {
+	assertSQL(t, "GROUP BY + HAVING COUNT(*) > n",
+		query.Select(ts.UsersT.RealmID, expr.Count().As("cnt")).
+			From(ts.UsersT).
+			GroupBy(ts.UsersT.RealmID).
+			Having(expr.Count().GT(5)),
+		`SELECT "users"."realm_id", COUNT(*) AS "cnt" FROM "users" GROUP BY "users"."realm_id" HAVING COUNT(*) > $1`,
+		[]any{5},
+	)
+}
+
+func TestAgg_OrderByCountDesc(t *testing.T) {
+	assertSQL(t, "ORDER BY COUNT(*) DESC",
+		query.Select(ts.UsersT.RealmID, expr.Count()).
+			From(ts.UsersT).
+			GroupBy(ts.UsersT.RealmID).
+			OrderBy(expr.Count().Desc()),
+		`SELECT "users"."realm_id", COUNT(*) FROM "users" GROUP BY "users"."realm_id" ORDER BY COUNT(*) DESC`,
+		nil,
+	)
+}
+
+func TestAgg_SumAvgMaxMin(t *testing.T) {
+	ctx := newBuildCtx()
+	for _, tc := range []struct {
+		name string
+		agg  expr.AggExpr
+		want string
+	}{
+		{"SUM", expr.Sum(ts.UsersT.RealmID), `SUM("users"."realm_id")`},
+		{"MAX", expr.Max(ts.UsersT.Username), `MAX("users"."username")`},
+		{"MIN", expr.Min(ts.UsersT.Username), `MIN("users"."username")`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := tc.agg.ToSQL(ctx)
+			if got != tc.want {
+				t.Errorf("got %s, want %s", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAgg_HavingGTE(t *testing.T) {
+	assertSQL(t, "HAVING COUNT(*) >= 3",
+		query.Select(ts.UsersT.RealmID).
+			From(ts.UsersT).
+			GroupBy(ts.UsersT.RealmID).
+			Having(expr.Count().GTE(3)),
+		`SELECT "users"."realm_id" FROM "users" GROUP BY "users"."realm_id" HAVING COUNT(*) >= $1`,
+		[]any{3},
+	)
 }
