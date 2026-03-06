@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	pg "github.com/grizzle-orm/g-rizzle/schema/pg"
+	pg "github.com/grizzle-orm/grizzle/schema/pg"
 )
 
 // -------------------------------------------------------------------

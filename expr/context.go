@@ -4,7 +4,7 @@
 // mismatched types are compared.
 package expr
 
-import "github.com/grizzle-orm/g-rizzle/dialect"
+import "github.com/grizzle-orm/grizzle/dialect"
 
 // BuildContext accumulates bound parameters and carries the active dialect
 // during SQL generation. It is threaded through every ToSQL call.

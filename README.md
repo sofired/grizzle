@@ -12,7 +12,7 @@ G-rizzle generates Go structs that mirror your database schema. Every column is 
 - **Relations** — BelongsTo, HasMany, HasOne with JoinRel / InnerJoinRel
 - **Eager loading** — batch preloading to avoid N+1 queries
 - **JSONB operators** — ->, ->>, #>, #>>, @>, <@, ?, ?|, ?&
-- **Code generator** — `g-rizzle generate` turns a schema file into Go table types
+- **Code generator** — `grizzle generate` turns a schema file into Go table types
 - **Migration kit** — diff live DB vs desired schema, apply DDL atomically with history tracking
 - **Multi-dialect** — PostgreSQL (primary), MySQL / MariaDB, SQLite
 
@@ -21,13 +21,13 @@ G-rizzle generates Go structs that mirror your database schema. Every column is 
 ## Installation
 
 ```sh
-go get github.com/grizzle-orm/g-rizzle
+go get github.com/grizzle-orm/grizzle
 ```
 
 Install the CLI:
 
 ```sh
-go install github.com/grizzle-orm/g-rizzle/cmd/g-rizzle@latest
+go install github.com/grizzle-orm/grizzle/cmd/grizzle@latest
 ```
 
 ---
@@ -57,7 +57,7 @@ table "realms" {
 ### 2. Generate table types
 
 ```sh
-g-rizzle generate --schema schema.grizzle --out db/schema.go --package db
+grizzle generate --schema schema.grizzle --out db/schema.go --package db
 ```
 
 This creates typed table handles like:
@@ -82,8 +82,8 @@ All builders produce `(sql string, args []any)` via `.Build(dialect)`.
 
 ```go
 import (
-    "github.com/grizzle-orm/g-rizzle/query"
-    "github.com/grizzle-orm/g-rizzle/dialect"
+    "github.com/grizzle-orm/grizzle/query"
+    "github.com/grizzle-orm/grizzle/dialect"
     db "myapp/db"
 )
 
@@ -309,7 +309,7 @@ db.UsersT.Attributes.HasAllKeys("role", "region")
 ### Applying migrations
 
 ```go
-import "github.com/grizzle-orm/g-rizzle/kit"
+import "github.com/grizzle-orm/grizzle/kit"
 
 // Introspect live DB, diff, apply DDL, record in _grizzle_migrations
 err := kit.Migrate(ctx, pool,
@@ -337,7 +337,7 @@ kit.Status(ctx, pool, db.UsersTableDef, db.RealmsTableDef)
 ### MySQL migrations
 
 ```go
-import "github.com/grizzle-orm/g-rizzle/kit"
+import "github.com/grizzle-orm/grizzle/kit"
 
 stmts := kit.AllChangeSQLMySQL(snap, changes)
 ```
@@ -347,9 +347,9 @@ stmts := kit.AllChangeSQLMySQL(snap, changes)
 ## CLI
 
 ```
-g-rizzle generate --schema schema.grizzle --out db/schema.go --package db
-g-rizzle migrate  --dsn "postgres://..." --schema schema.grizzle [--dry-run]
-g-rizzle status   --dsn "postgres://..." --schema schema.grizzle
+grizzle generate --schema schema.grizzle --out db/schema.go --package db
+grizzle migrate  --dsn "postgres://..." --schema schema.grizzle [--dry-run]
+grizzle status   --dsn "postgres://..." --schema schema.grizzle
 ```
 
 ---

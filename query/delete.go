@@ -3,8 +3,8 @@ package query
 import (
 	"strings"
 
-	"github.com/grizzle-orm/g-rizzle/dialect"
-	"github.com/grizzle-orm/g-rizzle/expr"
+	"github.com/grizzle-orm/grizzle/dialect"
+	"github.com/grizzle-orm/grizzle/expr"
 )
 
 // DeleteBuilder constructs a DELETE query.

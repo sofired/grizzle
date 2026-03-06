@@ -3,7 +3,7 @@ package codegen
 import (
 	"fmt"
 
-	"github.com/grizzle-orm/g-rizzle/gen/parser"
+	"github.com/grizzle-orm/grizzle/gen/parser"
 )
 
 // ColumnInfo is the processed, codegen-ready description of a single column.

@@ -1,4 +1,4 @@
-module github.com/grizzle-orm/g-rizzle
+module github.com/grizzle-orm/grizzle
 
 go 1.22
 

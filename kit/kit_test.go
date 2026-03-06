@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	pg "github.com/grizzle-orm/g-rizzle/schema/pg"
-	"github.com/grizzle-orm/g-rizzle/kit"
+	pg "github.com/grizzle-orm/grizzle/schema/pg"
+	"github.com/grizzle-orm/grizzle/kit"
 )
 
 // --- Test schema fixtures ---

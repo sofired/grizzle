@@ -10,7 +10,7 @@ import (
 	"sort"
 	"text/template"
 
-	"github.com/grizzle-orm/g-rizzle/gen/parser"
+	"github.com/grizzle-orm/grizzle/gen/parser"
 )
 
 // Options controls code generation.
@@ -86,7 +86,7 @@ func GenerateTable(pt *parser.ParsedTable, opts Options) (GeneratedFile, error) 
 // buildImports gathers the set of import paths needed for the generated file.
 func buildImports(cols []ColumnInfo) []string {
 	seen := map[string]bool{
-		"github.com/grizzle-orm/g-rizzle/expr": true,
+		"github.com/grizzle-orm/grizzle/expr": true,
 	}
 	for _, c := range cols {
 		if c.NeedsImport != "" {

@@ -1,7 +1,7 @@
 package kit
 
 import (
-	pg "github.com/grizzle-orm/g-rizzle/schema/pg"
+	pg "github.com/grizzle-orm/grizzle/schema/pg"
 )
 
 // ChangeKind identifies the type of schema change.

@@ -2,7 +2,7 @@
 
 ## Purpose
 Go port of Drizzle ORM + Drizzle Kit. Type-safe database toolkit for Go.
-Module: `github.com/grizzle-orm/g-rizzle`
+Module: `github.com/grizzle-orm/grizzle`
 
 ## Architecture
 
@@ -39,7 +39,7 @@ kit/              — Migration tooling (stubbed directories, not yet implemente
 7. **ScanAll/ScanOne generics** — thin wrappers over pgx.CollectRows + pgx.RowToStructByName[T]
 
 ## Generated Code Pattern
-Schema definition (user writes) → `g-rizzle gen` → typed Go structs:
+Schema definition (user writes) → `grizzle gen` → typed Go structs:
 - `RealmsTable` struct with typed column fields (UUIDColumn, StringColumn, etc.)
 - `var RealmsT = RealmsTable{...}` singleton for use in queries
 - `RealmSelect` struct (all columns, nullable = pointer types)
@@ -47,7 +47,7 @@ Schema definition (user writes) → `g-rizzle gen` → typed Go structs:
 - `RealmUpdate` struct (all pointer fields for partial updates)
 
 ## What's Next
-1. `g-rizzle gen` — code generator reading schema.go → emitting *_gen.go files
+1. `grizzle gen` — code generator reading schema.go → emitting *_gen.go files
 2. `kit/` — snapshot serialization, differ, SQL generation, CLI (generate/migrate/push/pull)
 3. MySQL dialect query builder
 4. Prepared statements

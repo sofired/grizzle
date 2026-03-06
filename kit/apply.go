@@ -5,8 +5,8 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	pg "github.com/grizzle-orm/g-rizzle/schema/pg"
-	"github.com/grizzle-orm/g-rizzle/kit/introspect"
+	pg "github.com/grizzle-orm/grizzle/schema/pg"
+	"github.com/grizzle-orm/grizzle/kit/introspect"
 )
 
 // PushResult contains the outcome of a Push operation.

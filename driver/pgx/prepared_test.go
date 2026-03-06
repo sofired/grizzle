@@ -5,9 +5,9 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	pgxdb "github.com/grizzle-orm/g-rizzle/driver/pgx"
-	"github.com/grizzle-orm/g-rizzle/internal/testschema"
-	"github.com/grizzle-orm/g-rizzle/query"
+	pgxdb "github.com/grizzle-orm/grizzle/driver/pgx"
+	"github.com/grizzle-orm/grizzle/internal/testschema"
+	"github.com/grizzle-orm/grizzle/query"
 )
 
 // TestPreparedSelect_SQLBuiltOnce verifies that RegisterSelect pre-builds

@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	pg "github.com/grizzle-orm/g-rizzle/schema/pg"
+	pg "github.com/grizzle-orm/grizzle/schema/pg"
 )
 
 // Snapshot holds a read-back of the live DB schema.

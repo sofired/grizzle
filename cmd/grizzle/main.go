@@ -20,10 +20,10 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/grizzle-orm/g-rizzle/gen/codegen"
-	"github.com/grizzle-orm/g-rizzle/gen/parser"
-	"github.com/grizzle-orm/g-rizzle/kit"
-	pg "github.com/grizzle-orm/g-rizzle/schema/pg"
+	"github.com/grizzle-orm/grizzle/gen/codegen"
+	"github.com/grizzle-orm/grizzle/gen/parser"
+	"github.com/grizzle-orm/grizzle/kit"
+	pg "github.com/grizzle-orm/grizzle/schema/pg"
 )
 
 func main() {

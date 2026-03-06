@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	pg "github.com/grizzle-orm/g-rizzle/schema/pg"
-	"github.com/grizzle-orm/g-rizzle/kit/introspect"
+	pg "github.com/grizzle-orm/grizzle/schema/pg"
+	"github.com/grizzle-orm/grizzle/kit/introspect"
 )
 
 // MigrationsTable is the name of the history table G-rizzle creates to track
