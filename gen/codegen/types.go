@@ -92,8 +92,13 @@ func applyBaseType(info *ColumnInfo, chain *parser.ChainResult) error {
 		info.GoType = "bool"
 		info.GoTypePtr = "*bool"
 
-	case "Integer", "BigInt", "SmallInt", "Serial", "BigSerial", "SmallSerial":
+	case "Integer", "SmallInt", "Serial", "SmallSerial":
 		info.ColType = "expr.IntColumn"
+		info.GoType = "int"
+		info.GoTypePtr = "*int"
+
+	case "BigInt", "BigSerial":
+		info.ColType = "expr.BigIntColumn"
 		info.GoType = "int64"
 		info.GoTypePtr = "*int64"
 

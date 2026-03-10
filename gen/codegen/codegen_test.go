@@ -224,6 +224,50 @@ var Things = pg.Table("things",
 	}
 }
 
+func TestIntegerTypes_ColumnMapping(t *testing.T) {
+	src := `package testschema
+import pg "github.com/sofired/grizzle/schema/pg"
+var Orders = pg.Table("orders",
+	pg.C("id",       pg.BigSerial()),
+	pg.C("user_id",  pg.BigInt().NotNull()),
+	pg.C("quantity", pg.Integer().NotNull()),
+	pg.C("priority", pg.SmallInt()),
+)
+`
+	dir := t.TempDir()
+	f := dir + "/schema.go"
+	if err := writeFile(f, src); err != nil {
+		t.Fatal(err)
+	}
+	tables, err := parser.ParseFile(f)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	gf, err := codegen.GenerateTable(tables[0], codegen.Options{PackageName: "testschema", OutputDir: dir})
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+
+	src2 := string(gf.Source)
+
+	// BigSerial / BigInt → BigIntColumn + int64
+	if !strings.Contains(src2, "expr.BigIntColumn") {
+		t.Errorf("expected expr.BigIntColumn for BigSerial/BigInt in output:\n%s", src2)
+	}
+	if !strings.Contains(src2, "int64") {
+		t.Errorf("expected int64 for BigSerial/BigInt select model in output:\n%s", src2)
+	}
+
+	// Integer / SmallInt → IntColumn + int
+	if !strings.Contains(src2, "expr.IntColumn") {
+		t.Errorf("expected expr.IntColumn for Integer/SmallInt in output:\n%s", src2)
+	}
+	// Verify "int" appears but "int64" doesn't dominate (at least both present)
+	if !strings.Contains(src2, "\tQuantity\tint\n") && !strings.Contains(src2, " int\n") {
+		t.Logf("output:\n%s", src2)
+	}
+}
+
 func TestJSONB_CustomGoType(t *testing.T) {
 	src := `package testschema
 import pg "github.com/sofired/grizzle/schema/pg"

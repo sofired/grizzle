@@ -156,7 +156,9 @@ func (c StringColumn) EQCol(other StringColumn) Expression {
 // IntColumn
 // -------------------------------------------------------------------
 
-// IntColumn is a typed column handle for INTEGER / BIGINT values.
+// IntColumn is a typed column handle for INTEGER / SERIAL / SMALLINT values
+// (4-byte or 2-byte signed integers). Go value type: int.
+// For BIGINT / BIGSERIAL columns use BigIntColumn.
 type IntColumn struct{ ColBase }
 
 func (c IntColumn) EQ(val int) Expression {
@@ -199,6 +201,63 @@ func (c IntColumn) NotIn(vals ...int) Expression {
 		anys[i] = v
 	}
 	return inExpr{ref: c.ColBase, vals: anys, not: true}
+}
+func (c IntColumn) EQCol(other IntColumn) Expression {
+	return colColExpr{left: c.ColBase, op: "=", right: other.ColBase}
+}
+
+// -------------------------------------------------------------------
+// BigIntColumn
+// -------------------------------------------------------------------
+
+// BigIntColumn is a typed column handle for BIGINT / BIGSERIAL values
+// (8-byte signed integers). Go value type: int64.
+// For INTEGER / SERIAL / SMALLINT columns use IntColumn.
+type BigIntColumn struct{ ColBase }
+
+func (c BigIntColumn) EQ(val int64) Expression {
+	return binaryExpr{ref: c.ColBase, op: "=", val: val}
+}
+func (c BigIntColumn) NEQ(val int64) Expression {
+	return binaryExpr{ref: c.ColBase, op: "<>", val: val}
+}
+func (c BigIntColumn) GT(val int64) Expression {
+	return binaryExpr{ref: c.ColBase, op: ">", val: val}
+}
+func (c BigIntColumn) GTE(val int64) Expression {
+	return binaryExpr{ref: c.ColBase, op: ">=", val: val}
+}
+func (c BigIntColumn) LT(val int64) Expression {
+	return binaryExpr{ref: c.ColBase, op: "<", val: val}
+}
+func (c BigIntColumn) LTE(val int64) Expression {
+	return binaryExpr{ref: c.ColBase, op: "<=", val: val}
+}
+func (c BigIntColumn) Between(lo, hi int64) Expression {
+	return betweenExpr{ref: c.ColBase, lo: lo, hi: hi}
+}
+func (c BigIntColumn) In(vals ...int64) Expression {
+	if len(vals) == 0 {
+		return Raw("FALSE")
+	}
+	anys := make([]any, len(vals))
+	for i, v := range vals {
+		anys[i] = v
+	}
+	return inExpr{ref: c.ColBase, vals: anys}
+}
+func (c BigIntColumn) NotIn(vals ...int64) Expression {
+	if len(vals) == 0 {
+		return Raw("TRUE")
+	}
+	anys := make([]any, len(vals))
+	for i, v := range vals {
+		anys[i] = v
+	}
+	return inExpr{ref: c.ColBase, vals: anys, not: true}
+}
+func (c BigIntColumn) EQCol(other BigIntColumn) Expression {
+	return colColExpr{left: c.ColBase, op: "=", right: other.ColBase}
 }
 
 // -------------------------------------------------------------------
