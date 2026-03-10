@@ -224,6 +224,38 @@ var Things = pg.Table("things",
 	}
 }
 
+func TestJSONB_CustomGoType(t *testing.T) {
+	src := `package testschema
+import pg "github.com/sofired/grizzle/schema/pg"
+var Events = pg.Table("events",
+	pg.C("id",      pg.UUID().PrimaryKey().DefaultRandom()),
+	pg.C("payload", pg.JSONB().Type("MyPayload")),
+	pg.C("meta",    pg.JSONB()),
+)
+`
+	dir := t.TempDir()
+	f := dir + "/schema.go"
+	if err := writeFile(f, src); err != nil {
+		t.Fatal(err)
+	}
+	tables, err := parser.ParseFile(f)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	gf, err := codegen.GenerateTable(tables[0], codegen.Options{PackageName: "testschema", OutputDir: dir})
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+
+	src2 := string(gf.Source)
+	if !strings.Contains(src2, "expr.JSONBColumn[MyPayload]") {
+		t.Errorf("expected JSONBColumn[MyPayload] in output:\n%s", src2)
+	}
+	if !strings.Contains(src2, "expr.JSONBColumn[map[string]any]") {
+		t.Errorf("expected JSONBColumn[map[string]any] (default) in output:\n%s", src2)
+	}
+}
+
 // writeFile is a simple helper for writing test files.
 func writeFile(path, content string) error {
 	return os.WriteFile(path, []byte(content), 0644)

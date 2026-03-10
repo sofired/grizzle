@@ -1412,3 +1412,79 @@ func TestCTE_ParametersSharedAcrossCTE(t *testing.T) {
 		t.Errorf("expected [alice], got %v", args)
 	}
 }
+
+// -------------------------------------------------------------------
+// IntColumn / FloatColumn NotIn tests
+// -------------------------------------------------------------------
+
+func TestIntColumn_NotIn(t *testing.T) {
+	// Need an IntColumn — add one inline using ColBase directly.
+	col := expr.IntColumn{ColBase: expr.ColBase{TableAlias: "users", ColName: "score"}}
+	ctx := expr.NewBuildContext(dialect.Postgres)
+	got := col.NotIn(1, 2, 3).ToSQL(ctx)
+	want := `"users"."score" NOT IN ($1, $2, $3)`
+	if got != want {
+		t.Errorf("got %s, want %s", got, want)
+	}
+}
+
+func TestIntColumn_NotIn_Empty(t *testing.T) {
+	col := expr.IntColumn{ColBase: expr.ColBase{TableAlias: "users", ColName: "score"}}
+	ctx := expr.NewBuildContext(dialect.Postgres)
+	got := col.NotIn().ToSQL(ctx)
+	if got != "TRUE" {
+		t.Errorf("empty NotIn should produce TRUE, got %s", got)
+	}
+}
+
+func TestFloatColumn_In(t *testing.T) {
+	col := expr.FloatColumn{ColBase: expr.ColBase{TableAlias: "users", ColName: "score"}}
+	ctx := expr.NewBuildContext(dialect.Postgres)
+	got := col.In(1.5, 2.5).ToSQL(ctx)
+	want := `"users"."score" IN ($1, $2)`
+	if got != want {
+		t.Errorf("got %s, want %s", got, want)
+	}
+}
+
+func TestFloatColumn_NotIn(t *testing.T) {
+	col := expr.FloatColumn{ColBase: expr.ColBase{TableAlias: "users", ColName: "score"}}
+	ctx := expr.NewBuildContext(dialect.Postgres)
+	got := col.NotIn(1.5, 2.5).ToSQL(ctx)
+	want := `"users"."score" NOT IN ($1, $2)`
+	if got != want {
+		t.Errorf("got %s, want %s", got, want)
+	}
+}
+
+// -------------------------------------------------------------------
+// Simple CASE tests
+// -------------------------------------------------------------------
+
+func TestSimpleCase_WhenVal(t *testing.T) {
+	assertSQL(t, "CASE col WHEN val THEN result ELSE default END",
+		query.Select(
+			ts.UsersT.ID,
+			expr.SimpleCase(ts.UsersT.Username).
+				WhenVal("alice", expr.Lit("Alice")).
+				WhenVal("bob", expr.Lit("Bob")).
+				Else(expr.Lit("Other")).
+				As("display_name"),
+		).From(ts.UsersT),
+		`SELECT "users"."id", CASE "users"."username" WHEN $1 THEN $2 WHEN $3 THEN $4 ELSE $5 END AS "display_name" FROM "users"`,
+		[]any{"alice", "Alice", "bob", "Bob", "Other"},
+	)
+}
+
+func TestSimpleCase_NoElse(t *testing.T) {
+	assertSQL(t, "CASE col WHEN val THEN result END (no ELSE)",
+		query.Select(
+			ts.UsersT.ID,
+			expr.SimpleCase(ts.UsersT.Username).
+				WhenVal("admin", expr.Lit(1)).
+				As("is_admin"),
+		).From(ts.UsersT),
+		`SELECT "users"."id", CASE "users"."username" WHEN $1 THEN $2 END AS "is_admin" FROM "users"`,
+		[]any{"admin", 1},
+	)
+}

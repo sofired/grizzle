@@ -110,8 +110,15 @@ func applyBaseType(info *ColumnInfo, chain *parser.ChainResult) error {
 
 	case "JSONB", "JSON":
 		// Default JSONB generic type is map[string]any.
-		// In the future the user could annotate with a Go type via a method.
+		// If the user called .Type("MyStruct") in the chain, honour that type.
 		goType := "map[string]any"
+		for _, m := range chain.Methods {
+			if m.Name == "Type" && len(m.Args) == 1 {
+				if s, ok := m.Args[0].(string); ok && s != "" {
+					goType = s
+				}
+			}
+		}
 		info.ColType = "expr.JSONBColumn[" + goType + "]"
 		info.GoType = goType
 		info.GoTypePtr = "*" + goType

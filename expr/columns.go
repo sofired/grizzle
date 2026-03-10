@@ -190,6 +190,16 @@ func (c IntColumn) In(vals ...int) Expression {
 	}
 	return inExpr{ref: c.ColBase, vals: anys}
 }
+func (c IntColumn) NotIn(vals ...int) Expression {
+	if len(vals) == 0 {
+		return Raw("TRUE")
+	}
+	anys := make([]any, len(vals))
+	for i, v := range vals {
+		anys[i] = v
+	}
+	return inExpr{ref: c.ColBase, vals: anys, not: true}
+}
 
 // -------------------------------------------------------------------
 // BoolColumn
@@ -346,4 +356,24 @@ func (c FloatColumn) LTE(val float64) Expression {
 }
 func (c FloatColumn) Between(lo, hi float64) Expression {
 	return betweenExpr{ref: c.ColBase, lo: lo, hi: hi}
+}
+func (c FloatColumn) In(vals ...float64) Expression {
+	if len(vals) == 0 {
+		return Raw("FALSE")
+	}
+	anys := make([]any, len(vals))
+	for i, v := range vals {
+		anys[i] = v
+	}
+	return inExpr{ref: c.ColBase, vals: anys}
+}
+func (c FloatColumn) NotIn(vals ...float64) Expression {
+	if len(vals) == 0 {
+		return Raw("TRUE")
+	}
+	anys := make([]any, len(vals))
+	for i, v := range vals {
+		anys[i] = v
+	}
+	return inExpr{ref: c.ColBase, vals: anys, not: true}
 }

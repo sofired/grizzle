@@ -8,6 +8,9 @@ G-rizzle generates Go structs that mirror your database schema. Every column is 
 
 - **Type-safe query builders** — SELECT, INSERT, UPDATE, DELETE, UPSERT
 - **Aggregate functions** — COUNT, SUM, AVG, MAX, MIN with HAVING / ORDER BY
+- **Window functions** — ROW_NUMBER, RANK, DENSE_RANK, LEAD, LAG, FIRST_VALUE, LAST_VALUE with OVER / PARTITION BY / ORDER BY
+- **CASE expressions** — searched CASE (WHEN cond THEN val) and simple CASE (CASE col WHEN val THEN result)
+- **CTEs** — WITH name AS (SELECT …) prepended to any SELECT
 - **Subquery support** — EXISTS, NOT EXISTS, IN (subquery), NOT IN (subquery), FROM (subquery)
 - **Relations** — BelongsTo, HasMany, HasOne with JoinRel / InnerJoinRel
 - **Eager loading** — batch preloading to avoid N+1 queries
@@ -178,6 +181,71 @@ query.Select().From(query.FromSubquery(inner, "sub"))
 
 Parameter numbers are shared between outer and inner queries — no collisions.
 
+### Window Functions
+
+```go
+// ROW_NUMBER() OVER (PARTITION BY realm_id ORDER BY created_at ASC) AS "rn"
+expr.RowNumber().
+    PartitionBy(db.UsersT.RealmID).
+    OrderBy(db.UsersT.CreatedAt.Asc()).
+    As("rn")
+
+// RANK() OVER (PARTITION BY realm_id ORDER BY score DESC) AS "score_rank"
+expr.Rank().PartitionBy(db.UsersT.RealmID).OrderBy(db.UsersT.Score.Desc()).As("score_rank")
+
+// Other window functions
+expr.DenseRank()                    // DENSE_RANK()
+expr.Lead(db.UsersT.Username)       // LEAD("username")
+expr.Lag(db.UsersT.Username)        // LAG("username")
+expr.FirstValue(db.UsersT.Score)    // FIRST_VALUE("score")
+expr.LastValue(db.UsersT.Score)     // LAST_VALUE("score")
+expr.WinSum(db.UsersT.Score)        // SUM("score") — as window function
+expr.WinCount()                     // COUNT(*) — as window function
+```
+
+Window expressions implement `SelectableColumn` so they can be used in SELECT and ORDER BY.
+
+### CASE Expressions
+
+```go
+// Searched CASE: CASE WHEN cond THEN val … END
+expr.Case().
+    When(db.UsersT.Score.GTE(90), expr.Lit("A")).
+    When(db.UsersT.Score.GTE(75), expr.Lit("B")).
+    Else(expr.Lit("C")).
+    As("grade")
+
+// Simple CASE: CASE col WHEN val THEN result … END
+expr.SimpleCase(db.UsersT.Status).
+    WhenVal("active", expr.Lit("Active")).
+    WhenVal("banned", expr.Lit("Banned")).
+    Else(expr.Lit("Unknown")).
+    As("status_label")
+```
+
+`expr.Lit(v)` wraps any Go value as a bound parameter — use it in THEN and ELSE clauses.
+
+### CTEs (Common Table Expressions)
+
+```go
+// WITH active AS (SELECT …) SELECT * FROM active
+active := query.Select(db.UsersT.ID, db.UsersT.Email).
+    From(db.UsersT).
+    Where(db.UsersT.DeletedAt.IsNull())
+
+query.Select().
+    With("active", active).
+    From(query.CTERef("active"))
+
+// Multiple CTEs render as WITH a AS (…), b AS (…)
+query.Select().
+    With("a", subA).
+    With("b", subB).
+    From(query.CTERef("a"))
+```
+
+Parameters are shared across all CTEs and the outer query — placeholders remain sequential.
+
 ### INSERT
 
 ```go
@@ -211,6 +279,9 @@ query.InsertInto(db.UsersT).
     Values(row).
     OnConflict(db.UsersT.Username).
     DoUpdateSetExcluded(db.UsersT.Email)
+
+// INSERT IGNORE (MySQL) / INSERT OR IGNORE (SQLite) — silently skip conflicting rows
+query.InsertInto(db.UsersT).Values(row).IgnoreConflicts()
 ```
 
 ### UPDATE
@@ -334,12 +405,31 @@ for _, c := range changes {
 kit.Status(ctx, pool, db.UsersTableDef, db.RealmsTableDef)
 ```
 
-### MySQL migrations
+### MySQL / SQLite migrations
 
 ```go
-import "github.com/sofired/grizzle/kit"
+import (
+    _ "github.com/go-sql-driver/mysql"
+    _ "github.com/mattn/go-sqlite3"
+    "github.com/sofired/grizzle/kit"
+)
 
-stmts := kit.AllChangeSQLMySQL(snap, changes)
+// MySQL
+db, _ := sql.Open("mysql", "user:pass@tcp(localhost:3306)/mydb?parseTime=true")
+result, err := kit.MigrateMySQL(ctx, db, db.UsersTableDef, db.RealmsTableDef)
+
+// SQLite
+db, _ := sql.Open("sqlite3", "./mydb.sqlite?_foreign_keys=on")
+result, err := kit.MigrateSQLite(ctx, db, db.UsersTableDef, db.RealmsTableDef)
+
+// Both support the same Push / DryRun / Migrate / Status API:
+kit.PushMySQL(ctx, db, ...)       // apply without history
+kit.DryRunMySQL(ctx, db, ...)     // preview changes, no apply
+kit.StatusMySQL(ctx, db, ...)     // show history + pending
+
+kit.PushSQLite(ctx, db, ...)
+kit.DryRunSQLite(ctx, db, ...)
+kit.StatusSQLite(ctx, db, ...)
 ```
 
 ---
@@ -356,14 +446,19 @@ grizzle status   --dsn "postgres://..." --schema schema.grizzle
 
 ## Dialects
 
-| Feature           | PostgreSQL | MySQL / MariaDB | SQLite |
-|-------------------|:----------:|:---------------:|:------:|
-| Named params      | $1, $2 … | ?               | ?      |
-| RETURNING         | ✓          | ✗               | ✓      |
-| ON CONFLICT       | ✓          | ✗               | ✓      |
-| ON DUPLICATE KEY  | ✗          | ✓               | ✗      |
-| JSONB operators   | ✓          | ✗               | ✗      |
-| UUID native type  | ✓          | CHAR(36)        | TEXT   |
+| Feature              | PostgreSQL | MySQL / MariaDB | SQLite |
+|----------------------|:----------:|:---------------:|:------:|
+| Named params         | $1, $2 …  | ?               | ?      |
+| RETURNING            | ✓          | ✗               | ✓ (3.35+) |
+| ON CONFLICT          | ✓          | ✗               | ✓      |
+| ON DUPLICATE KEY     | ✗          | ✓               | ✗      |
+| INSERT IGNORE        | ✗          | ✓               | ✓ (OR IGNORE) |
+| JSONB operators      | ✓          | ✗               | ✗      |
+| UUID native type     | ✓          | CHAR(36)        | TEXT   |
+| Migrations (kit)     | ✓          | ✓               | ✓      |
+| ALTER COLUMN         | ✓          | ✓               | comment stub† |
+
+† SQLite does not support ALTER COLUMN — type/nullability/default changes require a manual table rebuild. The migration kit emits a `-- SQLite does not support ALTER COLUMN` comment so you can identify and apply these manually.
 
 ---
 

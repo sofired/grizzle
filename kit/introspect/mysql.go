@@ -315,18 +315,3 @@ func normalizeMySQLType(dataType, colType string) string {
 	}
 }
 
-// normalizeFKAction converts MySQL referential action strings to pg.FKAction constants.
-func normalizeFKAction(action string) string {
-	switch strings.ToUpper(action) {
-	case "CASCADE":
-		return string(pg.FKActionCascade)
-	case "SET NULL":
-		return string(pg.FKActionSetNull)
-	case "SET DEFAULT":
-		return string(pg.FKActionSetDefault)
-	case "RESTRICT":
-		return string(pg.FKActionRestrict)
-	default:
-		return string(pg.FKActionNoAction)
-	}
-}
