@@ -3,15 +3,16 @@
 // Usage:
 //
 //	grizzle gen      [--schema <dir>] [--out <dir>] [--package <name>]
-//	grizzle sql      [--schema <dir>]
-//	grizzle diff     [--schema <dir>] [--snapshot <file>]
+//	grizzle sql      [--schema <dir>] [--dialect postgres|mysql]
+//	grizzle diff     [--schema <dir>] [--snapshot <file>] [--dialect postgres|mysql]
 //	grizzle snapshot [--schema <dir>] [--out <file>]
-//	grizzle migrate  [--schema <dir>] --db <dsn>
-//	grizzle status   [--schema <dir>] --db <dsn>
+//	grizzle migrate  [--schema <dir>] --db <dsn> [--dialect postgres|mysql]
+//	grizzle status   [--schema <dir>] --db <dsn> [--dialect postgres|mysql]
 package main
 
 import (
 	"context"
+	"database/sql"
 	"flag"
 	"fmt"
 	"log"
@@ -19,6 +20,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	_ "github.com/go-sql-driver/mysql"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/sofired/grizzle/gen/codegen"
 	"github.com/sofired/grizzle/gen/parser"
@@ -156,6 +158,7 @@ func runGen(args []string) error {
 func runSQL(args []string) error {
 	fs := flag.NewFlagSet("sql", flag.ExitOnError)
 	schemaDir := fs.String("schema", ".", "directory containing schema Go files")
+	dialect := fs.String("dialect", "postgres", "target dialect: postgres or mysql")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -163,7 +166,12 @@ func runSQL(args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Println(kit.GenerateCreateSQL(tables...))
+	switch *dialect {
+	case "mysql":
+		fmt.Println(kit.GenerateCreateSQLMySQL(tables...))
+	default:
+		fmt.Println(kit.GenerateCreateSQL(tables...))
+	}
 	return nil
 }
 
@@ -193,6 +201,7 @@ func runDiff(args []string) error {
 	fs := flag.NewFlagSet("diff", flag.ExitOnError)
 	schemaDir := fs.String("schema", ".", "directory containing schema Go files")
 	snapshotFile := fs.String("snapshot", "schema.snapshot.json", "path to the baseline snapshot file")
+	dialect := fs.String("dialect", "postgres", "target dialect: postgres or mysql")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -223,7 +232,13 @@ func runDiff(args []string) error {
 		return nil
 	}
 
-	stmts := kit.AllChangeSQL(newSnap, changes)
+	var stmts []string
+	switch *dialect {
+	case "mysql":
+		stmts = kit.AllChangeSQLMySQL(newSnap, changes)
+	default:
+		stmts = kit.AllChangeSQL(newSnap, changes)
+	}
 	fmt.Println(strings.Join(stmts, ";\n") + ";")
 	log.Printf("%d change(s), %d statement(s)", len(changes), len(stmts))
 	return nil
@@ -233,7 +248,8 @@ func runDiff(args []string) error {
 func runMigrate(args []string) error {
 	fs := flag.NewFlagSet("migrate", flag.ExitOnError)
 	schemaDir := fs.String("schema", ".", "directory containing schema Go files")
-	dsn := fs.String("db", "", "PostgreSQL connection string (required)")
+	dsn := fs.String("db", "", "database connection string (required)")
+	dialect := fs.String("dialect", "postgres", "target dialect: postgres or mysql")
 	dryRun := fs.Bool("dry-run", false, "print SQL without applying it")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -248,13 +264,21 @@ func runMigrate(args []string) error {
 	}
 
 	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, *dsn)
+
+	if *dialect == "mysql" {
+		return runMigrateMySQL(ctx, *dsn, *dryRun, tables...)
+	}
+	return runMigratePostgres(ctx, *dsn, *dryRun, tables...)
+}
+
+func runMigratePostgres(ctx context.Context, dsn string, dryRun bool, tables ...*pg.TableDef) error {
+	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
 		return fmt.Errorf("connect: %w", err)
 	}
 	defer pool.Close()
 
-	if *dryRun {
+	if dryRun {
 		result, err := kit.DryRun(ctx, pool, tables...)
 		if err != nil {
 			return err
@@ -281,11 +305,46 @@ func runMigrate(args []string) error {
 	return nil
 }
 
+func runMigrateMySQL(ctx context.Context, dsn string, dryRun bool, tables ...*pg.TableDef) error {
+	db, err := openMySQL(dsn)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	if dryRun {
+		result, err := kit.DryRunMySQL(ctx, db, tables...)
+		if err != nil {
+			return err
+		}
+		if len(result.SQL) == 0 {
+			fmt.Println("-- Already current, nothing to apply.")
+			return nil
+		}
+		fmt.Println(strings.Join(result.SQL, ";\n") + ";")
+		log.Printf("(dry-run) %d change(s), %d statement(s)", len(result.Changes), len(result.SQL))
+		return nil
+	}
+
+	result, err := kit.MigrateMySQL(ctx, db, tables...)
+	if err != nil {
+		return err
+	}
+	if result.AlreadyCurrent {
+		log.Println("already current — nothing to apply")
+		return nil
+	}
+	log.Printf("applied %d change(s) in %d statement(s) [checksum: %s]",
+		len(result.Changes), len(result.SQL), result.Checksum[:8])
+	return nil
+}
+
 // runStatus shows migration history and any pending changes.
 func runStatus(args []string) error {
 	fs := flag.NewFlagSet("status", flag.ExitOnError)
 	schemaDir := fs.String("schema", ".", "directory containing schema Go files")
-	dsn := fs.String("db", "", "PostgreSQL connection string (required)")
+	dsn := fs.String("db", "", "database connection string (required)")
+	dialect := fs.String("dialect", "postgres", "target dialect: postgres or mysql")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -299,15 +358,28 @@ func runStatus(args []string) error {
 	}
 
 	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, *dsn)
-	if err != nil {
-		return fmt.Errorf("connect: %w", err)
-	}
-	defer pool.Close()
 
-	status, err := kit.Status(ctx, pool, tables...)
-	if err != nil {
-		return err
+	var status kit.StatusResult
+	if *dialect == "mysql" {
+		db, err := openMySQL(*dsn)
+		if err != nil {
+			return err
+		}
+		defer db.Close()
+		status, err = kit.StatusMySQL(ctx, db, tables...)
+		if err != nil {
+			return err
+		}
+	} else {
+		pool, err := pgxpool.New(ctx, *dsn)
+		if err != nil {
+			return fmt.Errorf("connect: %w", err)
+		}
+		defer pool.Close()
+		status, err = kit.Status(ctx, pool, tables...)
+		if err != nil {
+			return err
+		}
 	}
 
 	if len(status.Applied) == 0 {
@@ -329,6 +401,23 @@ func runStatus(args []string) error {
 		}
 	}
 	return nil
+}
+
+// openMySQL opens a *sql.DB for MySQL, ensuring parseTime=true is set so
+// that DATETIME columns scan correctly into time.Time.
+func openMySQL(dsn string) (*sql.DB, error) {
+	if !strings.Contains(dsn, "parseTime") {
+		if strings.Contains(dsn, "?") {
+			dsn += "&parseTime=true"
+		} else {
+			dsn += "?parseTime=true"
+		}
+	}
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("open mysql: %w", err)
+	}
+	return db, nil
 }
 
 // parseSchemaDir parses schema Go files and evaluates them into *pg.TableDef values.
@@ -375,23 +464,32 @@ gen flags:
   --package <name>  Package name for generated files (default: basename of --out)
   -v                Verbose output
 
-sql / snapshot / diff flags:
+sql / diff flags:
   --schema <dir>        Directory containing schema Go files (default: .)
-  --out <file>          (snapshot only) Output snapshot path (default: schema.snapshot.json)
+  --dialect <dialect>   Target SQL dialect: postgres (default) or mysql
   --snapshot <file>     (diff only) Baseline snapshot path (default: schema.snapshot.json)
 
-migrate / status flags:
+snapshot flags:
   --schema <dir>    Directory containing schema Go files (default: .)
-  --db <dsn>        PostgreSQL connection string (required)
-  --dry-run         (migrate only) Print SQL without applying it
+  --out <file>      Output snapshot path (default: schema.snapshot.json)
+
+migrate / status flags:
+  --schema <dir>      Directory containing schema Go files (default: .)
+  --db <dsn>          Database connection string (required)
+  --dialect <dialect> Target SQL dialect: postgres (default) or mysql
+  --dry-run           (migrate only) Print SQL without applying it
 
 Examples:
   grizzle gen --schema ./db/schema --out ./db/schema --package schema
   grizzle sql --schema ./db/schema
+  grizzle sql --schema ./db/schema --dialect mysql
   grizzle snapshot --schema ./db/schema --out ./db/schema.snapshot.json
   grizzle diff --schema ./db/schema --snapshot ./db/schema.snapshot.json
+  grizzle diff --schema ./db/schema --dialect mysql
   grizzle migrate --schema ./db/schema --db "postgres://user:pass@localhost/mydb"
   grizzle migrate --schema ./db/schema --db "postgres://..." --dry-run
+  grizzle migrate --schema ./db/schema --db "user:pass@tcp(localhost:3306)/mydb" --dialect mysql
   grizzle status  --schema ./db/schema --db "postgres://user:pass@localhost/mydb"
+  grizzle status  --schema ./db/schema --db "user:pass@tcp(localhost:3306)/mydb" --dialect mysql
 `)
 }
