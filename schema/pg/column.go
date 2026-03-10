@@ -369,6 +369,16 @@ func (b *JSONBBuilder) DefaultEmptyArray() *JSONBBuilder {
 }
 func (b *JSONBBuilder) Build(name string) ColumnDef { return b.build(name) }
 
+// JSON starts a json column (plain JSON, not the binary JSONB format).
+// In PostgreSQL schemas prefer JSONB() for indexing support.
+// In MySQL-targeted schemas use schema/mysql.JSON() which resolves to this.
+func JSON() *JSONBBuilder {
+	b := &JSONBBuilder{}
+	b.def.SQLType = "json"
+	b.def.GoType = GoTypeAny
+	return b
+}
+
 // -------------------------------------------------------------------
 // Numeric / Decimal
 // -------------------------------------------------------------------
