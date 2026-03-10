@@ -117,7 +117,7 @@ func ScanOne[T any](rows pgx.Rows, err error) (T, error) {
 	case 1:
 		return results[0], nil
 	default:
-		return zero, fmt.Errorf("g-rizzle: ScanOne: expected 1 row, got %d", len(results))
+		return zero, fmt.Errorf("grizzle: ScanOne: expected 1 row, got %d", len(results))
 	}
 }
 
@@ -158,7 +158,7 @@ type Tx struct {
 func (db *DB) Transaction(ctx context.Context, fn func(tx *Tx) error) error {
 	pgxTx, err := db.pool.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("g-rizzle: begin transaction: %w", err)
+		return fmt.Errorf("grizzle: begin transaction: %w", err)
 	}
 
 	tx := &Tx{tx: pgxTx}

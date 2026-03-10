@@ -1,8 +1,8 @@
-# G-rizzle — Project Overview
+# Grizzle — Project Overview
 
 ## Purpose
 Go port of Drizzle ORM + Drizzle Kit. Type-safe database toolkit for Go.
-Module: `github.com/grizzle-orm/grizzle`
+Module: `github.com/sofired/grizzle`
 
 ## Architecture
 

@@ -1,13 +1,13 @@
-// Command g-rizzle is the CLI for the G-rizzle ORM toolkit.
+// Command grizzle is the CLI for the Grizzle ORM toolkit.
 //
 // Usage:
 //
-//	g-rizzle gen      [--schema <dir>] [--out <dir>] [--package <name>]
-//	g-rizzle sql      [--schema <dir>]
-//	g-rizzle diff     [--schema <dir>] [--snapshot <file>]
-//	g-rizzle snapshot [--schema <dir>] [--out <file>]
-//	g-rizzle migrate  [--schema <dir>] --db <dsn>
-//	g-rizzle status   [--schema <dir>] --db <dsn>
+//	grizzle gen      [--schema <dir>] [--out <dir>] [--package <name>]
+//	grizzle sql      [--schema <dir>]
+//	grizzle diff     [--schema <dir>] [--snapshot <file>]
+//	grizzle snapshot [--schema <dir>] [--out <file>]
+//	grizzle migrate  [--schema <dir>] --db <dsn>
+//	grizzle status   [--schema <dir>] --db <dsn>
 package main
 
 import (
@@ -28,7 +28,7 @@ import (
 
 func main() {
 	log.SetFlags(0)
-	log.SetPrefix("g-rizzle: ")
+	log.SetPrefix("grizzle: ")
 
 	if len(os.Args) < 2 {
 		printUsage()
@@ -63,7 +63,7 @@ func main() {
 	case "help", "--help", "-h":
 		printUsage()
 	default:
-		log.Fatalf("unknown command %q — run 'g-rizzle help' for usage", os.Args[1])
+		log.Fatalf("unknown command %q — run 'grizzle help' for usage", os.Args[1])
 	}
 }
 
@@ -356,10 +356,10 @@ func parseSchemaDir(dir string) ([]*pg.TableDef, error) {
 }
 
 func printUsage() {
-	fmt.Fprintf(os.Stderr, `g-rizzle — the G-rizzle ORM toolkit
+	fmt.Fprintf(os.Stderr, `grizzle — the Grizzle ORM toolkit
 
 Usage:
-  g-rizzle <command> [flags]
+  grizzle <command> [flags]
 
 Commands:
   gen       Generate typed Go code from schema definitions
@@ -386,12 +386,12 @@ migrate / status flags:
   --dry-run         (migrate only) Print SQL without applying it
 
 Examples:
-  g-rizzle gen --schema ./db/schema --out ./db/schema --package schema
-  g-rizzle sql --schema ./db/schema
-  g-rizzle snapshot --schema ./db/schema --out ./db/schema.snapshot.json
-  g-rizzle diff --schema ./db/schema --snapshot ./db/schema.snapshot.json
-  g-rizzle migrate --schema ./db/schema --db "postgres://user:pass@localhost/mydb"
-  g-rizzle migrate --schema ./db/schema --db "postgres://..." --dry-run
-  g-rizzle status  --schema ./db/schema --db "postgres://user:pass@localhost/mydb"
+  grizzle gen --schema ./db/schema --out ./db/schema --package schema
+  grizzle sql --schema ./db/schema
+  grizzle snapshot --schema ./db/schema --out ./db/schema.snapshot.json
+  grizzle diff --schema ./db/schema --snapshot ./db/schema.snapshot.json
+  grizzle migrate --schema ./db/schema --db "postgres://user:pass@localhost/mydb"
+  grizzle migrate --schema ./db/schema --db "postgres://..." --dry-run
+  grizzle status  --schema ./db/schema --db "postgres://user:pass@localhost/mydb"
 `)
 }

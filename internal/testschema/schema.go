@@ -63,7 +63,7 @@ var Users = pg.Table("users",
 })
 
 // -------------------------------------------------------------------
-// Generated table types (in production these come from `g-rizzle gen`)
+// Generated table types (in production these come from `grizzle gen`)
 // -------------------------------------------------------------------
 
 // RealmsTable is what the code generator would produce for the realms table.
@@ -124,7 +124,7 @@ var UsersT = UsersTable{
 }
 
 // -------------------------------------------------------------------
-// Select / Insert model types (in production these come from `g-rizzle gen`)
+// Select / Insert model types (in production these come from `grizzle gen`)
 // -------------------------------------------------------------------
 
 // RealmSelect is the full select model for the realms table.
