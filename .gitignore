@@ -24,3 +24,8 @@ vendor/
 # Session / scratch files
 SESSION_OUTPUT.md
 *.snapshot.json
+
+# Node / VitePress
+node_modules/
+docs/.vitepress/dist/
+docs/.vitepress/cache/
