@@ -97,6 +97,14 @@ func applyBaseType(def *pg.ColumnDef, baseFn string, args []any) error {
 		def.SQLType = "smallint"
 		def.GoType = pg.GoTypeInt
 
+	case "TinyInt":
+		def.SQLType = "tinyint"
+		def.GoType = pg.GoTypeInt
+
+	case "Double":
+		def.SQLType = "double precision"
+		def.GoType = pg.GoTypeFloat64
+
 	case "Timestamp":
 		def.SQLType = "timestamp"
 		def.GoType = pg.GoTypeTime

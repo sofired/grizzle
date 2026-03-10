@@ -1488,3 +1488,149 @@ func TestSimpleCase_NoElse(t *testing.T) {
 		[]any{"admin", 1},
 	)
 }
+
+// -------------------------------------------------------------------
+// DISTINCT tests
+// -------------------------------------------------------------------
+
+func TestSelect_Distinct(t *testing.T) {
+	assertSQL(t, "SELECT DISTINCT",
+		query.Select(ts.UsersT.RealmID).From(ts.UsersT).Distinct(),
+		`SELECT DISTINCT "users"."realm_id" FROM "users"`,
+		nil,
+	)
+}
+
+func TestSelect_Distinct_Star(t *testing.T) {
+	assertSQL(t, "SELECT DISTINCT *",
+		query.Select().From(ts.UsersT).Distinct(),
+		`SELECT DISTINCT * FROM "users"`,
+		nil,
+	)
+}
+
+// -------------------------------------------------------------------
+// NULLS FIRST / NULLS LAST tests
+// -------------------------------------------------------------------
+
+func TestOrderBy_NullsFirst(t *testing.T) {
+	assertSQL(t, "ORDER BY col ASC NULLS FIRST",
+		query.Select().From(ts.UsersT).OrderBy(ts.UsersT.DeletedAt.Asc().NullsFirst()),
+		`SELECT * FROM "users" ORDER BY "users"."deleted_at" ASC NULLS FIRST`,
+		nil,
+	)
+}
+
+func TestOrderBy_NullsLast(t *testing.T) {
+	assertSQL(t, "ORDER BY col DESC NULLS LAST",
+		query.Select().From(ts.UsersT).OrderBy(ts.UsersT.DeletedAt.Desc().NullsLast()),
+		`SELECT * FROM "users" ORDER BY "users"."deleted_at" DESC NULLS LAST`,
+		nil,
+	)
+}
+
+// -------------------------------------------------------------------
+// FOR UPDATE / FOR SHARE tests
+// -------------------------------------------------------------------
+
+func TestSelect_ForUpdate(t *testing.T) {
+	assertSQL(t, "FOR UPDATE",
+		query.Select().From(ts.UsersT).Where(ts.UsersT.ID.EQ(uuid.Nil)).ForUpdate(),
+		`SELECT * FROM "users" WHERE "users"."id" = $1 FOR UPDATE`,
+		[]any{uuid.Nil},
+	)
+}
+
+func TestSelect_ForShare_Postgres(t *testing.T) {
+	q := query.Select().From(ts.UsersT).ForShare()
+	got, _ := q.Build(dialect.Postgres)
+	if !strings.Contains(got, "FOR SHARE") {
+		t.Errorf("expected FOR SHARE in: %s", got)
+	}
+}
+
+func TestSelect_ForShare_MySQL(t *testing.T) {
+	q := query.Select().From(ts.UsersT).ForShare()
+	got, _ := q.Build(dialect.MySQL)
+	if !strings.Contains(got, "LOCK IN SHARE MODE") {
+		t.Errorf("expected LOCK IN SHARE MODE in: %s", got)
+	}
+}
+
+// -------------------------------------------------------------------
+// UPDATE / DELETE LIMIT tests
+// -------------------------------------------------------------------
+
+func TestUpdate_Limit_MySQL(t *testing.T) {
+	q := query.Update(ts.UsersT).
+		Set("enabled", false).
+		Where(ts.UsersT.DeletedAt.IsNotNull()).
+		Limit(100)
+	got, _ := q.Build(dialect.MySQL)
+	want := "UPDATE `users` SET `enabled` = ? WHERE `users`.`deleted_at` IS NOT NULL LIMIT 100"
+	if got != want {
+		t.Errorf("SQL mismatch\n got:  %s\nwant: %s", got, want)
+	}
+}
+
+func TestUpdate_Limit_Postgres_Ignored(t *testing.T) {
+	q := query.Update(ts.UsersT).
+		Set("enabled", false).
+		Limit(100)
+	got, _ := q.Build(dialect.Postgres)
+	if strings.Contains(got, "LIMIT") {
+		t.Errorf("LIMIT should not appear in Postgres UPDATE: %s", got)
+	}
+}
+
+func TestDelete_Limit_MySQL(t *testing.T) {
+	q := query.DeleteFrom(ts.UsersT).
+		Where(ts.UsersT.DeletedAt.IsNotNull()).
+		Limit(50)
+	got, _ := q.Build(dialect.MySQL)
+	want := "DELETE FROM `users` WHERE `users`.`deleted_at` IS NOT NULL LIMIT 50"
+	if got != want {
+		t.Errorf("SQL mismatch\n got:  %s\nwant: %s", got, want)
+	}
+}
+
+func TestDelete_Limit_Postgres_Ignored(t *testing.T) {
+	q := query.DeleteFrom(ts.UsersT).Where(ts.UsersT.DeletedAt.IsNotNull()).Limit(50)
+	got, _ := q.Build(dialect.Postgres)
+	if strings.Contains(got, "LIMIT") {
+		t.Errorf("LIMIT should not appear in Postgres DELETE: %s", got)
+	}
+}
+
+// -------------------------------------------------------------------
+// Column-to-column operator tests
+// -------------------------------------------------------------------
+
+func TestTimestampColumn_EQCol(t *testing.T) {
+	ctx := expr.NewBuildContext(dialect.Postgres)
+	got := ts.UsersT.CreatedAt.EQCol(ts.UsersT.UpdatedAt).ToSQL(ctx)
+	want := `"users"."created_at" = "users"."updated_at"`
+	if got != want {
+		t.Errorf("got %s, want %s", got, want)
+	}
+}
+
+func TestTimestampColumn_LTCol(t *testing.T) {
+	ctx := expr.NewBuildContext(dialect.Postgres)
+	got := ts.UsersT.CreatedAt.LTCol(ts.UsersT.DeletedAt).ToSQL(ctx)
+	want := `"users"."created_at" < "users"."deleted_at"`
+	if got != want {
+		t.Errorf("got %s, want %s", got, want)
+	}
+}
+
+func TestFloatColumn_GTCol(t *testing.T) {
+	a := expr.FloatColumn{ColBase: expr.ColBase{TableAlias: "products", ColName: "price"}}
+	b := expr.FloatColumn{ColBase: expr.ColBase{TableAlias: "products", ColName: "cost"}}
+	ctx := expr.NewBuildContext(dialect.Postgres)
+	got := a.GTCol(b).ToSQL(ctx)
+	want := `"products"."price" > "products"."cost"`
+	if got != want {
+		t.Errorf("got %s, want %s", got, want)
+	}
+}

@@ -1,6 +1,7 @@
 package query
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/sofired/grizzle/dialect"
@@ -12,6 +13,7 @@ type DeleteBuilder struct {
 	table     TableSource
 	where     expr.Expression
 	returning []expr.SelectableColumn
+	limit     int // 0 = no limit; MySQL/SQLite only
 }
 
 // DeleteFrom starts a DELETE FROM <table> query.
@@ -38,6 +40,15 @@ func (b *DeleteBuilder) Returning(cols ...expr.SelectableColumn) *DeleteBuilder 
 	return &cp
 }
 
+// Limit sets a row limit on the DELETE (MySQL / SQLite only).
+// PostgreSQL does not support LIMIT on DELETE; this is silently ignored for
+// dialects that do not support it.
+func (b *DeleteBuilder) Limit(n int) *DeleteBuilder {
+	cp := *b
+	cp.limit = n
+	return &cp
+}
+
 // Build renders the DELETE statement.
 func (b *DeleteBuilder) Build(d dialect.Dialect) (string, []any) {
 	ctx := expr.NewBuildContext(d)
@@ -47,6 +58,10 @@ func (b *DeleteBuilder) Build(d dialect.Dialect) (string, []any) {
 	sb.WriteString(ctx.Quote(b.table.GRizTableName()))
 
 	sb.WriteString(buildWhere(ctx, b.where))
+
+	if b.limit > 0 && d.Name() != "postgres" {
+		sb.WriteString(fmt.Sprintf(" LIMIT %d", b.limit))
+	}
 
 	if len(b.returning) > 0 && d.SupportsReturning() {
 		sb.WriteString(" RETURNING ")

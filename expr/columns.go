@@ -46,12 +46,29 @@ func (c ColBase) Desc() OrderExpr { return OrderExpr{ref: c, dir: "DESC"} }
 
 // OrderExpr represents a single ORDER BY clause entry.
 type OrderExpr struct {
-	ref colRefer
-	dir string
+	ref   colRefer
+	dir   string
+	nulls string // "NULLS FIRST", "NULLS LAST", or ""
 }
 
 func (o OrderExpr) ToSQL(ctx *BuildContext) string {
-	return o.ref.colRef(ctx) + " " + o.dir
+	s := o.ref.colRef(ctx) + " " + o.dir
+	if o.nulls != "" {
+		s += " " + o.nulls
+	}
+	return s
+}
+
+// NullsFirst returns a copy of the ORDER BY expression with NULLS FIRST appended.
+func (o OrderExpr) NullsFirst() OrderExpr {
+	o.nulls = "NULLS FIRST"
+	return o
+}
+
+// NullsLast returns a copy of the ORDER BY expression with NULLS LAST appended.
+func (o OrderExpr) NullsLast() OrderExpr {
+	o.nulls = "NULLS LAST"
+	return o
 }
 
 // -------------------------------------------------------------------
@@ -272,6 +289,9 @@ func (c BoolColumn) EQ(val bool) Expression {
 }
 func (c BoolColumn) IsTrue() Expression  { return binaryExpr{ref: c.ColBase, op: "=", val: true} }
 func (c BoolColumn) IsFalse() Expression { return binaryExpr{ref: c.ColBase, op: "=", val: false} }
+func (c BoolColumn) EQCol(other BoolColumn) Expression {
+	return colColExpr{left: c.ColBase, op: "=", right: other.ColBase}
+}
 
 // -------------------------------------------------------------------
 // TimestampColumn
@@ -299,12 +319,23 @@ func (c TimestampColumn) Between(lo, hi time.Time) Expression {
 	return betweenExpr{ref: c.ColBase, lo: lo, hi: hi}
 }
 
-// GTCol compares two timestamp columns: useful for check-style expressions.
+func (c TimestampColumn) EQCol(other TimestampColumn) Expression {
+	return colColExpr{left: c.ColBase, op: "=", right: other.ColBase}
+}
+func (c TimestampColumn) NEQCol(other TimestampColumn) Expression {
+	return colColExpr{left: c.ColBase, op: "<>", right: other.ColBase}
+}
 func (c TimestampColumn) GTCol(other TimestampColumn) Expression {
 	return colColExpr{left: c.ColBase, op: ">", right: other.ColBase}
 }
 func (c TimestampColumn) GTECol(other TimestampColumn) Expression {
 	return colColExpr{left: c.ColBase, op: ">=", right: other.ColBase}
+}
+func (c TimestampColumn) LTCol(other TimestampColumn) Expression {
+	return colColExpr{left: c.ColBase, op: "<", right: other.ColBase}
+}
+func (c TimestampColumn) LTECol(other TimestampColumn) Expression {
+	return colColExpr{left: c.ColBase, op: "<=", right: other.ColBase}
 }
 
 // -------------------------------------------------------------------
@@ -435,4 +466,22 @@ func (c FloatColumn) NotIn(vals ...float64) Expression {
 		anys[i] = v
 	}
 	return inExpr{ref: c.ColBase, vals: anys, not: true}
+}
+func (c FloatColumn) EQCol(other FloatColumn) Expression {
+	return colColExpr{left: c.ColBase, op: "=", right: other.ColBase}
+}
+func (c FloatColumn) NEQCol(other FloatColumn) Expression {
+	return colColExpr{left: c.ColBase, op: "<>", right: other.ColBase}
+}
+func (c FloatColumn) GTCol(other FloatColumn) Expression {
+	return colColExpr{left: c.ColBase, op: ">", right: other.ColBase}
+}
+func (c FloatColumn) GTECol(other FloatColumn) Expression {
+	return colColExpr{left: c.ColBase, op: ">=", right: other.ColBase}
+}
+func (c FloatColumn) LTCol(other FloatColumn) Expression {
+	return colColExpr{left: c.ColBase, op: "<", right: other.ColBase}
+}
+func (c FloatColumn) LTECol(other FloatColumn) Expression {
+	return colColExpr{left: c.ColBase, op: "<=", right: other.ColBase}
 }

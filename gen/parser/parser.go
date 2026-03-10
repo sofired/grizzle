@@ -116,7 +116,7 @@ func tryExtractTable(varName string, expr ast.Expr) (*ParsedTable, error) {
 	if !ok {
 		return nil, nil
 	}
-	if pkg.Name != "pg" {
+	if pkg.Name != "pg" && pkg.Name != "mysql" {
 		return nil, nil
 	}
 
@@ -219,11 +219,11 @@ func extractColumn(arg ast.Expr) (*ParsedColumn, error) {
 		return nil, nil
 	}
 	pkg, ok := sel.X.(*ast.Ident)
-	if !ok || pkg.Name != "pg" || sel.Sel.Name != "C" {
+	if !ok || (pkg.Name != "pg" && pkg.Name != "mysql") || sel.Sel.Name != "C" {
 		return nil, nil
 	}
 	if len(call.Args) != 2 {
-		return nil, fmt.Errorf("pg.C: expected 2 args, got %d", len(call.Args))
+		return nil, fmt.Errorf("%s.C: expected 2 args, got %d", pkg.Name, len(call.Args))
 	}
 	colName, err := evalStringArg(call.Args[0])
 	if err != nil {

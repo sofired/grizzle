@@ -1,6 +1,7 @@
 package query
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 
@@ -15,6 +16,7 @@ type UpdateBuilder struct {
 	setStruct any         // alternative: set via struct reflection
 	where     expr.Expression
 	returning []expr.SelectableColumn
+	limit     int // 0 = no limit; MySQL/SQLite only
 }
 
 type setClause struct {
@@ -70,6 +72,15 @@ func (b *UpdateBuilder) Returning(cols ...expr.SelectableColumn) *UpdateBuilder 
 	return &cp
 }
 
+// Limit sets a row limit on the UPDATE (MySQL / SQLite only).
+// PostgreSQL does not support LIMIT on UPDATE; this is silently ignored for
+// dialects that do not support it.
+func (b *UpdateBuilder) Limit(n int) *UpdateBuilder {
+	cp := *b
+	cp.limit = n
+	return &cp
+}
+
 // Build renders the UPDATE statement.
 func (b *UpdateBuilder) Build(d dialect.Dialect) (string, []any) {
 	ctx := expr.NewBuildContext(d)
@@ -98,6 +109,10 @@ func (b *UpdateBuilder) Build(d dialect.Dialect) (string, []any) {
 	}
 
 	sb.WriteString(buildWhere(ctx, b.where))
+
+	if b.limit > 0 && d.Name() != "postgres" {
+		sb.WriteString(fmt.Sprintf(" LIMIT %d", b.limit))
+	}
 
 	if len(b.returning) > 0 && d.SupportsReturning() {
 		sb.WriteString(" RETURNING ")

@@ -537,3 +537,46 @@ var T = pg.SchemaTable("audit", "logs", pg.C("id", pg.UUID().PrimaryKey()))`
 		t.Errorf("Name: got %q, want logs", def.Name)
 	}
 }
+
+func TestParseFile_MysqlTable(t *testing.T) {
+	src := `package s
+import mysql "github.com/sofired/grizzle/schema/mysql"
+var Orders = mysql.Table("orders",
+	mysql.C("id",       mysql.BigSerial()),
+	mysql.C("user_id",  mysql.BigInt().NotNull()),
+	mysql.C("quantity", mysql.Integer().NotNull()),
+)`
+	tables := parseSource(t, src)
+	if len(tables) != 1 {
+		t.Fatalf("expected 1 table, got %d", len(tables))
+	}
+	tbl := tables[0]
+	if tbl.TableName != "orders" {
+		t.Errorf("TableName: got %q, want orders", tbl.TableName)
+	}
+	if len(tbl.Columns) != 3 {
+		t.Errorf("Columns: got %d, want 3", len(tbl.Columns))
+	}
+}
+
+func TestParseFile_MysqlSpecificTypes(t *testing.T) {
+	src := `package s
+import mysql "github.com/sofired/grizzle/schema/mysql"
+var T = mysql.Table("items",
+	mysql.C("id",       mysql.BigSerial()),
+	mysql.C("flag",     mysql.TinyInt()),
+	mysql.C("priority", mysql.SmallInt()),
+	mysql.C("weight",   mysql.Double()),
+)`
+	tables := parseSource(t, src)
+	if len(tables) != 1 {
+		t.Fatalf("expected 1 table, got %d", len(tables))
+	}
+	def, err := parser.EvalTable(tables[0])
+	if err != nil {
+		t.Fatalf("EvalTable: %v", err)
+	}
+	if len(def.Columns) != 4 {
+		t.Errorf("expected 4 columns, got %d", len(def.Columns))
+	}
+}

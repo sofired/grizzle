@@ -12,16 +12,19 @@ import (
 // Each method returns a modified copy, so builders can be shared and
 // extended without mutating the original.
 type SelectBuilder struct {
-	ctes    []cteClause             // optional WITH clauses (prepended as CTEs)
-	cols    []expr.SelectableColumn // nil = SELECT *
-	from    TableSource
-	joins   []joinClause
-	where   expr.Expression
-	orderBy []expr.OrderExpr
-	groupBy []expr.SelectableColumn
-	having  expr.Expression
-	limit   int // 0 = no limit
-	offset  int // 0 = no offset
+	ctes      []cteClause             // optional WITH clauses (prepended as CTEs)
+	distinct  bool                    // SELECT DISTINCT
+	cols      []expr.SelectableColumn // nil = SELECT *
+	from      TableSource
+	joins     []joinClause
+	where     expr.Expression
+	orderBy   []expr.OrderExpr
+	groupBy   []expr.SelectableColumn
+	having    expr.Expression
+	limit     int    // 0 = no limit
+	offset    int    // 0 = no offset
+	forUpdate bool   // append FOR UPDATE
+	forShare  bool   // append FOR SHARE
 }
 
 // cteClause holds a single WITH name AS (SELECT ...) entry.
@@ -37,6 +40,37 @@ type cteClause struct {
 //	query.Select() // SELECT *
 func Select(cols ...expr.SelectableColumn) *SelectBuilder {
 	return &SelectBuilder{cols: cols}
+}
+
+// Distinct adds the DISTINCT keyword to the SELECT clause, eliminating
+// duplicate rows from the result set.
+//
+//	query.Select(UsersT.RealmID).From(UsersT).Distinct()
+//	// SELECT DISTINCT "users"."realm_id" FROM "users"
+func (b *SelectBuilder) Distinct() *SelectBuilder {
+	cp := *b
+	cp.distinct = true
+	return &cp
+}
+
+// ForUpdate appends FOR UPDATE to the query, locking selected rows against
+// concurrent updates. PostgreSQL and MySQL only — not supported by SQLite.
+//
+//	query.Select().From(UsersT).Where(UsersT.ID.EQ(id)).ForUpdate()
+func (b *SelectBuilder) ForUpdate() *SelectBuilder {
+	cp := *b
+	cp.forUpdate = true
+	cp.forShare = false
+	return &cp
+}
+
+// ForShare appends FOR SHARE (PostgreSQL) / LOCK IN SHARE MODE (MySQL) to
+// the query, locking rows for read while allowing other readers.
+func (b *SelectBuilder) ForShare() *SelectBuilder {
+	cp := *b
+	cp.forShare = true
+	cp.forUpdate = false
+	return &cp
 }
 
 // With adds a Common Table Expression (CTE) to the query.
@@ -196,8 +230,11 @@ func (b *SelectBuilder) buildWith(ctx *expr.BuildContext) string {
 		sb.WriteString(" ")
 	}
 
-	// SELECT
+	// SELECT [DISTINCT]
 	sb.WriteString("SELECT ")
+	if b.distinct {
+		sb.WriteString("DISTINCT ")
+	}
 	if len(b.cols) == 0 {
 		sb.WriteString("*")
 	} else {
@@ -274,6 +311,17 @@ func (b *SelectBuilder) buildWith(ctx *expr.BuildContext) string {
 	// OFFSET
 	if b.offset > 0 {
 		sb.WriteString(fmt.Sprintf(" OFFSET %d", b.offset))
+	}
+
+	// Locking clauses — dialect-aware
+	if b.forUpdate {
+		sb.WriteString(" FOR UPDATE")
+	} else if b.forShare {
+		if ctx.Dialect().Name() == "mysql" {
+			sb.WriteString(" LOCK IN SHARE MODE")
+		} else {
+			sb.WriteString(" FOR SHARE")
+		}
 	}
 
 	return sb.String()

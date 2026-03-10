@@ -118,7 +118,7 @@ func runGen(args []string) error {
 		return fmt.Errorf("parse schema: %w", err)
 	}
 	if len(tables) == 0 {
-		log.Printf("warning: no pg.Table or pg.SchemaTable declarations found in %s", schemaAbs)
+		log.Printf("warning: no pg.Table, mysql.Table, or pg.SchemaTable declarations found in %s", schemaAbs)
 		return nil
 	}
 	if *verbose {
