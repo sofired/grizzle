@@ -181,6 +181,49 @@ func TestNamingHelpers(t *testing.T) {
 	}
 }
 
+func TestImportGrouping(t *testing.T) {
+	// Schema with both stdlib (time via Timestamp) and third-party (uuid via UUID) imports.
+	src := `package testschema
+import pg "github.com/sofired/grizzle/schema/pg"
+var Things = pg.Table("things",
+	pg.C("id",         pg.UUID().PrimaryKey().DefaultRandom()),
+	pg.C("name",       pg.Text().NotNull()),
+	pg.C("created_at", pg.Timestamp().NotNull().DefaultNow()),
+)
+`
+	dir := t.TempDir()
+	f := dir + "/schema.go"
+	if err := writeFile(f, src); err != nil {
+		t.Fatal(err)
+	}
+	tables, err := parser.ParseFile(f)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	gf, err := codegen.GenerateTable(tables[0], codegen.Options{PackageName: "testschema", OutputDir: dir})
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+
+	src2 := string(gf.Source)
+	// The stdlib import "time" must appear BEFORE the blank-line separator,
+	// and the third-party import "github.com/google/uuid" must appear AFTER.
+	timePos := strings.Index(src2, `"time"`)
+	uuidPos := strings.Index(src2, `"github.com/google/uuid"`)
+	blankPos := strings.Index(src2, "\"\n\n\t\"")
+	if timePos < 0 {
+		t.Fatal(`missing "time" import`)
+	}
+	if uuidPos < 0 {
+		t.Fatal(`missing "github.com/google/uuid" import`)
+	}
+	if blankPos < 0 {
+		t.Error("import block has no blank-line group separator")
+	} else if timePos > uuidPos {
+		t.Error("stdlib import should come before third-party import")
+	}
+}
+
 // writeFile is a simple helper for writing test files.
 func writeFile(path, content string) error {
 	return os.WriteFile(path, []byte(content), 0644)
