@@ -12,6 +12,7 @@ import (
 // Each method returns a modified copy, so builders can be shared and
 // extended without mutating the original.
 type SelectBuilder struct {
+	ctes    []cteClause             // optional WITH clauses (prepended as CTEs)
 	cols    []expr.SelectableColumn // nil = SELECT *
 	from    TableSource
 	joins   []joinClause
@@ -23,6 +24,12 @@ type SelectBuilder struct {
 	offset  int // 0 = no offset
 }
 
+// cteClause holds a single WITH name AS (SELECT ...) entry.
+type cteClause struct {
+	name string
+	sub  *SelectBuilder
+}
+
 // Select starts a SELECT query specifying the columns to return.
 // Pass no columns to SELECT *.
 //
@@ -31,6 +38,34 @@ type SelectBuilder struct {
 func Select(cols ...expr.SelectableColumn) *SelectBuilder {
 	return &SelectBuilder{cols: cols}
 }
+
+// With adds a Common Table Expression (CTE) to the query.
+// The CTE is rendered as WITH name AS (sub) before the SELECT.
+// Multiple CTEs are accumulated in order and rendered as WITH a AS (...), b AS (...).
+//
+// Example:
+//
+//	recent := query.Select(PostsT.ID, PostsT.AuthorID).
+//	    From(PostsT).
+//	    Where(PostsT.CreatedAt.GTE(cutoff))
+//
+//	query.Select(expr.Raw("recent.id")).
+//	    With("recent", recent).
+//	    From(query.CTERef("recent"))
+func (b *SelectBuilder) With(name string, sub *SelectBuilder) *SelectBuilder {
+	cp := *b
+	cp.ctes = append(append([]cteClause(nil), cp.ctes...), cteClause{name: name, sub: sub})
+	return &cp
+}
+
+// CTERef returns a TableSource that references a named CTE defined with .With().
+// Use it in From() or Join() to reference the CTE by name.
+func CTERef(name string) TableSource { return cteTableSource{name: name} }
+
+type cteTableSource struct{ name string }
+
+func (c cteTableSource) GRizTableName() string  { return c.name }
+func (c cteTableSource) GRizTableAlias() string { return c.name }
 
 // From sets the primary table.
 func (b *SelectBuilder) From(t TableSource) *SelectBuilder {
@@ -145,6 +180,21 @@ func (b *SelectBuilder) Build(d dialect.Dialect) (string, []any) {
 // This is called by Build and by subquery expressions to share parameter numbering.
 func (b *SelectBuilder) buildWith(ctx *expr.BuildContext) string {
 	var sb strings.Builder
+
+	// WITH (CTEs)
+	if len(b.ctes) > 0 {
+		sb.WriteString("WITH ")
+		for i, cte := range b.ctes {
+			if i > 0 {
+				sb.WriteString(", ")
+			}
+			sb.WriteString(ctx.Quote(cte.name))
+			sb.WriteString(" AS (")
+			sb.WriteString(cte.sub.buildWith(ctx))
+			sb.WriteString(")")
+		}
+		sb.WriteString(" ")
+	}
 
 	// SELECT
 	sb.WriteString("SELECT ")

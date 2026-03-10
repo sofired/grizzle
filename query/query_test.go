@@ -1216,3 +1216,199 @@ func TestAgg_HavingGTE(t *testing.T) {
 		[]any{3},
 	)
 }
+
+// -------------------------------------------------------------------
+// Window function tests
+// -------------------------------------------------------------------
+
+func TestWindow_RowNumber_PartitionOrderBy(t *testing.T) {
+	assertSQL(t, "ROW_NUMBER() OVER (PARTITION BY realm_id ORDER BY username ASC)",
+		query.Select(
+			ts.UsersT.ID,
+			expr.RowNumber().
+				PartitionBy(ts.UsersT.RealmID).
+				OrderBy(ts.UsersT.Username.Asc()).
+				As("rn"),
+		).From(ts.UsersT),
+		`SELECT "users"."id", ROW_NUMBER() OVER (PARTITION BY "users"."realm_id" ORDER BY "users"."username" ASC) AS "rn" FROM "users"`,
+		nil,
+	)
+}
+
+func TestWindow_Rank_PartitionOnly(t *testing.T) {
+	assertSQL(t, "RANK() OVER (PARTITION BY realm_id)",
+		query.Select(
+			ts.UsersT.ID,
+			expr.Rank().PartitionBy(ts.UsersT.RealmID).As("rnk"),
+		).From(ts.UsersT),
+		`SELECT "users"."id", RANK() OVER (PARTITION BY "users"."realm_id") AS "rnk" FROM "users"`,
+		nil,
+	)
+}
+
+func TestWindow_DenseRank_NoPartition(t *testing.T) {
+	assertSQL(t, "DENSE_RANK() OVER (ORDER BY created_at DESC)",
+		query.Select(
+			ts.UsersT.ID,
+			expr.DenseRank().OrderBy(ts.UsersT.CreatedAt.Desc()).As("dr"),
+		).From(ts.UsersT),
+		`SELECT "users"."id", DENSE_RANK() OVER (ORDER BY "users"."created_at" DESC) AS "dr" FROM "users"`,
+		nil,
+	)
+}
+
+func TestWindow_Lead_WithColumn(t *testing.T) {
+	assertSQL(t, "LEAD(username) OVER (ORDER BY created_at ASC)",
+		query.Select(
+			ts.UsersT.ID,
+			expr.Lead(ts.UsersT.Username).OrderBy(ts.UsersT.CreatedAt.Asc()).As("next_user"),
+		).From(ts.UsersT),
+		`SELECT "users"."id", LEAD("users"."username") OVER (ORDER BY "users"."created_at" ASC) AS "next_user" FROM "users"`,
+		nil,
+	)
+}
+
+func TestWindow_EmptyOver(t *testing.T) {
+	// Window with no PARTITION BY and no ORDER BY — valid SQL: OVER ()
+	assertSQL(t, "ROW_NUMBER() OVER ()",
+		query.Select(
+			ts.UsersT.ID,
+			expr.RowNumber().As("rn"),
+		).From(ts.UsersT),
+		`SELECT "users"."id", ROW_NUMBER() OVER () AS "rn" FROM "users"`,
+		nil,
+	)
+}
+
+func TestWindow_WinSum_PartitionBy(t *testing.T) {
+	assertSQL(t, "SUM(col) OVER (PARTITION BY realm_id)",
+		query.Select(
+			ts.UsersT.ID,
+			expr.WinSum(ts.UsersT.RealmID).PartitionBy(ts.UsersT.RealmID).As("realm_count"),
+		).From(ts.UsersT),
+		`SELECT "users"."id", SUM("users"."realm_id") OVER (PARTITION BY "users"."realm_id") AS "realm_count" FROM "users"`,
+		nil,
+	)
+}
+
+// -------------------------------------------------------------------
+// CASE expression tests
+// -------------------------------------------------------------------
+
+func TestCase_SearchedCase_MultipleWhen(t *testing.T) {
+	assertSQL(t, "CASE WHEN ... THEN ... WHEN ... THEN ... END",
+		query.Select(
+			ts.UsersT.ID,
+			expr.Case().
+				When(ts.UsersT.Enabled.IsTrue(), expr.Lit("active")).
+				When(ts.UsersT.DeletedAt.IsNotNull(), expr.Lit("deleted")).
+				Else(expr.Lit("inactive")).
+				As("status"),
+		).From(ts.UsersT),
+		`SELECT "users"."id", CASE WHEN "users"."enabled" = $1 THEN $2 WHEN "users"."deleted_at" IS NOT NULL THEN $3 ELSE $4 END AS "status" FROM "users"`,
+		[]any{true, "active", "deleted", "inactive"},
+	)
+}
+
+func TestCase_SearchedCase_NoElse(t *testing.T) {
+	assertSQL(t, "CASE WHEN ... THEN ... END (no ELSE)",
+		query.Select(
+			ts.UsersT.ID,
+			expr.Case().
+				When(ts.UsersT.Enabled.IsTrue(), expr.Lit(1)).
+				As("flag"),
+		).From(ts.UsersT),
+		`SELECT "users"."id", CASE WHEN "users"."enabled" = $1 THEN $2 END AS "flag" FROM "users"`,
+		[]any{true, 1},
+	)
+}
+
+func TestCase_UsedInWhere(t *testing.T) {
+	// CASE expressions are valid in WHERE (though unusual); verify it renders.
+	q := query.Select(ts.UsersT.ID).
+		From(ts.UsersT).
+		Where(expr.Case().
+			When(ts.UsersT.Enabled.IsTrue(), expr.Lit(1)).
+			Else(expr.Lit(0)))
+	got, _ := q.Build(dialect.Postgres)
+	want := `SELECT "users"."id" FROM "users" WHERE CASE WHEN "users"."enabled" = $1 THEN $2 ELSE $3 END`
+	if got != want {
+		t.Errorf("SQL mismatch\n got:  %s\nwant: %s", got, want)
+	}
+}
+
+func TestLit_BoundParameter(t *testing.T) {
+	ctx := expr.NewBuildContext(dialect.Postgres)
+	got := expr.Lit(42).ToSQL(ctx)
+	if got != "$1" {
+		t.Errorf("Lit(42) should produce $1, got %s", got)
+	}
+	if len(ctx.Args()) != 1 || ctx.Args()[0] != 42 {
+		t.Errorf("expected arg 42, got %v", ctx.Args())
+	}
+}
+
+// -------------------------------------------------------------------
+// CTE (WITH clause) tests
+// -------------------------------------------------------------------
+
+func TestCTE_SimpleWith(t *testing.T) {
+	recent := query.Select(ts.UsersT.ID, ts.UsersT.RealmID).
+		From(ts.UsersT).
+		Where(ts.UsersT.DeletedAt.IsNull())
+
+	assertSQL(t, "WITH recent AS (SELECT ...) SELECT *",
+		query.Select().
+			With("recent", recent).
+			From(query.CTERef("recent")),
+		`WITH "recent" AS (SELECT "users"."id", "users"."realm_id" FROM "users" WHERE "users"."deleted_at" IS NULL) SELECT * FROM "recent"`,
+		nil,
+	)
+}
+
+func TestCTE_MultipleWith(t *testing.T) {
+	activeUsers := query.Select(ts.UsersT.ID).
+		From(ts.UsersT).
+		Where(ts.UsersT.Enabled.IsTrue())
+
+	activeRealms := query.Select(ts.RealmsT.ID).
+		From(ts.RealmsT).
+		Where(ts.RealmsT.Enabled.IsTrue())
+
+	q := query.Select().
+		With("au", activeUsers).
+		With("ar", activeRealms).
+		From(query.CTERef("au"))
+	got, _ := q.Build(dialect.Postgres)
+
+	if !strings.Contains(got, `WITH "au" AS (`) {
+		t.Errorf("missing first CTE in: %s", got)
+	}
+	if !strings.Contains(got, `, "ar" AS (`) {
+		t.Errorf("missing second CTE in: %s", got)
+	}
+	if !strings.Contains(got, `FROM "au"`) {
+		t.Errorf("missing FROM reference in: %s", got)
+	}
+}
+
+func TestCTE_ParametersSharedAcrossCTE(t *testing.T) {
+	// Parameters in the CTE subquery and outer query should use sequential numbering.
+	sub := query.Select(ts.UsersT.ID).
+		From(ts.UsersT).
+		Where(ts.UsersT.Username.EQ("alice"))
+
+	outer := query.Select().
+		With("u", sub).
+		From(query.CTERef("u")).
+		Where(expr.Raw(`"u"."id" IS NOT NULL`))
+
+	got, args := outer.Build(dialect.Postgres)
+	want := `WITH "u" AS (SELECT "users"."id" FROM "users" WHERE "users"."username" = $1) SELECT * FROM "u" WHERE "u"."id" IS NOT NULL`
+	if got != want {
+		t.Errorf("SQL mismatch\n got:  %s\nwant: %s", got, want)
+	}
+	if len(args) != 1 || args[0] != "alice" {
+		t.Errorf("expected [alice], got %v", args)
+	}
+}
