@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/grizzle-orm/grizzle/dialect"
-	"github.com/grizzle-orm/grizzle/expr"
+	"github.com/sofired/grizzle/dialect"
+	"github.com/sofired/grizzle/expr"
 )
 
 // SelectBuilder constructs a SELECT query.

@@ -4,8 +4,8 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/grizzle-orm/grizzle/dialect"
-	"github.com/grizzle-orm/grizzle/expr"
+	"github.com/sofired/grizzle/dialect"
+	"github.com/sofired/grizzle/expr"
 )
 
 // UpdateBuilder constructs an UPDATE query.

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	pg "github.com/grizzle-orm/grizzle/schema/pg"
+	pg "github.com/sofired/grizzle/schema/pg"
 )
 
 // GenerateCreateSQL returns the full SQL to create all given tables from scratch,

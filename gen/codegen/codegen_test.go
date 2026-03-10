@@ -5,14 +5,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/grizzle-orm/grizzle/gen/codegen"
-	"github.com/grizzle-orm/grizzle/gen/parser"
+	"github.com/sofired/grizzle/gen/codegen"
+	"github.com/sofired/grizzle/gen/parser"
 )
 
 // minimalSchema is a small schema that exercises the main column types.
 const minimalSchemaGo = `package testschema
 
-import pg "github.com/grizzle-orm/grizzle/schema/pg"
+import pg "github.com/sofired/grizzle/schema/pg"
 
 var Users = pg.Table("users",
 	pg.C("id",         pg.UUID().PrimaryKey().DefaultRandom()),
@@ -112,7 +112,7 @@ func TestGenerateTable_Smoke(t *testing.T) {
 func TestGenerateTable_ConstrainedTable(t *testing.T) {
 	// Ensure WithConstraints(...) is stripped properly.
 	src := `package testschema
-import pg "github.com/grizzle-orm/grizzle/schema/pg"
+import pg "github.com/sofired/grizzle/schema/pg"
 var Realms = pg.Table("realms",
 	pg.C("id",   pg.UUID().PrimaryKey().DefaultRandom()),
 	pg.C("name", pg.Varchar(255).NotNull()),

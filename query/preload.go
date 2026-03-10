@@ -2,7 +2,7 @@ package query
 
 import (
 	"github.com/google/uuid"
-	"github.com/grizzle-orm/grizzle/expr"
+	"github.com/sofired/grizzle/expr"
 )
 
 // -------------------------------------------------------------------

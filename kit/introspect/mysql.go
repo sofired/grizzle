@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	pg "github.com/grizzle-orm/grizzle/schema/pg"
+	pg "github.com/sofired/grizzle/schema/pg"
 )
 
 // IntrospectMySQL reads the live schema from a MySQL / MariaDB database using

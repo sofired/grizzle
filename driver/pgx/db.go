@@ -24,8 +24,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/grizzle-orm/grizzle/dialect"
-	"github.com/grizzle-orm/grizzle/query"
+	"github.com/sofired/grizzle/dialect"
+	"github.com/sofired/grizzle/query"
 )
 
 // DB wraps a pgxpool.Pool and provides G-rizzle integration helpers.

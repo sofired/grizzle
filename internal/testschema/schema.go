@@ -11,9 +11,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	pg "github.com/grizzle-orm/grizzle/schema/pg"
-	"github.com/grizzle-orm/grizzle/expr"
-	"github.com/grizzle-orm/grizzle/query"
+	pg "github.com/sofired/grizzle/schema/pg"
+	"github.com/sofired/grizzle/expr"
+	"github.com/sofired/grizzle/query"
 )
 
 // -------------------------------------------------------------------

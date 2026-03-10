@@ -16,7 +16,7 @@ import (
 	"os"
 	"time"
 
-	pg "github.com/grizzle-orm/grizzle/schema/pg"
+	pg "github.com/sofired/grizzle/schema/pg"
 )
 
 const snapshotVersion = "1"

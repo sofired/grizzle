@@ -1,6 +1,6 @@
 package query
 
-import "github.com/grizzle-orm/grizzle/expr"
+import "github.com/sofired/grizzle/expr"
 
 // RelationKind identifies the cardinality of a relation.
 type RelationKind string

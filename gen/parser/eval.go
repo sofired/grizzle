@@ -3,7 +3,7 @@ package parser
 import (
 	"fmt"
 
-	pg "github.com/grizzle-orm/grizzle/schema/pg"
+	pg "github.com/sofired/grizzle/schema/pg"
 )
 
 // EvalTable converts a ParsedTable (from the AST parser) into a *pg.TableDef

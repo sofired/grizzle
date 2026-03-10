@@ -21,13 +21,13 @@ G-rizzle generates Go structs that mirror your database schema. Every column is 
 ## Installation
 
 ```sh
-go get github.com/grizzle-orm/grizzle
+go get github.com/sofired/grizzle
 ```
 
 Install the CLI:
 
 ```sh
-go install github.com/grizzle-orm/grizzle/cmd/grizzle@latest
+go install github.com/sofired/grizzle/cmd/grizzle@latest
 ```
 
 ---
@@ -82,8 +82,8 @@ All builders produce `(sql string, args []any)` via `.Build(dialect)`.
 
 ```go
 import (
-    "github.com/grizzle-orm/grizzle/query"
-    "github.com/grizzle-orm/grizzle/dialect"
+    "github.com/sofired/grizzle/query"
+    "github.com/sofired/grizzle/dialect"
     db "myapp/db"
 )
 
@@ -309,7 +309,7 @@ db.UsersT.Attributes.HasAllKeys("role", "region")
 ### Applying migrations
 
 ```go
-import "github.com/grizzle-orm/grizzle/kit"
+import "github.com/sofired/grizzle/kit"
 
 // Introspect live DB, diff, apply DDL, record in _grizzle_migrations
 err := kit.Migrate(ctx, pool,
@@ -337,7 +337,7 @@ kit.Status(ctx, pool, db.UsersTableDef, db.RealmsTableDef)
 ### MySQL migrations
 
 ```go
-import "github.com/grizzle-orm/grizzle/kit"
+import "github.com/sofired/grizzle/kit"
 
 stmts := kit.AllChangeSQLMySQL(snap, changes)
 ```

@@ -8,10 +8,10 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/grizzle-orm/grizzle/dialect"
-	"github.com/grizzle-orm/grizzle/expr"
-	ts "github.com/grizzle-orm/grizzle/internal/testschema"
-	"github.com/grizzle-orm/grizzle/query"
+	"github.com/sofired/grizzle/dialect"
+	"github.com/sofired/grizzle/expr"
+	ts "github.com/sofired/grizzle/internal/testschema"
+	"github.com/sofired/grizzle/query"
 )
 
 // assertSQL is a small helper that builds a query and compares the output.

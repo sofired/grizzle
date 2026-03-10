@@ -1,4 +1,4 @@
-module github.com/grizzle-orm/grizzle
+module github.com/sofired/grizzle
 
 go 1.22
 

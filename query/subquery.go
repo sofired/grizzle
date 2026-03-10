@@ -1,6 +1,6 @@
 package query
 
-import "github.com/grizzle-orm/grizzle/expr"
+import "github.com/sofired/grizzle/expr"
 
 // -------------------------------------------------------------------
 // Subquery expressions — usable in WHERE / HAVING clauses

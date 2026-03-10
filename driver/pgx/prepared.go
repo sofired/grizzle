@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/grizzle-orm/grizzle/dialect"
-	"github.com/grizzle-orm/grizzle/query"
+	"github.com/sofired/grizzle/dialect"
+	"github.com/sofired/grizzle/query"
 )
 
 // PreparedSelect is a SELECT query whose SQL has been pre-built and validated

@@ -19,8 +19,8 @@
 package query
 
 import (
-	"github.com/grizzle-orm/grizzle/dialect"
-	"github.com/grizzle-orm/grizzle/expr"
+	"github.com/sofired/grizzle/dialect"
+	"github.com/sofired/grizzle/expr"
 )
 
 // TableSource is implemented by generated table types and can appear in
