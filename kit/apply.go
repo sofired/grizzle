@@ -75,6 +75,9 @@ func liveToSnapshot(live introspect.LiveSnapshot) Snapshot {
 		Tables: make(map[string]*TableSnap, len(live.Tables)),
 	}
 	for key, t := range live.Tables {
+		if t.Name == MigrationsTable {
+			continue // exclude internal grizzle tracking table from diffs
+		}
 		snap.Tables[key] = &TableSnap{
 			Name:        t.Name,
 			Schema:      t.Schema,

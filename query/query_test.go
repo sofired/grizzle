@@ -308,6 +308,43 @@ func TestUpsert_DoNothing_NoTarget(t *testing.T) {
 	)
 }
 
+func TestInsert_IgnoreConflicts_MySQL(t *testing.T) {
+	name := "test-realm"
+	row := ts.RealmInsert{Name: name}
+	b := query.InsertInto(ts.RealmsT).Values(row).IgnoreConflicts()
+	sql, args := b.Build(dialect.MySQL)
+	if sql != "INSERT IGNORE INTO `realms` (`name`) VALUES (?)" {
+		t.Errorf("unexpected SQL: %s", sql)
+	}
+	if len(args) != 1 || args[0] != name {
+		t.Errorf("unexpected args: %v", args)
+	}
+}
+
+func TestInsert_IgnoreConflicts_SQLite(t *testing.T) {
+	name := "test-realm"
+	row := ts.RealmInsert{Name: name}
+	b := query.InsertInto(ts.RealmsT).Values(row).IgnoreConflicts()
+	sql, args := b.Build(dialect.SQLite)
+	if sql != `INSERT OR IGNORE INTO "realms" ("name") VALUES (?)` {
+		t.Errorf("unexpected SQL: %s", sql)
+	}
+	if len(args) != 1 || args[0] != name {
+		t.Errorf("unexpected args: %v", args)
+	}
+}
+
+func TestInsert_IgnoreConflicts_Postgres_Noop(t *testing.T) {
+	// PostgreSQL has no INSERT IGNORE equivalent; flag is silently ignored.
+	name := "test-realm"
+	row := ts.RealmInsert{Name: name}
+	b := query.InsertInto(ts.RealmsT).Values(row).IgnoreConflicts()
+	sql, _ := b.Build(dialect.Postgres)
+	if sql != `INSERT INTO "realms" ("name") VALUES ($1)` {
+		t.Errorf("unexpected SQL: %s", sql)
+	}
+}
+
 func TestUpsert_DoUpdateSetExcluded(t *testing.T) {
 	name := "test-realm"
 	enabled := true

@@ -21,6 +21,7 @@ import (
 	"strings"
 
 	_ "github.com/go-sql-driver/mysql"
+	_ "github.com/mattn/go-sqlite3"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/sofired/grizzle/gen/codegen"
 	"github.com/sofired/grizzle/gen/parser"
@@ -158,7 +159,7 @@ func runGen(args []string) error {
 func runSQL(args []string) error {
 	fs := flag.NewFlagSet("sql", flag.ExitOnError)
 	schemaDir := fs.String("schema", ".", "directory containing schema Go files")
-	dialect := fs.String("dialect", "postgres", "target dialect: postgres or mysql")
+	dialect := fs.String("dialect", "postgres", "target dialect: postgres, mysql, or sqlite")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -169,6 +170,8 @@ func runSQL(args []string) error {
 	switch *dialect {
 	case "mysql":
 		fmt.Println(kit.GenerateCreateSQLMySQL(tables...))
+	case "sqlite":
+		fmt.Println(kit.GenerateCreateSQLSQLite(tables...))
 	default:
 		fmt.Println(kit.GenerateCreateSQL(tables...))
 	}
@@ -201,7 +204,7 @@ func runDiff(args []string) error {
 	fs := flag.NewFlagSet("diff", flag.ExitOnError)
 	schemaDir := fs.String("schema", ".", "directory containing schema Go files")
 	snapshotFile := fs.String("snapshot", "schema.snapshot.json", "path to the baseline snapshot file")
-	dialect := fs.String("dialect", "postgres", "target dialect: postgres or mysql")
+	dialect := fs.String("dialect", "postgres", "target dialect: postgres, mysql, or sqlite")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -236,6 +239,8 @@ func runDiff(args []string) error {
 	switch *dialect {
 	case "mysql":
 		stmts = kit.AllChangeSQLMySQL(newSnap, changes)
+	case "sqlite":
+		stmts = kit.AllChangeSQLSQLite(newSnap, changes)
 	default:
 		stmts = kit.AllChangeSQL(newSnap, changes)
 	}
@@ -249,7 +254,7 @@ func runMigrate(args []string) error {
 	fs := flag.NewFlagSet("migrate", flag.ExitOnError)
 	schemaDir := fs.String("schema", ".", "directory containing schema Go files")
 	dsn := fs.String("db", "", "database connection string (required)")
-	dialect := fs.String("dialect", "postgres", "target dialect: postgres or mysql")
+	dialect := fs.String("dialect", "postgres", "target dialect: postgres, mysql, or sqlite")
 	dryRun := fs.Bool("dry-run", false, "print SQL without applying it")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -265,10 +270,14 @@ func runMigrate(args []string) error {
 
 	ctx := context.Background()
 
-	if *dialect == "mysql" {
+	switch *dialect {
+	case "mysql":
 		return runMigrateMySQL(ctx, *dsn, *dryRun, tables...)
+	case "sqlite":
+		return runMigrateSQLite(ctx, *dsn, *dryRun, tables...)
+	default:
+		return runMigratePostgres(ctx, *dsn, *dryRun, tables...)
 	}
-	return runMigratePostgres(ctx, *dsn, *dryRun, tables...)
 }
 
 func runMigratePostgres(ctx context.Context, dsn string, dryRun bool, tables ...*pg.TableDef) error {
@@ -339,12 +348,46 @@ func runMigrateMySQL(ctx context.Context, dsn string, dryRun bool, tables ...*pg
 	return nil
 }
 
+func runMigrateSQLite(ctx context.Context, dsn string, dryRun bool, tables ...*pg.TableDef) error {
+	db, err := sql.Open("sqlite3", dsn)
+	if err != nil {
+		return fmt.Errorf("open sqlite3: %w", err)
+	}
+	defer db.Close()
+
+	if dryRun {
+		result, err := kit.DryRunSQLite(ctx, db, tables...)
+		if err != nil {
+			return err
+		}
+		if len(result.SQL) == 0 {
+			fmt.Println("-- Already current, nothing to apply.")
+			return nil
+		}
+		fmt.Println(strings.Join(result.SQL, ";\n") + ";")
+		log.Printf("(dry-run) %d change(s), %d statement(s)", len(result.Changes), len(result.SQL))
+		return nil
+	}
+
+	result, err := kit.MigrateSQLite(ctx, db, tables...)
+	if err != nil {
+		return err
+	}
+	if result.AlreadyCurrent {
+		log.Println("already current — nothing to apply")
+		return nil
+	}
+	log.Printf("applied %d change(s) in %d statement(s) [checksum: %s]",
+		len(result.Changes), len(result.SQL), result.Checksum[:8])
+	return nil
+}
+
 // runStatus shows migration history and any pending changes.
 func runStatus(args []string) error {
 	fs := flag.NewFlagSet("status", flag.ExitOnError)
 	schemaDir := fs.String("schema", ".", "directory containing schema Go files")
 	dsn := fs.String("db", "", "database connection string (required)")
-	dialect := fs.String("dialect", "postgres", "target dialect: postgres or mysql")
+	dialect := fs.String("dialect", "postgres", "target dialect: postgres or mysql or sqlite")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -360,7 +403,8 @@ func runStatus(args []string) error {
 	ctx := context.Background()
 
 	var status kit.StatusResult
-	if *dialect == "mysql" {
+	switch *dialect {
+	case "mysql":
 		db, err := openMySQL(*dsn)
 		if err != nil {
 			return err
@@ -370,7 +414,17 @@ func runStatus(args []string) error {
 		if err != nil {
 			return err
 		}
-	} else {
+	case "sqlite":
+		db, err := sql.Open("sqlite3", *dsn)
+		if err != nil {
+			return fmt.Errorf("open sqlite3: %w", err)
+		}
+		defer db.Close()
+		status, err = kit.StatusSQLite(ctx, db, tables...)
+		if err != nil {
+			return err
+		}
+	default:
 		pool, err := pgxpool.New(ctx, *dsn)
 		if err != nil {
 			return fmt.Errorf("connect: %w", err)

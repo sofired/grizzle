@@ -10,11 +10,12 @@ import (
 
 // InsertBuilder constructs an INSERT query.
 type InsertBuilder struct {
-	table     TableSource
-	colNames  []string
-	rows      [][]any
-	returning []expr.SelectableColumn
-	upsert    *upsertClause
+	table          TableSource
+	colNames       []string
+	rows           [][]any
+	returning      []expr.SelectableColumn
+	upsert         *upsertClause
+	ignoreConflict bool // emit INSERT IGNORE / INSERT OR IGNORE
 }
 
 // upsertClause holds the ON CONFLICT … DO … specification.
@@ -157,6 +158,20 @@ func (b *InsertBuilder) upsertCopy() *upsertClause {
 	return &cp
 }
 
+// IgnoreConflicts marks the insert to silently skip rows that violate a
+// unique or primary key constraint.
+//
+// Dialect behaviour:
+//   - MySQL:  emits INSERT IGNORE INTO …
+//   - SQLite: emits INSERT OR IGNORE INTO …
+//   - PostgreSQL: no direct equivalent; this flag is silently ignored.
+//     Use OnConflict(cols).DoNothing() for PostgreSQL instead.
+func (b *InsertBuilder) IgnoreConflicts() *InsertBuilder {
+	cp := *b
+	cp.ignoreConflict = true
+	return &cp
+}
+
 // Returning specifies columns to return after insert (PostgreSQL RETURNING clause).
 func (b *InsertBuilder) Returning(cols ...expr.SelectableColumn) *InsertBuilder {
 	cp := *b
@@ -169,7 +184,17 @@ func (b *InsertBuilder) Build(d dialect.Dialect) (string, []any) {
 	ctx := expr.NewBuildContext(d)
 	var sb strings.Builder
 
-	sb.WriteString("INSERT INTO ")
+	// Choose INSERT keyword based on ignore flag and dialect support.
+	if b.ignoreConflict {
+		if clause := d.InsertIgnoreClause(); clause != "" {
+			sb.WriteString(clause)
+			sb.WriteString(" INTO ")
+		} else {
+			sb.WriteString("INSERT INTO ")
+		}
+	} else {
+		sb.WriteString("INSERT INTO ")
+	}
 	sb.WriteString(ctx.Quote(b.table.GRizTableName()))
 
 	// Column list
@@ -279,11 +304,9 @@ func buildOnConflict(sb *strings.Builder, ctx *expr.BuildContext, u *upsertClaus
 // by the table's PRIMARY KEY and UNIQUE indexes automatically.
 func buildOnDuplicateKey(sb *strings.Builder, ctx *expr.BuildContext, u *upsertClause) {
 	if u.doNothing {
-		// MySQL has no DO NOTHING, but INSERT IGNORE achieves the same effect.
-		// Emit nothing here — caller should use INSERT IGNORE instead.
-		// For now emit a no-op assignment to the first column in excluded/sets
-		// so that MySQL doesn't reject the statement.
-		// Best practice: use InsertIgnore() instead (TODO future method).
+		// MySQL has no DO NOTHING equivalent in ON DUPLICATE KEY UPDATE syntax.
+		// Callers should use IgnoreConflicts() to get INSERT IGNORE INTO instead.
+		// Emit nothing so the statement remains valid (just a regular INSERT).
 		return
 	}
 	sb.WriteString(" ON DUPLICATE KEY UPDATE ")
