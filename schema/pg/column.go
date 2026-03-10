@@ -408,5 +408,7 @@ func (b *NumericBuilder) Build(name string) ColumnDef { return b.build(name) }
 // ColumnBuilder is implemented by every column builder type.
 // It is used by Table() to finalise column names from the C() helper.
 type ColumnBuilder interface {
+	// Build finalises the column definition, injecting its name and returning
+	// an immutable ColumnDef. Typically called via C() rather than directly.
 	Build(name string) ColumnDef
 }

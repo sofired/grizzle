@@ -89,6 +89,7 @@ func (b *IndexBuilder) Where(expr string) *IndexBuilder {
 	return b
 }
 
+// Build returns the completed index constraint.
 func (b *IndexBuilder) Build() Constraint { return b.c }
 
 // -------------------------------------------------------------------
@@ -140,6 +141,7 @@ func (b *ForeignKeyBuilder) OnUpdate(action FKAction) *ForeignKeyBuilder {
 	return b
 }
 
+// Build returns the completed foreign key constraint.
 func (b *ForeignKeyBuilder) Build() Constraint { return b.c }
 
 // -------------------------------------------------------------------
