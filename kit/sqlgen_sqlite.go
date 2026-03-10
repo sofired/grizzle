@@ -80,6 +80,18 @@ func GenerateChangeSQLSQLite(snap Snapshot, c Change) []string {
 			qiSQLite(c.OldCol.Name),
 		)}
 
+	case ChangeRenameColumn:
+		if c.OldCol == nil || c.NewCol == nil {
+			return nil
+		}
+		// Supported since SQLite 3.25.0.
+		return []string{fmt.Sprintf(
+			"ALTER TABLE %s RENAME COLUMN %s TO %s",
+			qiSQLite(c.TableName),
+			qiSQLite(c.OldCol.Name),
+			qiSQLite(c.NewCol.Name),
+		)}
+
 	case ChangeAlterColumnType, ChangeAlterColumnNull, ChangeAlterColumnDefault:
 		// SQLite does not support ALTER COLUMN. A full table rebuild is required.
 		// Return a comment so callers can see what needs manual intervention.

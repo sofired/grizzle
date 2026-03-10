@@ -223,6 +223,29 @@ func (c IntColumn) EQCol(other IntColumn) Expression {
 	return colColExpr{left: c.ColBase, op: "=", right: other.ColBase}
 }
 
+// Arithmetic operators — return an ArithExpr usable in SELECT or WHERE.
+func (c IntColumn) Add(val int) ArithExpr {
+	return ArithExpr{left: c.ColBase, op: "+", right: litRefer{val}}
+}
+func (c IntColumn) Sub(val int) ArithExpr {
+	return ArithExpr{left: c.ColBase, op: "-", right: litRefer{val}}
+}
+func (c IntColumn) Mul(val int) ArithExpr {
+	return ArithExpr{left: c.ColBase, op: "*", right: litRefer{val}}
+}
+func (c IntColumn) Div(val int) ArithExpr {
+	return ArithExpr{left: c.ColBase, op: "/", right: litRefer{val}}
+}
+func (c IntColumn) AddCol(other IntColumn) ArithExpr {
+	return ArithExpr{left: c.ColBase, op: "+", right: other.ColBase}
+}
+func (c IntColumn) SubCol(other IntColumn) ArithExpr {
+	return ArithExpr{left: c.ColBase, op: "-", right: other.ColBase}
+}
+func (c IntColumn) MulCol(other IntColumn) ArithExpr {
+	return ArithExpr{left: c.ColBase, op: "*", right: other.ColBase}
+}
+
 // -------------------------------------------------------------------
 // BigIntColumn
 // -------------------------------------------------------------------
@@ -275,6 +298,29 @@ func (c BigIntColumn) NotIn(vals ...int64) Expression {
 }
 func (c BigIntColumn) EQCol(other BigIntColumn) Expression {
 	return colColExpr{left: c.ColBase, op: "=", right: other.ColBase}
+}
+
+// Arithmetic operators — return an ArithExpr usable in SELECT or WHERE.
+func (c BigIntColumn) Add(val int64) ArithExpr {
+	return ArithExpr{left: c.ColBase, op: "+", right: litRefer{val}}
+}
+func (c BigIntColumn) Sub(val int64) ArithExpr {
+	return ArithExpr{left: c.ColBase, op: "-", right: litRefer{val}}
+}
+func (c BigIntColumn) Mul(val int64) ArithExpr {
+	return ArithExpr{left: c.ColBase, op: "*", right: litRefer{val}}
+}
+func (c BigIntColumn) Div(val int64) ArithExpr {
+	return ArithExpr{left: c.ColBase, op: "/", right: litRefer{val}}
+}
+func (c BigIntColumn) AddCol(other BigIntColumn) ArithExpr {
+	return ArithExpr{left: c.ColBase, op: "+", right: other.ColBase}
+}
+func (c BigIntColumn) SubCol(other BigIntColumn) ArithExpr {
+	return ArithExpr{left: c.ColBase, op: "-", right: other.ColBase}
+}
+func (c BigIntColumn) MulCol(other BigIntColumn) ArithExpr {
+	return ArithExpr{left: c.ColBase, op: "*", right: other.ColBase}
 }
 
 // -------------------------------------------------------------------
@@ -484,4 +530,27 @@ func (c FloatColumn) LTCol(other FloatColumn) Expression {
 }
 func (c FloatColumn) LTECol(other FloatColumn) Expression {
 	return colColExpr{left: c.ColBase, op: "<=", right: other.ColBase}
+}
+
+// Arithmetic operators — return an ArithExpr usable in SELECT or WHERE.
+func (c FloatColumn) Add(val float64) ArithExpr {
+	return ArithExpr{left: c.ColBase, op: "+", right: litRefer{val}}
+}
+func (c FloatColumn) Sub(val float64) ArithExpr {
+	return ArithExpr{left: c.ColBase, op: "-", right: litRefer{val}}
+}
+func (c FloatColumn) Mul(val float64) ArithExpr {
+	return ArithExpr{left: c.ColBase, op: "*", right: litRefer{val}}
+}
+func (c FloatColumn) Div(val float64) ArithExpr {
+	return ArithExpr{left: c.ColBase, op: "/", right: litRefer{val}}
+}
+func (c FloatColumn) AddCol(other FloatColumn) ArithExpr {
+	return ArithExpr{left: c.ColBase, op: "+", right: other.ColBase}
+}
+func (c FloatColumn) SubCol(other FloatColumn) ArithExpr {
+	return ArithExpr{left: c.ColBase, op: "-", right: other.ColBase}
+}
+func (c FloatColumn) MulCol(other FloatColumn) ArithExpr {
+	return ArithExpr{left: c.ColBase, op: "*", right: other.ColBase}
 }

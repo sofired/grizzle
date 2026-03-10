@@ -1634,3 +1634,428 @@ func TestFloatColumn_GTCol(t *testing.T) {
 		t.Errorf("got %s, want %s", got, want)
 	}
 }
+
+// -------------------------------------------------------------------
+// UNION / UNION ALL / INTERSECT / EXCEPT
+// -------------------------------------------------------------------
+
+func TestSetOp_Union(t *testing.T) {
+	a := query.Select(ts.UsersT.Username).From(ts.UsersT).Where(ts.UsersT.Enabled.IsTrue())
+	b := query.Select(ts.RealmsT.Name).From(ts.RealmsT)
+	assertSQL(t, "union",
+		a.Union(b),
+		`(SELECT "users"."username" FROM "users" WHERE "users"."enabled" = $1) UNION (SELECT "realms"."name" FROM "realms")`,
+		[]any{true},
+	)
+}
+
+func TestSetOp_UnionAll(t *testing.T) {
+	a := query.Select(ts.UsersT.Username).From(ts.UsersT)
+	b := query.Select(ts.RealmsT.Name).From(ts.RealmsT)
+	assertSQL(t, "union all",
+		a.UnionAll(b),
+		`(SELECT "users"."username" FROM "users") UNION ALL (SELECT "realms"."name" FROM "realms")`,
+		nil,
+	)
+}
+
+func TestSetOp_Intersect(t *testing.T) {
+	a := query.Select(ts.UsersT.Username).From(ts.UsersT)
+	b := query.Select(ts.RealmsT.Name).From(ts.RealmsT)
+	assertSQL(t, "intersect",
+		a.Intersect(b),
+		`(SELECT "users"."username" FROM "users") INTERSECT (SELECT "realms"."name" FROM "realms")`,
+		nil,
+	)
+}
+
+func TestSetOp_Except(t *testing.T) {
+	a := query.Select(ts.UsersT.Username).From(ts.UsersT)
+	b := query.Select(ts.RealmsT.Name).From(ts.RealmsT)
+	assertSQL(t, "except",
+		a.Except(b),
+		`(SELECT "users"."username" FROM "users") EXCEPT (SELECT "realms"."name" FROM "realms")`,
+		nil,
+	)
+}
+
+func TestSetOp_UnionAll_ThreeParts(t *testing.T) {
+	a := query.Select(ts.UsersT.Username).From(ts.UsersT)
+	b := query.Select(ts.RealmsT.Name).From(ts.RealmsT)
+	c := query.Select(ts.UsersT.Email).From(ts.UsersT).Where(ts.UsersT.Email.IsNotNull())
+	assertSQL(t, "union all three parts",
+		a.UnionAll(b).UnionAll(c),
+		`(SELECT "users"."username" FROM "users") UNION ALL (SELECT "realms"."name" FROM "realms") UNION ALL (SELECT "users"."email" FROM "users" WHERE "users"."email" IS NOT NULL)`,
+		nil,
+	)
+}
+
+func TestSetOp_Union_WithLimitOrderBy(t *testing.T) {
+	a := query.Select(ts.UsersT.Username).From(ts.UsersT)
+	b := query.Select(ts.RealmsT.Name).From(ts.RealmsT)
+	assertSQL(t, "union with limit and order",
+		a.Union(b).OrderBy(ts.UsersT.Username.Asc()).Limit(10),
+		`(SELECT "users"."username" FROM "users") UNION (SELECT "realms"."name" FROM "realms") ORDER BY "users"."username" ASC LIMIT 10`,
+		nil,
+	)
+}
+
+func TestSetOp_SharedParameters(t *testing.T) {
+	a := query.Select(ts.UsersT.Username).From(ts.UsersT).Where(ts.UsersT.Enabled.EQ(true))
+	b := query.Select(ts.RealmsT.Name).From(ts.RealmsT).Where(ts.RealmsT.Enabled.EQ(false))
+	sql, args := a.UnionAll(b).Build(dialect.Postgres)
+	if !strings.Contains(sql, "$1") || !strings.Contains(sql, "$2") {
+		t.Errorf("expected shared parameter numbering, got: %s", sql)
+	}
+	if len(args) != 2 {
+		t.Errorf("expected 2 args, got %d: %v", len(args), args)
+	}
+}
+
+// -------------------------------------------------------------------
+// Arithmetic expressions
+// -------------------------------------------------------------------
+
+var (
+	scoreCol   = expr.IntColumn{ColBase: expr.ColBase{TableAlias: "products", ColName: "score"}}
+	quantCol   = expr.IntColumn{ColBase: expr.ColBase{TableAlias: "orders", ColName: "quantity"}}
+	priceCol   = expr.FloatColumn{ColBase: expr.ColBase{TableAlias: "orders", ColName: "price"}}
+	discountCol = expr.FloatColumn{ColBase: expr.ColBase{TableAlias: "orders", ColName: "discount"}}
+)
+
+func TestArith_IntColumn_Add(t *testing.T) {
+	ctx := expr.NewBuildContext(dialect.Postgres)
+	got := scoreCol.Add(10).ToSQL(ctx)
+	want := `("products"."score" + $1)`
+	if got != want {
+		t.Errorf("got %s, want %s", got, want)
+	}
+	if ctx.Args()[0] != 10 {
+		t.Errorf("arg = %v, want 10", ctx.Args()[0])
+	}
+}
+
+func TestArith_IntColumn_Sub(t *testing.T) {
+	ctx := expr.NewBuildContext(dialect.Postgres)
+	got := scoreCol.Sub(5).ToSQL(ctx)
+	if got != `("products"."score" - $1)` {
+		t.Errorf("unexpected: %s", got)
+	}
+}
+
+func TestArith_IntColumn_Mul(t *testing.T) {
+	ctx := expr.NewBuildContext(dialect.Postgres)
+	got := scoreCol.Mul(3).ToSQL(ctx)
+	if got != `("products"."score" * $1)` {
+		t.Errorf("unexpected: %s", got)
+	}
+}
+
+func TestArith_IntColumn_Div(t *testing.T) {
+	ctx := expr.NewBuildContext(dialect.Postgres)
+	got := scoreCol.Div(2).ToSQL(ctx)
+	if got != `("products"."score" / $1)` {
+		t.Errorf("unexpected: %s", got)
+	}
+}
+
+func TestArith_IntColumn_AddCol(t *testing.T) {
+	ctx := expr.NewBuildContext(dialect.Postgres)
+	got := quantCol.AddCol(scoreCol).ToSQL(ctx)
+	if got != `("orders"."quantity" + "products"."score")` {
+		t.Errorf("unexpected: %s", got)
+	}
+}
+
+func TestArith_FloatColumn_Mul(t *testing.T) {
+	ctx := expr.NewBuildContext(dialect.Postgres)
+	got := priceCol.Mul(1.1).ToSQL(ctx)
+	if got != `("orders"."price" * $1)` {
+		t.Errorf("unexpected: %s", got)
+	}
+}
+
+func TestArith_FloatColumn_MulCol(t *testing.T) {
+	ctx := expr.NewBuildContext(dialect.Postgres)
+	got := priceCol.MulCol(discountCol).ToSQL(ctx)
+	if got != `("orders"."price" * "orders"."discount")` {
+		t.Errorf("unexpected: %s", got)
+	}
+}
+
+func TestArith_Chain(t *testing.T) {
+	// (score + 5) * 2
+	ctx := expr.NewBuildContext(dialect.Postgres)
+	got := scoreCol.Add(5).Mul(2).ToSQL(ctx)
+	if got != `(("products"."score" + $1) * $2)` {
+		t.Errorf("unexpected: %s", got)
+	}
+}
+
+func TestArith_As_SelectAlias(t *testing.T) {
+	ctx := expr.NewBuildContext(dialect.Postgres)
+	got := priceCol.Mul(0.9).As("discounted").ToSQL(ctx)
+	if got != `("orders"."price" * $1) AS "discounted"` {
+		t.Errorf("unexpected: %s", got)
+	}
+}
+
+func TestArith_GTE_InWhere(t *testing.T) {
+	ctx := expr.NewBuildContext(dialect.Postgres)
+	got := scoreCol.Add(10).GTE(100).ToSQL(ctx)
+	// ("products"."score" + $1) >= $2
+	if !strings.Contains(got, ">=") {
+		t.Errorf("expected >= operator, got: %s", got)
+	}
+}
+
+func TestArith_UsedInSelect(t *testing.T) {
+	type ordersTable struct{ expr.ColBase }
+	orders := ordersTable{}
+	_ = orders
+	assertSQL(t, "arith in select",
+		query.Select(priceCol.MulCol(discountCol).As("total")).From(ts.UsersT),
+		`SELECT ("orders"."price" * "orders"."discount") AS "total" FROM "users"`,
+		nil,
+	)
+}
+
+// -------------------------------------------------------------------
+// CAST
+// -------------------------------------------------------------------
+
+func TestCast_ColAsText(t *testing.T) {
+	ctx := expr.NewBuildContext(dialect.Postgres)
+	got := expr.Cast(ts.UsersT.ID, "text").ToSQL(ctx)
+	want := `CAST("users"."id" AS text)`
+	if got != want {
+		t.Errorf("got %s, want %s", got, want)
+	}
+}
+
+func TestCast_WithAlias(t *testing.T) {
+	ctx := expr.NewBuildContext(dialect.Postgres)
+	got := expr.Cast(scoreCol, "bigint").As("big_score").ToSQL(ctx)
+	want := `CAST("products"."score" AS bigint) AS "big_score"`
+	if got != want {
+		t.Errorf("got %s, want %s", got, want)
+	}
+}
+
+func TestCast_EQ_InWhere(t *testing.T) {
+	ctx := expr.NewBuildContext(dialect.Postgres)
+	got := expr.Cast(ts.UsersT.ID, "text").EQ("abc").ToSQL(ctx)
+	want := `CAST("users"."id" AS text) = $1`
+	if got != want {
+		t.Errorf("got %s, want %s", got, want)
+	}
+}
+
+// -------------------------------------------------------------------
+// COALESCE / NULLIF
+// -------------------------------------------------------------------
+
+func TestCoalesce_TwoColumns(t *testing.T) {
+	ctx := expr.NewBuildContext(dialect.Postgres)
+	got := expr.Coalesce(expr.Col(ts.UsersT.Email), expr.Col(ts.UsersT.Username)).ToSQL(ctx)
+	want := `COALESCE("users"."email", "users"."username")`
+	if got != want {
+		t.Errorf("got %s, want %s", got, want)
+	}
+}
+
+func TestCoalesce_ColumnAndLiteral(t *testing.T) {
+	ctx := expr.NewBuildContext(dialect.Postgres)
+	got := expr.Coalesce(expr.Col(ts.UsersT.Email), expr.Lit("anon")).ToSQL(ctx)
+	want := `COALESCE("users"."email", $1)`
+	if got != want {
+		t.Errorf("got %s, want %s", got, want)
+	}
+}
+
+func TestCoalesce_WithAlias(t *testing.T) {
+	ctx := expr.NewBuildContext(dialect.Postgres)
+	got := expr.Coalesce(expr.Col(ts.UsersT.Email), expr.Lit("anon")).As("display_email").ToSQL(ctx)
+	if !strings.Contains(got, `AS "display_email"`) {
+		t.Errorf("alias not rendered: %s", got)
+	}
+}
+
+func TestNullIf(t *testing.T) {
+	ctx := expr.NewBuildContext(dialect.Postgres)
+	got := expr.NullIf(expr.Col(scoreCol), expr.Lit(0)).ToSQL(ctx)
+	want := `NULLIF("products"."score", $1)`
+	if got != want {
+		t.Errorf("got %s, want %s", got, want)
+	}
+}
+
+// -------------------------------------------------------------------
+// String functions
+// -------------------------------------------------------------------
+
+func TestUpper(t *testing.T) {
+	ctx := expr.NewBuildContext(dialect.Postgres)
+	got := expr.Upper(ts.UsersT.Username).ToSQL(ctx)
+	want := `UPPER("users"."username")`
+	if got != want {
+		t.Errorf("got %s, want %s", got, want)
+	}
+}
+
+func TestLower(t *testing.T) {
+	ctx := expr.NewBuildContext(dialect.Postgres)
+	got := expr.Lower(ts.UsersT.Email).ToSQL(ctx)
+	want := `LOWER("users"."email")`
+	if got != want {
+		t.Errorf("got %s, want %s", got, want)
+	}
+}
+
+func TestLength(t *testing.T) {
+	ctx := expr.NewBuildContext(dialect.Postgres)
+	got := expr.Length(ts.UsersT.Username).GT(3).ToSQL(ctx)
+	if !strings.Contains(got, "LENGTH") || !strings.Contains(got, ">") {
+		t.Errorf("unexpected: %s", got)
+	}
+}
+
+func TestTrim(t *testing.T) {
+	ctx := expr.NewBuildContext(dialect.Postgres)
+	got := expr.Trim(ts.UsersT.Username).ToSQL(ctx)
+	want := `TRIM("users"."username")`
+	if got != want {
+		t.Errorf("got %s, want %s", got, want)
+	}
+}
+
+func TestConcat(t *testing.T) {
+	ctx := expr.NewBuildContext(dialect.Postgres)
+	got := expr.Concat(expr.Col(ts.UsersT.Username), expr.Lit(" "), expr.Col(ts.UsersT.Email)).ToSQL(ctx)
+	want := `CONCAT("users"."username", $1, "users"."email")`
+	if got != want {
+		t.Errorf("got %s, want %s", got, want)
+	}
+}
+
+func TestConcatCols(t *testing.T) {
+	ctx := expr.NewBuildContext(dialect.Postgres)
+	got := expr.ConcatCols(ts.UsersT.Username, ts.UsersT.Email).ToSQL(ctx)
+	want := `CONCAT("users"."username", "users"."email")`
+	if got != want {
+		t.Errorf("got %s, want %s", got, want)
+	}
+}
+
+func TestLower_Like_InWhere(t *testing.T) {
+	ctx := expr.NewBuildContext(dialect.Postgres)
+	got := expr.Lower(ts.UsersT.Email).Like("%@example.com").ToSQL(ctx)
+	if !strings.Contains(got, "LOWER") || !strings.Contains(got, "LIKE") {
+		t.Errorf("unexpected: %s", got)
+	}
+}
+
+func TestFuncExpr_Asc_Desc(t *testing.T) {
+	ctx := expr.NewBuildContext(dialect.Postgres)
+	asc := expr.Lower(ts.UsersT.Username).Asc()
+	desc := expr.Upper(ts.UsersT.Email).Desc()
+	gotAsc := asc.ToSQL(ctx)
+	gotDesc := desc.ToSQL(ctx)
+	if !strings.Contains(gotAsc, "ASC") || !strings.Contains(gotAsc, "LOWER") {
+		t.Errorf("asc: unexpected: %s", gotAsc)
+	}
+	if !strings.Contains(gotDesc, "DESC") || !strings.Contains(gotDesc, "UPPER") {
+		t.Errorf("desc: unexpected: %s", gotDesc)
+	}
+}
+
+// -------------------------------------------------------------------
+// Numeric functions
+// -------------------------------------------------------------------
+
+func TestAbs(t *testing.T) {
+	ctx := expr.NewBuildContext(dialect.Postgres)
+	got := expr.Abs(priceCol).ToSQL(ctx)
+	if got != `ABS("orders"."price")` {
+		t.Errorf("got %s", got)
+	}
+}
+
+func TestRound_NoDecimals(t *testing.T) {
+	ctx := expr.NewBuildContext(dialect.Postgres)
+	got := expr.Round(priceCol).ToSQL(ctx)
+	if got != `ROUND("orders"."price")` {
+		t.Errorf("got %s", got)
+	}
+}
+
+func TestRound_WithDecimals(t *testing.T) {
+	ctx := expr.NewBuildContext(dialect.Postgres)
+	got := expr.Round(priceCol, 2).ToSQL(ctx)
+	// ROUND("orders"."price", $1)
+	if !strings.Contains(got, "ROUND") || !strings.Contains(got, "$1") {
+		t.Errorf("got %s", got)
+	}
+}
+
+// -------------------------------------------------------------------
+// Recursive CTEs
+// -------------------------------------------------------------------
+
+func TestWithRecursive_Basic(t *testing.T) {
+	idCol := expr.IntColumn{ColBase: expr.ColBase{TableAlias: "nodes", ColName: "id"}}
+	parentCol := expr.IntColumn{ColBase: expr.ColBase{TableAlias: "nodes", ColName: "parent_id"}}
+	treeIDCol := expr.IntColumn{ColBase: expr.ColBase{TableAlias: "tree", ColName: "id"}}
+
+	anchor := query.Select(idCol, parentCol).
+		From(ts.UsersT). // using any table as stand-in
+		Where(idCol.EQ(1))
+
+	recursive := query.Select(idCol, parentCol).
+		From(ts.UsersT).
+		InnerJoin(query.CTERef("tree"), idCol.EQCol(treeIDCol))
+
+	sql, args := query.Select().
+		WithRecursive("tree", anchor, recursive).
+		From(query.CTERef("tree")).
+		Build(dialect.Postgres)
+
+	if !strings.Contains(sql, "WITH RECURSIVE") {
+		t.Errorf("expected WITH RECURSIVE, got: %s", sql)
+	}
+	if !strings.Contains(sql, "UNION ALL") {
+		t.Errorf("expected UNION ALL in recursive CTE body, got: %s", sql)
+	}
+	if !strings.HasPrefix(sql, "WITH RECURSIVE") {
+		t.Errorf("expected query to start with WITH RECURSIVE, got: %s", sql)
+	}
+	_ = args
+}
+
+func TestWith_NonRecursive_UsesWITH(t *testing.T) {
+	sub := query.Select(ts.UsersT.ID).From(ts.UsersT).Where(ts.UsersT.Enabled.IsTrue())
+	sql, _ := query.Select().
+		With("active", sub).
+		From(query.CTERef("active")).
+		Build(dialect.Postgres)
+	if !strings.HasPrefix(sql, "WITH ") || strings.HasPrefix(sql, "WITH RECURSIVE") {
+		t.Errorf("expected plain WITH, got: %s", sql)
+	}
+}
+
+func TestWithRecursive_AndRegularCTE(t *testing.T) {
+	// Mixed: one regular CTE + one recursive CTE → WITH RECURSIVE for the whole block.
+	sub := query.Select(ts.UsersT.ID).From(ts.UsersT)
+	anchor := query.Select(ts.UsersT.ID).From(ts.UsersT).Where(ts.UsersT.Enabled.IsTrue())
+	recursive := query.Select(ts.UsersT.ID).From(ts.UsersT)
+
+	sql, _ := query.Select().
+		With("regular", sub).
+		WithRecursive("tree", anchor, recursive).
+		From(query.CTERef("tree")).
+		Build(dialect.Postgres)
+
+	if !strings.HasPrefix(sql, "WITH RECURSIVE") {
+		t.Errorf("expected WITH RECURSIVE (any recursive CTE triggers it), got: %s", sql)
+	}
+}
