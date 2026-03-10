@@ -15,6 +15,7 @@ const (
 	ChangeAlterColumnType    ChangeKind = "alter_column_type"
 	ChangeAlterColumnNull    ChangeKind = "alter_column_nullable"
 	ChangeAlterColumnDefault ChangeKind = "alter_column_default"
+	ChangeRenameColumn       ChangeKind = "rename_column"
 	ChangeAddConstraint      ChangeKind = "add_constraint"
 	ChangeDropConstraint     ChangeKind = "drop_constraint"
 )

@@ -27,10 +27,14 @@ type SelectBuilder struct {
 	forShare  bool   // append FOR SHARE
 }
 
-// cteClause holds a single WITH name AS (SELECT ...) entry.
+// cteClause holds a single WITH name AS (...) entry.
+// For regular CTEs, sub is set. For recursive CTEs, anchor and recursive are
+// set instead and sub is nil; the body renders as "anchor UNION ALL recursive".
 type cteClause struct {
-	name string
-	sub  *SelectBuilder
+	name      string
+	sub       *SelectBuilder // regular CTE body
+	anchor    *SelectBuilder // recursive CTE: base case
+	recursive *SelectBuilder // recursive CTE: recursive term
 }
 
 // Select starts a SELECT query specifying the columns to return.
@@ -89,6 +93,34 @@ func (b *SelectBuilder) ForShare() *SelectBuilder {
 func (b *SelectBuilder) With(name string, sub *SelectBuilder) *SelectBuilder {
 	cp := *b
 	cp.ctes = append(append([]cteClause(nil), cp.ctes...), cteClause{name: name, sub: sub})
+	return &cp
+}
+
+// WithRecursive adds a recursive Common Table Expression (CTE).
+// The CTE body is rendered as "anchor UNION ALL recursive", which is the
+// standard SQL form for a recursive CTE that iterates until no new rows
+// are produced.
+//
+// Example — traverse an org-chart by manager_id:
+//
+//	anchor := query.Select(EmployeesT.ID, EmployeesT.ManagerID).
+//	    From(EmployeesT).
+//	    Where(EmployeesT.ID.EQ(rootID))
+//
+//	rec := query.Select(EmployeesT.ID, EmployeesT.ManagerID).
+//	    From(EmployeesT).
+//	    InnerJoin(query.CTERef("org"), EmployeesT.ManagerID.EQCol(ManagerIDCol))
+//
+//	query.Select().
+//	    WithRecursive("org", anchor, rec).
+//	    From(query.CTERef("org"))
+func (b *SelectBuilder) WithRecursive(name string, anchor, recursive *SelectBuilder) *SelectBuilder {
+	cp := *b
+	cp.ctes = append(append([]cteClause(nil), cp.ctes...), cteClause{
+		name:      name,
+		anchor:    anchor,
+		recursive: recursive,
+	})
 	return &cp
 }
 
@@ -215,16 +247,34 @@ func (b *SelectBuilder) Build(d dialect.Dialect) (string, []any) {
 func (b *SelectBuilder) buildWith(ctx *expr.BuildContext) string {
 	var sb strings.Builder
 
-	// WITH (CTEs)
+	// WITH [RECURSIVE] (CTEs)
 	if len(b.ctes) > 0 {
-		sb.WriteString("WITH ")
+		hasRecursive := false
+		for _, cte := range b.ctes {
+			if cte.anchor != nil {
+				hasRecursive = true
+				break
+			}
+		}
+		if hasRecursive {
+			sb.WriteString("WITH RECURSIVE ")
+		} else {
+			sb.WriteString("WITH ")
+		}
 		for i, cte := range b.ctes {
 			if i > 0 {
 				sb.WriteString(", ")
 			}
 			sb.WriteString(ctx.Quote(cte.name))
 			sb.WriteString(" AS (")
-			sb.WriteString(cte.sub.buildWith(ctx))
+			if cte.anchor != nil {
+				// Recursive CTE: anchor UNION ALL recursive
+				sb.WriteString(cte.anchor.buildWith(ctx))
+				sb.WriteString(" UNION ALL ")
+				sb.WriteString(cte.recursive.buildWith(ctx))
+			} else {
+				sb.WriteString(cte.sub.buildWith(ctx))
+			}
 			sb.WriteString(")")
 		}
 		sb.WriteString(" ")

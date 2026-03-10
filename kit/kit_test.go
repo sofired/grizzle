@@ -438,3 +438,63 @@ func TestMySQLChangeSQL_AlterColumnType(t *testing.T) {
 		t.Errorf("MySQL alter type should use MODIFY COLUMN: %s", stmts[0])
 	}
 }
+
+// -------------------------------------------------------------------
+// ChangeRenameColumn — all three dialects
+// -------------------------------------------------------------------
+
+func makeRenameChange() kit.Change {
+	old := pg.ColumnDef{Name: "username", SQLType: "varchar(255)", NotNull: true}
+	newCol := pg.ColumnDef{Name: "login_name", SQLType: "varchar(255)", NotNull: true}
+	return kit.Change{
+		Kind:      kit.ChangeRenameColumn,
+		TableName: "users",
+		OldCol:    &old,
+		NewCol:    &newCol,
+	}
+}
+
+func TestRenameColumn_Postgres(t *testing.T) {
+	snap := kit.FromDefs(usersDef)
+	stmts := kit.GenerateChangeSQL(snap, makeRenameChange())
+	if len(stmts) != 1 {
+		t.Fatalf("expected 1 statement, got %d: %v", len(stmts), stmts)
+	}
+	want := `ALTER TABLE "users" RENAME COLUMN "username" TO "login_name"`
+	if stmts[0] != want {
+		t.Errorf("got:  %s\nwant: %s", stmts[0], want)
+	}
+}
+
+func TestRenameColumn_MySQL(t *testing.T) {
+	snap := kit.FromDefs(usersDef)
+	stmts := kit.GenerateChangeSQLMySQL(snap, makeRenameChange())
+	if len(stmts) != 1 {
+		t.Fatalf("expected 1 statement, got %d: %v", len(stmts), stmts)
+	}
+	want := "ALTER TABLE `users` RENAME COLUMN `username` TO `login_name`"
+	if stmts[0] != want {
+		t.Errorf("got:  %s\nwant: %s", stmts[0], want)
+	}
+}
+
+func TestRenameColumn_SQLite(t *testing.T) {
+	snap := kit.FromDefs(usersDef)
+	stmts := kit.GenerateChangeSQLSQLite(snap, makeRenameChange())
+	if len(stmts) != 1 {
+		t.Fatalf("expected 1 statement, got %d: %v", len(stmts), stmts)
+	}
+	want := `ALTER TABLE "users" RENAME COLUMN "username" TO "login_name"`
+	if stmts[0] != want {
+		t.Errorf("got:  %s\nwant: %s", stmts[0], want)
+	}
+}
+
+func TestRenameColumn_NilGuard(t *testing.T) {
+	snap := kit.FromDefs(usersDef)
+	// Missing OldCol / NewCol must not panic.
+	c := kit.Change{Kind: kit.ChangeRenameColumn, TableName: "users"}
+	if stmts := kit.GenerateChangeSQL(snap, c); stmts != nil {
+		t.Errorf("expected nil for nil cols, got %v", stmts)
+	}
+}

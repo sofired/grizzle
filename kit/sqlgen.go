@@ -105,6 +105,17 @@ func GenerateChangeSQL(snap Snapshot, c Change) []string {
 			quoteTable(c.TableName), qi(c.NewCol.Name), c.NewCol.DefaultExpr,
 		)}
 
+	case ChangeRenameColumn:
+		if c.OldCol == nil || c.NewCol == nil {
+			return nil
+		}
+		return []string{fmt.Sprintf(
+			"ALTER TABLE %s RENAME COLUMN %s TO %s",
+			quoteTable(c.TableName),
+			qi(c.OldCol.Name),
+			qi(c.NewCol.Name),
+		)}
+
 	case ChangeAddConstraint:
 		if c.Constraint == nil {
 			return nil

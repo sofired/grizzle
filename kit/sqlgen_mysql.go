@@ -115,6 +115,19 @@ func GenerateChangeSQLMySQL(snap Snapshot, c Change) []string {
 			mysqlDefaultExpr(c.NewCol.DefaultExpr),
 		)}
 
+	case ChangeRenameColumn:
+		if c.OldCol == nil || c.NewCol == nil {
+			return nil
+		}
+		// MySQL 8.0+: RENAME COLUMN old TO new
+		// Older MySQL requires CHANGE old new <full_def> — we use the modern syntax.
+		return []string{fmt.Sprintf(
+			"ALTER TABLE %s RENAME COLUMN %s TO %s",
+			quoteTableMySQL(c.TableName),
+			qiMySQL(c.OldCol.Name),
+			qiMySQL(c.NewCol.Name),
+		)}
+
 	case ChangeAddConstraint:
 		if c.Constraint == nil {
 			return nil
