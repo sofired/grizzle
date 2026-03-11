@@ -585,8 +585,8 @@ func TestRelation_BelongsTo_Fields(t *testing.T) {
 	if rel.Name != "realm" {
 		t.Errorf("name: got %q, want %q", rel.Name, "realm")
 	}
-	if rel.Table.GRizTableName() != "realms" {
-		t.Errorf("table: got %q, want %q", rel.Table.GRizTableName(), "realms")
+	if rel.Table.GrizTableName() != "realms" {
+		t.Errorf("table: got %q, want %q", rel.Table.GrizTableName(), "realms")
 	}
 	if rel.On == nil {
 		t.Error("On expression must not be nil")
@@ -601,8 +601,8 @@ func TestRelation_HasMany_Fields(t *testing.T) {
 	if rel.Name != "users" {
 		t.Errorf("name: got %q, want %q", rel.Name, "users")
 	}
-	if rel.Table.GRizTableName() != "users" {
-		t.Errorf("table: got %q, want %q", rel.Table.GRizTableName(), "users")
+	if rel.Table.GrizTableName() != "users" {
+		t.Errorf("table: got %q, want %q", rel.Table.GrizTableName(), "users")
 	}
 }
 

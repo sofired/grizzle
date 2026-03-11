@@ -1,4 +1,4 @@
-// Package parser provides AST-based parsing of G-rizzle schema definitions.
+// Package parser provides AST-based parsing of Grizzle schema definitions.
 // It reads Go source files containing pg.Table(...) declarations and extracts
 // structured TableDef information without executing the schema code.
 package parser

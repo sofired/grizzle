@@ -1,4 +1,4 @@
-// Package kit provides G-rizzle's migration tooling: schema snapshots, diffing,
+// Package kit provides Grizzle's migration tooling: schema snapshots, diffing,
 // SQL generation, and schema push. It is the Go equivalent of Drizzle Kit.
 //
 // Typical usage (library mode — user writes their own migrate entrypoint):

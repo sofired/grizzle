@@ -1,4 +1,4 @@
-// Package pgx provides the G-rizzle database adapter for jackc/pgx v5.
+// Package pgx provides the Grizzle database adapter for jackc/pgx v5.
 // It wraps pgxpool.Pool and exposes a transaction helper, keeping the
 // query builder and execution layer cleanly separated.
 //
@@ -28,7 +28,7 @@ import (
 	"github.com/sofired/grizzle/query"
 )
 
-// DB wraps a pgxpool.Pool and provides G-rizzle integration helpers.
+// DB wraps a pgxpool.Pool and provides Grizzle integration helpers.
 type DB struct {
 	pool *pgxpool.Pool
 }
@@ -141,7 +141,7 @@ func ScanOneOpt[T any](rows pgx.Rows, err error) (*T, error) {
 // Transactions
 // -------------------------------------------------------------------
 
-// Tx wraps a pgx.Tx with G-rizzle helpers.
+// Tx wraps a pgx.Tx with Grizzle helpers.
 type Tx struct {
 	tx pgx.Tx
 }

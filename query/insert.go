@@ -195,7 +195,7 @@ func (b *InsertBuilder) Build(d dialect.Dialect) (string, []any) {
 	} else {
 		sb.WriteString("INSERT INTO ")
 	}
-	sb.WriteString(ctx.Quote(b.table.GRizTableName()))
+	sb.WriteString(ctx.Quote(b.table.GrizTableName()))
 
 	// Column list
 	sb.WriteString(" (")

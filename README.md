@@ -1,8 +1,8 @@
-# G-rizzle
+# Grizzle
 
 A type-safe, code-generated query builder and migration toolkit for Go — inspired by [Drizzle ORM](https://orm.drizzle.team/).
 
-G-rizzle generates Go structs that mirror your database schema. Every column is a strongly-typed handle: you can only compare a `UUIDColumn` with another UUID, a `StringColumn` with a string, and so on. Type mismatches become compile errors, not runtime surprises.
+Grizzle generates Go structs that mirror your database schema. Every column is a strongly-typed handle: you can only compare a `UUIDColumn` with another UUID, a `StringColumn` with a string, and so on. Type mismatches become compile errors, not runtime surprises.
 
 ## Features
 

@@ -53,12 +53,12 @@ func FromSubquery(sub *SelectBuilder, alias string) *SubquerySource {
 	return &SubquerySource{sub: sub, alias: alias}
 }
 
-// GRizTableName satisfies TableSource. Returns the alias (used as the table
+// GrizTableName satisfies TableSource. Returns the alias (used as the table
 // reference in column expressions against this subquery).
-func (s *SubquerySource) GRizTableName() string { return s.alias }
+func (s *SubquerySource) GrizTableName() string { return s.alias }
 
-// GRizTableAlias satisfies TableSource.
-func (s *SubquerySource) GRizTableAlias() string { return s.alias }
+// GrizTableAlias satisfies TableSource.
+func (s *SubquerySource) GrizTableAlias() string { return s.alias }
 
 // -------------------------------------------------------------------
 // internal expression types

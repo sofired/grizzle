@@ -130,8 +130,8 @@ func CTERef(name string) TableSource { return cteTableSource{name: name} }
 
 type cteTableSource struct{ name string }
 
-func (c cteTableSource) GRizTableName() string  { return c.name }
-func (c cteTableSource) GRizTableAlias() string { return c.name }
+func (c cteTableSource) GrizTableName() string  { return c.name }
+func (c cteTableSource) GrizTableAlias() string { return c.name }
 
 // From sets the primary table.
 func (b *SelectBuilder) From(t TableSource) *SelectBuilder {
@@ -306,10 +306,10 @@ func (b *SelectBuilder) buildWith(ctx *expr.BuildContext) string {
 			sb.WriteString(") AS ")
 			sb.WriteString(ctx.Quote(sq.alias))
 		} else {
-			sb.WriteString(ctx.Quote(b.from.GRizTableName()))
-			if b.from.GRizTableAlias() != b.from.GRizTableName() {
+			sb.WriteString(ctx.Quote(b.from.GrizTableName()))
+			if b.from.GrizTableAlias() != b.from.GrizTableName() {
 				sb.WriteString(" AS ")
-				sb.WriteString(ctx.Quote(b.from.GRizTableAlias()))
+				sb.WriteString(ctx.Quote(b.from.GrizTableAlias()))
 			}
 		}
 	}
@@ -319,10 +319,10 @@ func (b *SelectBuilder) buildWith(ctx *expr.BuildContext) string {
 		sb.WriteString(" ")
 		sb.WriteString(string(j.kind))
 		sb.WriteString(" ")
-		sb.WriteString(ctx.Quote(j.table.GRizTableName()))
-		if j.table.GRizTableAlias() != j.table.GRizTableName() {
+		sb.WriteString(ctx.Quote(j.table.GrizTableName()))
+		if j.table.GrizTableAlias() != j.table.GrizTableName() {
 			sb.WriteString(" AS ")
-			sb.WriteString(ctx.Quote(j.table.GRizTableAlias()))
+			sb.WriteString(ctx.Quote(j.table.GrizTableAlias()))
 		}
 		if j.on != nil {
 			sb.WriteString(" ON ")

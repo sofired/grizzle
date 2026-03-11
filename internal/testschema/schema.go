@@ -1,10 +1,10 @@
-// Package testschema defines a small representative schema used in G-rizzle's
+// Package testschema defines a small representative schema used in Grizzle's
 // own tests. It mirrors the patterns from the uncloak-identity project:
 // soft-delete, partial indexes, composite FKs, JSONB columns, UUID PKs.
 //
 // This package plays a dual role:
 //   1. It's used by tests to verify SQL generation without a live database.
-//   2. It serves as the canonical example of the G-rizzle schema DSL.
+//   2. It serves as the canonical example of the Grizzle schema DSL.
 package testschema
 
 import (
@@ -77,8 +77,8 @@ type RealmsTable struct {
 	UpdatedAt   expr.TimestampColumn
 }
 
-func (RealmsTable) GRizTableName() string  { return "realms" }
-func (RealmsTable) GRizTableAlias() string { return "realms" }
+func (RealmsTable) GrizTableName() string  { return "realms" }
+func (RealmsTable) GrizTableAlias() string { return "realms" }
 
 // RealmsT is the singleton table handle used in queries.
 var RealmsT = RealmsTable{
@@ -106,8 +106,8 @@ type UsersTable struct {
 	PurgedAt      expr.TimestampColumn
 }
 
-func (UsersTable) GRizTableName() string  { return "users" }
-func (UsersTable) GRizTableAlias() string { return "users" }
+func (UsersTable) GrizTableName() string  { return "users" }
+func (UsersTable) GrizTableAlias() string { return "users" }
 
 var UsersT = UsersTable{
 	ID:            expr.UUIDColumn{ColBase: expr.ColBase{TableAlias: "users", ColName: "id"}},

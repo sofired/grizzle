@@ -9,7 +9,7 @@ import (
 // Eager loading — batch query helpers and result collectors
 // -------------------------------------------------------------------
 //
-// G-rizzle's approach to N+1 prevention is explicit and composable:
+// Grizzle's approach to N+1 prevention is explicit and composable:
 //
 //  1. Load primary rows with a regular SELECT.
 //  2. Pluck FK values from those rows.

@@ -1,4 +1,4 @@
-// Package pg provides the PostgreSQL schema definition DSL for G-rizzle.
+// Package pg provides the PostgreSQL schema definition DSL for Grizzle.
 // Use it to declare your database schema in Go; the grizzle code generator
 // reads these declarations to produce typed query helpers and migration snapshots.
 //
