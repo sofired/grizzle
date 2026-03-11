@@ -1,4 +1,4 @@
-// Package codegen converts parsed G-rizzle schema definitions into Go source
+// Package codegen converts parsed Grizzle schema definitions into Go source
 // files containing typed table handles and model structs.
 package codegen
 
@@ -183,8 +183,8 @@ type {{.TableTypeName}} struct {
 {{- end}}
 }
 
-func ({{.TableTypeName}}) GRizTableName() string  { return {{quote .TableName}} }
-func ({{.TableTypeName}}) GRizTableAlias() string { return {{quote .TableName}} }
+func ({{.TableTypeName}}) GrizTableName() string  { return {{quote .TableName}} }
+func ({{.TableTypeName}}) GrizTableAlias() string { return {{quote .TableName}} }
 
 // {{.SingletonName}} is the singleton handle for the {{.TableName}} table.
 var {{.SingletonName}} = {{.TableTypeName}}{

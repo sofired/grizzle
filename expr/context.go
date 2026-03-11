@@ -1,4 +1,4 @@
-// Package expr provides the type-safe expression system for G-rizzle.
+// Package expr provides the type-safe expression system for Grizzle.
 // Column types (UUIDColumn, StringColumn, etc.) expose only the operators
 // that are valid for their SQL type, producing compile-time errors when
 // mismatched types are compared.

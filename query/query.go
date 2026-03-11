@@ -1,4 +1,4 @@
-// Package query provides the G-rizzle fluent query builder.
+// Package query provides the Grizzle fluent query builder.
 // All builders are safe for concurrent use after construction — they are
 // immutable value types; each method returns a new copy.
 //
@@ -26,11 +26,11 @@ import (
 // TableSource is implemented by generated table types and can appear in
 // FROM and JOIN clauses.
 type TableSource interface {
-	// GRizTableName returns the SQL table name (without schema qualification).
-	GRizTableName() string
-	// GRizTableAlias returns the alias to use for this table in a query.
-	// Usually the same as GRizTableName unless the table has been aliased.
-	GRizTableAlias() string
+	// GrizTableName returns the SQL table name (without schema qualification).
+	GrizTableName() string
+	// GrizTableAlias returns the alias to use for this table in a query.
+	// Usually the same as GrizTableName unless the table has been aliased.
+	GrizTableAlias() string
 }
 
 // -------------------------------------------------------------------

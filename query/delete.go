@@ -55,7 +55,7 @@ func (b *DeleteBuilder) Build(d dialect.Dialect) (string, []any) {
 	var sb strings.Builder
 
 	sb.WriteString("DELETE FROM ")
-	sb.WriteString(ctx.Quote(b.table.GRizTableName()))
+	sb.WriteString(ctx.Quote(b.table.GrizTableName()))
 
 	sb.WriteString(buildWhere(ctx, b.where))
 

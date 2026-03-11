@@ -1,5 +1,5 @@
 // Package dialect defines the SQL dialect interface and built-in implementations.
-// All SQL generation in G-rizzle is dialect-aware, allowing the same query builder
+// All SQL generation in Grizzle is dialect-aware, allowing the same query builder
 // to produce correct SQL for PostgreSQL, MySQL, and SQLite.
 package dialect
 

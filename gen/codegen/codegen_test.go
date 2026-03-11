@@ -59,8 +59,8 @@ func TestGenerateTable_Smoke(t *testing.T) {
 	// type name and field name separately rather than "Field Type" as one string.
 	checks := []string{
 		"type UsersTable struct",
-		"func (UsersTable) GRizTableName() string",
-		"func (UsersTable) GRizTableAlias() string",
+		"func (UsersTable) GrizTableName() string",
+		"func (UsersTable) GrizTableAlias() string",
 		"var UsersT = UsersTable{",
 		"type UserSelect struct",
 		"type UserInsert struct",
