@@ -1,0 +1,13 @@
+Grizzle
+Copyright (c) 2026 sofired
+
+This project is a Go port of Drizzle ORM (https://orm.drizzle.team),
+originally created by the Drizzle Team (https://github.com/drizzle-team).
+
+Drizzle ORM is copyright (c) Drizzle Team and licensed under the
+Apache License, Version 2.0 (https://github.com/drizzle-team/drizzle-orm/blob/main/LICENSE).
+
+The API design, schema definition patterns, query builder concepts, and
+migration toolkit architecture in this project are derived from and inspired
+by Drizzle ORM. The Go implementation is original work by the Grizzle
+maintainers and contributors.

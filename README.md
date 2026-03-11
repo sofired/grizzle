@@ -1,8 +1,12 @@
-# G-rizzle
+# Grizzle
+
+[![CI](https://github.com/sofired/grizzle/actions/workflows/ci.yml/badge.svg)](https://github.com/sofired/grizzle/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/sofired/grizzle.svg)](https://pkg.go.dev/github.com/sofired/grizzle)
+[![Go Report Card](https://goreportcard.com/badge/github.com/sofired/grizzle)](https://goreportcard.com/report/github.com/sofired/grizzle)
 
 A type-safe, code-generated query builder and migration toolkit for Go — inspired by [Drizzle ORM](https://orm.drizzle.team/).
 
-G-rizzle generates Go structs that mirror your database schema. Every column is a strongly-typed handle: you can only compare a `UUIDColumn` with another UUID, a `StringColumn` with a string, and so on. Type mismatches become compile errors, not runtime surprises.
+Grizzle generates Go structs that mirror your database schema. Every column is a strongly-typed handle: you can only compare a `UUIDColumn` with another UUID, a `StringColumn` with a string, and so on. Type mismatches become compile errors, not runtime surprises.
 
 ## Features
 
@@ -461,6 +465,16 @@ grizzle status   --dsn "postgres://..." --schema schema.grizzle
 † SQLite does not support ALTER COLUMN — type/nullability/default changes require a manual table rebuild. The migration kit emits a `-- SQLite does not support ALTER COLUMN` comment so you can identify and apply these manually.
 
 ---
+
+## Acknowledgements
+
+Grizzle is a Go port of [Drizzle ORM](https://orm.drizzle.team), originally
+created by the [Drizzle Team](https://github.com/drizzle-team). The API design,
+schema definition patterns, query builder concepts, and migration toolkit
+architecture in this project are derived from and inspired by their work.
+
+Drizzle ORM is licensed under the [Apache License 2.0](https://github.com/drizzle-team/drizzle-orm/blob/main/LICENSE).
+The Go implementation is original work by the Grizzle maintainers and contributors.
 
 ## License
 
