@@ -86,7 +86,7 @@ func Pluck[T any, F any](items []T, fn func(T) F) []F {
 //	realmIDs := query.UniqueUUIDs(query.Pluck(users, func(u UserSelect) uuid.UUID { return u.RealmID }))
 func UniqueUUIDs(ids []uuid.UUID) []uuid.UUID {
 	seen := make(map[uuid.UUID]struct{}, len(ids))
-	out := ids[:0:len(ids)]
+	out := make([]uuid.UUID, 0, len(ids))
 	for _, id := range ids {
 		if _, ok := seen[id]; !ok {
 			seen[id] = struct{}{}
@@ -99,7 +99,7 @@ func UniqueUUIDs(ids []uuid.UUID) []uuid.UUID {
 // UniqueStrings returns a deduplicated slice of strings preserving first-seen order.
 func UniqueStrings(vals []string) []string {
 	seen := make(map[string]struct{}, len(vals))
-	out := vals[:0:len(vals)]
+	out := make([]string, 0, len(vals))
 	for _, v := range vals {
 		if _, ok := seen[v]; !ok {
 			seen[v] = struct{}{}

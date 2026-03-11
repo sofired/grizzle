@@ -34,7 +34,8 @@ type Dialect interface {
 	Name() string
 
 	// SupportsReturning reports whether the dialect supports the RETURNING clause
-	// on INSERT / UPDATE / DELETE statements (PostgreSQL) or not (MySQL, SQLite).
+	// on INSERT / UPDATE / DELETE statements (e.g. PostgreSQL, SQLite 3.35+) or
+	// not (e.g. MySQL).
 	SupportsReturning() bool
 
 	// UpsertStyle returns the dialect's INSERT conflict-resolution style.
