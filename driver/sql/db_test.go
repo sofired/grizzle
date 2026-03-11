@@ -19,8 +19,8 @@ import (
 
 type usersTable struct{ expr.ColBase }
 
-func (usersTable) GRizTableName() string  { return "users" }
-func (usersTable) GRizTableAlias() string { return "users" }
+func (usersTable) GrizTableName() string  { return "users" }
+func (usersTable) GrizTableAlias() string { return "users" }
 
 var (
 	usersT  = usersTable{}

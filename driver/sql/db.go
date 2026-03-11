@@ -1,4 +1,4 @@
-// Package sql provides G-rizzle integration for database/sql-based drivers
+// Package sql provides Grizzle integration for database/sql-based drivers
 // (MySQL via go-sql-driver/mysql, SQLite via mattn/go-sqlite3, and any other
 // driver that uses the standard database/sql interface).
 //
@@ -52,7 +52,7 @@ import (
 // It mirrors the sentinel error from database/sql.
 var ErrNoRows = sql.ErrNoRows
 
-// DB wraps a *sql.DB together with its dialect and provides G-rizzle helpers.
+// DB wraps a *sql.DB together with its dialect and provides Grizzle helpers.
 type DB struct {
 	db *sql.DB
 	d  dialect.Dialect
@@ -205,7 +205,7 @@ func ScanOneOpt[T any](rows *sql.Rows, err error) (*T, error) {
 // Transactions
 // -------------------------------------------------------------------
 
-// Tx wraps a *sql.Tx with G-rizzle helpers.
+// Tx wraps a *sql.Tx with Grizzle helpers.
 type Tx struct {
 	tx *sql.Tx
 	d  dialect.Dialect

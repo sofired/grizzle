@@ -87,7 +87,7 @@ func (b *UpdateBuilder) Build(d dialect.Dialect) (string, []any) {
 	var sb strings.Builder
 
 	sb.WriteString("UPDATE ")
-	sb.WriteString(ctx.Quote(b.table.GRizTableName()))
+	sb.WriteString(ctx.Quote(b.table.GrizTableName()))
 	sb.WriteString(" SET ")
 
 	// Collect all SET clauses: explicit sets + struct sets

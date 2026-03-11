@@ -87,8 +87,8 @@ type UsersTable struct {
     DeletedAt expr.TimestampColumn
 }
 
-func (UsersTable) GRizTableName() string  { return "users" }
-func (UsersTable) GRizTableAlias() string { return "users" }
+func (UsersTable) GrizTableName() string  { return "users" }
+func (UsersTable) GrizTableAlias() string { return "users" }
 
 var UsersT = UsersTable{
     ID:        expr.UUIDColumn{ColBase: expr.ColBase{TableAlias: "users", ColName: "id"}},

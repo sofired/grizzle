@@ -32,7 +32,7 @@ kit/              — Migration tooling (stubbed directories, not yet implemente
 ## Key Design Decisions
 1. **Immutable query builders** — every method returns a copy, safe to share/extend
 2. **ColBase embedding** — all column types embed ColBase for common IsNull/IsNotNull/Asc/Desc
-3. **TableSource interface** — GRizTableName() + GRizTableAlias() — implemented by generated table types
+3. **TableSource interface** — GrizTableName() + GrizTableAlias() — implemented by generated table types
 4. **Nil-safe And/Or** — nil expressions silently dropped, key for dynamic WHERE
 5. **BuildContext** — carries dialect + accumulates args, threaded through all ToSQL calls
 6. **structToColVals reflection** — Insert/Update accept db-tagged structs; nil pointers = omit

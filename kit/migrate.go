@@ -13,7 +13,7 @@ import (
 	pg "github.com/sofired/grizzle/schema/pg"
 )
 
-// MigrationsTable is the name of the history table G-rizzle creates to track
+// MigrationsTable is the name of the history table Grizzle creates to track
 // applied migrations.
 const MigrationsTable = "_grizzle_migrations"
 
