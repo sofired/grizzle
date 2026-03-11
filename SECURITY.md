@@ -2,7 +2,7 @@
 
 ## Supported Versions
 
-Only the latest release of G-rizzle receives security fixes.
+Only the latest release of Grizzle receives security fixes.
 
 | Version | Supported |
 | ------- | --------- |
