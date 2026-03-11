@@ -224,7 +224,7 @@ func columnDefSQLMySQL(col pg.ColumnDef) string {
 	}
 	if col.References != nil {
 		ref := col.References
-		sb.WriteString(fmt.Sprintf(" REFERENCES %s (%s)", qiMySQL(ref.Table), qiMySQL(ref.Column)))
+		fmt.Fprintf(&sb, " REFERENCES %s (%s)", qiMySQL(ref.Table), qiMySQL(ref.Column))
 		if ref.OnDelete != "" && ref.OnDelete != pg.FKActionNoAction {
 			sb.WriteString(" ON DELETE " + string(ref.OnDelete))
 		}

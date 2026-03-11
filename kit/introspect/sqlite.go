@@ -74,7 +74,7 @@ func sqliteTables(ctx context.Context, db *sql.DB) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("query tables: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var names []string
 	for rows.Next() {
@@ -94,7 +94,7 @@ func sqliteColumns(ctx context.Context, db *sql.DB, table string) ([]pg.ColumnDe
 	if err != nil {
 		return nil, fmt.Errorf("pragma table_info: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var cols []pg.ColumnDef
 	for rows.Next() {
@@ -138,7 +138,7 @@ func sqliteIndexes(ctx context.Context, db *sql.DB, table string) ([]pg.Constrai
 	if err != nil {
 		return nil, fmt.Errorf("pragma index_list: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	type idxMeta struct {
 		name    string
@@ -199,7 +199,7 @@ func sqliteIndexCols(ctx context.Context, db *sql.DB, idxName string) ([]string,
 	if err != nil {
 		return nil, fmt.Errorf("pragma index_info(%q): %w", idxName, err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var cols []string
 	for rows.Next() {
@@ -239,7 +239,7 @@ func sqliteForeignKeys(ctx context.Context, db *sql.DB, table string) ([]pg.Cons
 	if err != nil {
 		return nil, fmt.Errorf("pragma foreign_key_list: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	type fkRow struct {
 		id       int

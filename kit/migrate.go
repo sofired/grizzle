@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	pg "github.com/sofired/grizzle/schema/pg"
 	"github.com/sofired/grizzle/kit/introspect"
+	pg "github.com/sofired/grizzle/schema/pg"
 )
 
 // MigrationsTable is the name of the history table G-rizzle creates to track
@@ -28,7 +28,7 @@ type MigrationRecord struct {
 
 // MigrateResult contains the outcome of a Migrate call.
 type MigrateResult struct {
-	AlreadyCurrent bool   // true when no changes were needed
+	AlreadyCurrent bool // true when no changes were needed
 	Changes        []Change
 	SQL            []string
 	Checksum       string

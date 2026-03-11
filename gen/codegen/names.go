@@ -47,7 +47,7 @@ func snakeToPascal(s string) string {
 }
 
 // snakeToCamel converts "display_name" → "displayName".
-func snakeToCamel(s string) string {
+func snakeToCamel(s string) string { //nolint:unused
 	p := snakeToPascal(s)
 	if p == "" {
 		return p
@@ -109,4 +109,3 @@ func updateModelName(tableName string) string {
 func genFileName(tableName string) string {
 	return tableName + "_gen.go"
 }
-

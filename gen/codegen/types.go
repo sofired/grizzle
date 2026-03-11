@@ -8,17 +8,17 @@ import (
 
 // ColumnInfo is the processed, codegen-ready description of a single column.
 type ColumnInfo struct {
-	ColName    string // SQL column name, e.g. "display_name"
-	FieldName  string // Go struct field name, e.g. "DisplayName"
-	ColType    string // expr column type, e.g. "expr.StringColumn"
-	GoType     string // Go value type, e.g. "string", "*string", "uuid.UUID"
-	GoTypePtr  string // Pointer form of GoType, e.g. "*string", "*uuid.UUID"
-	IsNullable bool   // True if the column is nullable (no NOT NULL)
-	HasDefault bool   // True if the column has a DB default
-	IsPK       bool   // True if PRIMARY KEY
-	IsOmitEmpty bool  // True if insert model field should use omitempty
+	ColName      string // SQL column name, e.g. "display_name"
+	FieldName    string // Go struct field name, e.g. "DisplayName"
+	ColType      string // expr column type, e.g. "expr.StringColumn"
+	GoType       string // Go value type, e.g. "string", "*string", "uuid.UUID"
+	GoTypePtr    string // Pointer form of GoType, e.g. "*string", "*uuid.UUID"
+	IsNullable   bool   // True if the column is nullable (no NOT NULL)
+	HasDefault   bool   // True if the column has a DB default
+	IsPK         bool   // True if PRIMARY KEY
+	IsOmitEmpty  bool   // True if insert model field should use omitempty
 	JSONBGeneric string // Non-empty if this is a JSONBColumn[T]; holds T e.g. "map[string]any"
-	NeedsImport string  // Non-empty if a special import is needed (e.g. "github.com/google/uuid")
+	NeedsImport  string // Non-empty if a special import is needed (e.g. "github.com/google/uuid")
 }
 
 // ResolveColumn converts a ParsedColumn into a ColumnInfo by interpreting

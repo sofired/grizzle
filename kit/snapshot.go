@@ -31,10 +31,10 @@ type Snapshot struct {
 
 // TableSnap is the snapshot of a single table.
 type TableSnap struct {
-	Name        string           `json:"name"`
-	Schema      string           `json:"schema,omitempty"`
-	Columns     []pg.ColumnDef   `json:"columns"`
-	Constraints []pg.Constraint  `json:"constraints,omitempty"`
+	Name        string          `json:"name"`
+	Schema      string          `json:"schema,omitempty"`
+	Columns     []pg.ColumnDef  `json:"columns"`
+	Constraints []pg.Constraint `json:"constraints,omitempty"`
 }
 
 // QualifiedName returns the schema-qualified name used as the map key.

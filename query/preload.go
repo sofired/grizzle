@@ -147,4 +147,3 @@ func First[T any](items []T) *T {
 	}
 	return &items[0]
 }
-

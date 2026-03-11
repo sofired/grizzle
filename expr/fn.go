@@ -235,16 +235,16 @@ func (e CastExpr) ColumnName() string {
 	}
 	return "cast"
 }
-func (e CastExpr) TableName() string                { return "" }
-func (e CastExpr) As(alias string) CastExpr         { e.alias = alias; return e }
-func (e CastExpr) Asc() OrderExpr                   { return OrderExpr{ref: e, dir: "ASC"} }
-func (e CastExpr) Desc() OrderExpr                  { return OrderExpr{ref: e, dir: "DESC"} }
-func (e CastExpr) EQ(val any) Expression            { return binaryExpr{ref: e, op: "=", val: val} }
-func (e CastExpr) NEQ(val any) Expression           { return binaryExpr{ref: e, op: "<>", val: val} }
-func (e CastExpr) GT(val any) Expression            { return binaryExpr{ref: e, op: ">", val: val} }
-func (e CastExpr) GTE(val any) Expression           { return binaryExpr{ref: e, op: ">=", val: val} }
-func (e CastExpr) LT(val any) Expression            { return binaryExpr{ref: e, op: "<", val: val} }
-func (e CastExpr) LTE(val any) Expression           { return binaryExpr{ref: e, op: "<=", val: val} }
+func (e CastExpr) TableName() string        { return "" }
+func (e CastExpr) As(alias string) CastExpr { e.alias = alias; return e }
+func (e CastExpr) Asc() OrderExpr           { return OrderExpr{ref: e, dir: "ASC"} }
+func (e CastExpr) Desc() OrderExpr          { return OrderExpr{ref: e, dir: "DESC"} }
+func (e CastExpr) EQ(val any) Expression    { return binaryExpr{ref: e, op: "=", val: val} }
+func (e CastExpr) NEQ(val any) Expression   { return binaryExpr{ref: e, op: "<>", val: val} }
+func (e CastExpr) GT(val any) Expression    { return binaryExpr{ref: e, op: ">", val: val} }
+func (e CastExpr) GTE(val any) Expression   { return binaryExpr{ref: e, op: ">=", val: val} }
+func (e CastExpr) LT(val any) Expression    { return binaryExpr{ref: e, op: "<", val: val} }
+func (e CastExpr) LTE(val any) Expression   { return binaryExpr{ref: e, op: "<=", val: val} }
 
 // -------------------------------------------------------------------
 // COALESCE / NULLIF

@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	pg "github.com/sofired/grizzle/schema/pg"
 	"github.com/sofired/grizzle/kit/introspect"
+	pg "github.com/sofired/grizzle/schema/pg"
 )
 
 // ---------------------------------------------------------------------------
@@ -170,7 +170,7 @@ func loadHistoryMySQL(ctx context.Context, db *sql.DB) ([]MigrationRecord, error
 	if err != nil {
 		return nil, fmt.Errorf("query history: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var records []MigrationRecord
 	for rows.Next() {

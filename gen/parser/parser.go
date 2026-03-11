@@ -18,10 +18,10 @@ type ParsedColumn struct {
 
 // ParsedTable holds extracted information from a pg.Table(...) declaration.
 type ParsedTable struct {
-	VarName     string         // Go variable name, e.g. "Users"
-	TableName   string         // SQL table name, e.g. "users"
-	SchemaName  string         // SQL schema if pg.SchemaTable used
-	Columns     []ParsedColumn
+	VarName    string // Go variable name, e.g. "Users"
+	TableName  string // SQL table name, e.g. "users"
+	SchemaName string // SQL schema if pg.SchemaTable used
+	Columns    []ParsedColumn
 	// RawConstraintsNode is kept for future Kit/migration work but not used in codegen.
 	HasConstraints bool
 }

@@ -86,7 +86,7 @@ func mySQLTables(ctx context.Context, db *sql.DB, dbName string) ([]string, erro
 	if err != nil {
 		return nil, fmt.Errorf("query tables: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var tables []string
 	for rows.Next() {
@@ -111,14 +111,14 @@ func mySQLColumns(ctx context.Context, db *sql.DB, dbName string, snap LiveSnaps
 	if err != nil {
 		return fmt.Errorf("query columns: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
 		var (
 			tableName, colName, dataType, colType string
-			isNullable                             string
-			colDefault                             sql.NullString
-			colKey, extra                          string
+			isNullable                            string
+			colDefault                            sql.NullString
+			colKey, extra                         string
 		)
 		if err := rows.Scan(&tableName, &colName, &dataType, &colType,
 			&isNullable, &colDefault, &colKey, &extra); err != nil {
@@ -163,7 +163,7 @@ func mySQLIndexes(ctx context.Context, db *sql.DB, dbName string, snap LiveSnaps
 	if err != nil {
 		return fmt.Errorf("query indexes: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	type idxKey struct{ table, name string }
 	type idxInfo struct {
@@ -228,7 +228,7 @@ func mySQLForeignKeys(ctx context.Context, db *sql.DB, dbName string, snap LiveS
 	if err != nil {
 		return fmt.Errorf("query foreign keys: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	type fkKey struct{ name, table string }
 	type fkInfo struct {
@@ -314,4 +314,3 @@ func normalizeMySQLType(dataType, colType string) string {
 		return strings.ToLower(dataType)
 	}
 }
-

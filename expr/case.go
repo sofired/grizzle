@@ -183,9 +183,9 @@ func (c *SimpleCaseExpr) ColumnName() string {
 	}
 	return "case"
 }
-func (c *SimpleCaseExpr) TableName() string          { return "" }
-func (c *SimpleCaseExpr) Asc() OrderExpr             { return OrderExpr{ref: c, dir: "ASC"} }
-func (c *SimpleCaseExpr) Desc() OrderExpr            { return OrderExpr{ref: c, dir: "DESC"} }
+func (c *SimpleCaseExpr) TableName() string { return "" }
+func (c *SimpleCaseExpr) Asc() OrderExpr    { return OrderExpr{ref: c, dir: "ASC"} }
+func (c *SimpleCaseExpr) Desc() OrderExpr   { return OrderExpr{ref: c, dir: "DESC"} }
 
 // -------------------------------------------------------------------
 // Lit — wrap a Go literal as an Expression (for use in THEN / ELSE)

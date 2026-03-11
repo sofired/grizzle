@@ -21,10 +21,10 @@ type SelectBuilder struct {
 	orderBy   []expr.OrderExpr
 	groupBy   []expr.SelectableColumn
 	having    expr.Expression
-	limit     int    // 0 = no limit
-	offset    int    // 0 = no offset
-	forUpdate bool   // append FOR UPDATE
-	forShare  bool   // append FOR SHARE
+	limit     int  // 0 = no limit
+	offset    int  // 0 = no offset
+	forUpdate bool // append FOR UPDATE
+	forShare  bool // append FOR SHARE
 }
 
 // cteClause holds a single WITH name AS (...) entry.
@@ -355,12 +355,12 @@ func (b *SelectBuilder) buildWith(ctx *expr.BuildContext) string {
 
 	// LIMIT
 	if b.limit > 0 {
-		sb.WriteString(fmt.Sprintf(" LIMIT %d", b.limit))
+		fmt.Fprintf(&sb, " LIMIT %d", b.limit)
 	}
 
 	// OFFSET
 	if b.offset > 0 {
-		sb.WriteString(fmt.Sprintf(" OFFSET %d", b.offset))
+		fmt.Fprintf(&sb, " OFFSET %d", b.offset)
 	}
 
 	// Locking clauses — dialect-aware

@@ -230,7 +230,7 @@ func (b *InsertBuilder) Build(d dialect.Dialect) (string, []any) {
 			buildOnConflict(&sb, ctx, b.upsert)
 		case dialect.UpsertDuplicateKey:
 			buildOnDuplicateKey(&sb, ctx, b.upsert)
-		// UpsertNone: silently drop the clause
+			// UpsertNone: silently drop the clause
 		}
 	}
 
@@ -253,7 +253,8 @@ func (b *InsertBuilder) Build(d dialect.Dialect) (string, []any) {
 // -------------------------------------------------------------------
 
 // buildOnConflict emits PostgreSQL / SQLite style:
-//   ON CONFLICT (cols) DO NOTHING | DO UPDATE SET …
+//
+//	ON CONFLICT (cols) DO NOTHING | DO UPDATE SET …
 func buildOnConflict(sb *strings.Builder, ctx *expr.BuildContext, u *upsertClause) {
 	sb.WriteString(" ON CONFLICT")
 
@@ -299,7 +300,9 @@ func buildOnConflict(sb *strings.Builder, ctx *expr.BuildContext, u *upsertClaus
 }
 
 // buildOnDuplicateKey emits MySQL style:
-//   ON DUPLICATE KEY UPDATE col = VALUES(col), col = val
+//
+//	ON DUPLICATE KEY UPDATE col = VALUES(col), col = val
+//
 // Note: MySQL ignores the conflict-target columns — the conflict is determined
 // by the table's PRIMARY KEY and UNIQUE indexes automatically.
 func buildOnDuplicateKey(sb *strings.Builder, ctx *expr.BuildContext, u *upsertClause) {

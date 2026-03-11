@@ -50,14 +50,18 @@ func (db *DB) Dialect() dialect.Dialect { return dialect.Postgres }
 
 // Query executes a SELECT builder and returns the raw pgx.Rows.
 // Use ScanAll or ScanOne to collect results into typed structs.
-func (db *DB) Query(ctx context.Context, b interface{ Build(dialect.Dialect) (string, []any) }) (pgx.Rows, error) {
+func (db *DB) Query(ctx context.Context, b interface {
+	Build(dialect.Dialect) (string, []any)
+}) (pgx.Rows, error) {
 	sql, args := b.Build(dialect.Postgres)
 	return db.pool.Query(ctx, sql, args...)
 }
 
 // Exec executes an INSERT, UPDATE, or DELETE builder and returns the
 // number of rows affected.
-func (db *DB) Exec(ctx context.Context, b interface{ Build(dialect.Dialect) (string, []any) }) (int64, error) {
+func (db *DB) Exec(ctx context.Context, b interface {
+	Build(dialect.Dialect) (string, []any)
+}) (int64, error) {
 	sql, args := b.Build(dialect.Postgres)
 	tag, err := db.pool.Exec(ctx, sql, args...)
 	if err != nil {
@@ -170,13 +174,17 @@ func (db *DB) Transaction(ctx context.Context, fn func(tx *Tx) error) error {
 }
 
 // Query executes a SELECT builder within the transaction.
-func (tx *Tx) Query(ctx context.Context, b interface{ Build(dialect.Dialect) (string, []any) }) (pgx.Rows, error) {
+func (tx *Tx) Query(ctx context.Context, b interface {
+	Build(dialect.Dialect) (string, []any)
+}) (pgx.Rows, error) {
 	sql, args := b.Build(dialect.Postgres)
 	return tx.tx.Query(ctx, sql, args...)
 }
 
 // Exec executes an INSERT/UPDATE/DELETE builder within the transaction.
-func (tx *Tx) Exec(ctx context.Context, b interface{ Build(dialect.Dialect) (string, []any) }) (int64, error) {
+func (tx *Tx) Exec(ctx context.Context, b interface {
+	Build(dialect.Dialect) (string, []any)
+}) (int64, error) {
 	sql, args := b.Build(dialect.Postgres)
 	tag, err := tx.tx.Exec(ctx, sql, args...)
 	if err != nil {

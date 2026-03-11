@@ -10,21 +10,21 @@ import "strings"
 type ConstraintKind string
 
 const (
-	KindIndex         ConstraintKind = "index"
-	KindUniqueIndex   ConstraintKind = "unique_index"
-	KindCheck         ConstraintKind = "check"
-	KindForeignKey    ConstraintKind = "foreign_key"
-	KindPrimaryKey    ConstraintKind = "primary_key"
-	KindUnique        ConstraintKind = "unique"
+	KindIndex       ConstraintKind = "index"
+	KindUniqueIndex ConstraintKind = "unique_index"
+	KindCheck       ConstraintKind = "check"
+	KindForeignKey  ConstraintKind = "foreign_key"
+	KindPrimaryKey  ConstraintKind = "primary_key"
+	KindUnique      ConstraintKind = "unique"
 )
 
 // Constraint describes a table-level constraint or index.
 type Constraint struct {
-	Kind       ConstraintKind
-	Name       string
-	Columns    []string  // column names this constraint applies to
-	WhereExpr  string    // partial index WHERE clause (raw SQL)
-	CheckExpr  string    // CHECK constraint expression (raw SQL)
+	Kind      ConstraintKind
+	Name      string
+	Columns   []string // column names this constraint applies to
+	WhereExpr string   // partial index WHERE clause (raw SQL)
+	CheckExpr string   // CHECK constraint expression (raw SQL)
 	// Foreign key fields
 	FKTable    string
 	FKColumns  []string
@@ -97,7 +97,7 @@ func (b *IndexBuilder) Build() Constraint { return b.c }
 // -------------------------------------------------------------------
 
 // CheckBuilder builds a CHECK constraint.
-type CheckBuilder struct{ c Constraint }
+type CheckBuilder struct{ c Constraint } //nolint:unused
 
 // Check creates a CHECK constraint with the given name and raw SQL expression.
 func Check(name, expr string) Constraint {

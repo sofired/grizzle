@@ -57,10 +57,10 @@ var Postgres Dialect = postgresDialect{}
 
 type postgresDialect struct{}
 
-func (postgresDialect) Name() string                 { return "postgres" }
-func (postgresDialect) SupportsReturning() bool      { return true }
-func (postgresDialect) UpsertStyle() UpsertStyle     { return UpsertOnConflict }
-func (postgresDialect) InsertIgnoreClause() string   { return "" } // use ON CONFLICT … DO NOTHING
+func (postgresDialect) Name() string               { return "postgres" }
+func (postgresDialect) SupportsReturning() bool    { return true }
+func (postgresDialect) UpsertStyle() UpsertStyle   { return UpsertOnConflict }
+func (postgresDialect) InsertIgnoreClause() string { return "" } // use ON CONFLICT … DO NOTHING
 
 func (postgresDialect) Placeholder(n int) string {
 	return fmt.Sprintf("$%d", n)
@@ -80,10 +80,10 @@ var MySQL Dialect = mysqlDialect{}
 
 type mysqlDialect struct{}
 
-func (mysqlDialect) Name() string                { return "mysql" }
-func (mysqlDialect) SupportsReturning() bool     { return false }
-func (mysqlDialect) UpsertStyle() UpsertStyle    { return UpsertDuplicateKey }
-func (mysqlDialect) InsertIgnoreClause() string  { return "INSERT IGNORE" }
+func (mysqlDialect) Name() string               { return "mysql" }
+func (mysqlDialect) SupportsReturning() bool    { return false }
+func (mysqlDialect) UpsertStyle() UpsertStyle   { return UpsertDuplicateKey }
+func (mysqlDialect) InsertIgnoreClause() string { return "INSERT IGNORE" }
 
 func (mysqlDialect) Placeholder(_ int) string { return "?" }
 
@@ -100,10 +100,10 @@ var SQLite Dialect = sqliteDialect{}
 
 type sqliteDialect struct{}
 
-func (sqliteDialect) Name() string                { return "sqlite" }
-func (sqliteDialect) SupportsReturning() bool     { return true } // SQLite 3.35+
-func (sqliteDialect) UpsertStyle() UpsertStyle    { return UpsertOnConflict }
-func (sqliteDialect) InsertIgnoreClause() string  { return "INSERT OR IGNORE" }
+func (sqliteDialect) Name() string               { return "sqlite" }
+func (sqliteDialect) SupportsReturning() bool    { return true } // SQLite 3.35+
+func (sqliteDialect) UpsertStyle() UpsertStyle   { return UpsertOnConflict }
+func (sqliteDialect) InsertIgnoreClause() string { return "INSERT OR IGNORE" }
 
 func (sqliteDialect) Placeholder(_ int) string { return "?" }
 

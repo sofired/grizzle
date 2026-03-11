@@ -3,17 +3,17 @@
 // soft-delete, partial indexes, composite FKs, JSONB columns, UUID PKs.
 //
 // This package plays a dual role:
-//   1. It's used by tests to verify SQL generation without a live database.
-//   2. It serves as the canonical example of the G-rizzle schema DSL.
+//  1. It's used by tests to verify SQL generation without a live database.
+//  2. It serves as the canonical example of the G-rizzle schema DSL.
 package testschema
 
 import (
 	"time"
 
 	"github.com/google/uuid"
-	pg "github.com/sofired/grizzle/schema/pg"
 	"github.com/sofired/grizzle/expr"
 	"github.com/sofired/grizzle/query"
+	pg "github.com/sofired/grizzle/schema/pg"
 )
 
 // -------------------------------------------------------------------
@@ -21,13 +21,13 @@ import (
 // -------------------------------------------------------------------
 
 var Realms = pg.Table("realms",
-	pg.C("id",           pg.UUID().PrimaryKey().DefaultRandom()),
-	pg.C("name",         pg.Varchar(255).NotNull()),
+	pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+	pg.C("name", pg.Varchar(255).NotNull()),
 	pg.C("display_name", pg.Varchar(255)),
-	pg.C("enabled",      pg.Boolean().NotNull().Default(true)),
-	pg.C("settings",     pg.JSONB().DefaultEmpty()),
-	pg.C("created_at",   pg.Timestamp().WithTimezone().NotNull().DefaultNow()),
-	pg.C("updated_at",   pg.Timestamp().WithTimezone().NotNull().DefaultNow()),
+	pg.C("enabled", pg.Boolean().NotNull().Default(true)),
+	pg.C("settings", pg.JSONB().DefaultEmpty()),
+	pg.C("created_at", pg.Timestamp().WithTimezone().NotNull().DefaultNow()),
+	pg.C("updated_at", pg.Timestamp().WithTimezone().NotNull().DefaultNow()),
 ).WithConstraints(func(t pg.TableRef) []pg.Constraint {
 	return []pg.Constraint{
 		pg.UniqueIndex("realms_name_idx").On(t.Col("name")).Build(),
@@ -36,17 +36,17 @@ var Realms = pg.Table("realms",
 })
 
 var Users = pg.Table("users",
-	pg.C("id",             pg.UUID().PrimaryKey().DefaultRandom()),
-	pg.C("realm_id",       pg.UUID().NotNull().References("realms", "id", pg.OnDelete(pg.FKActionRestrict))),
-	pg.C("username",       pg.Varchar(255).NotNull()),
-	pg.C("email",          pg.Varchar(255)),
+	pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+	pg.C("realm_id", pg.UUID().NotNull().References("realms", "id", pg.OnDelete(pg.FKActionRestrict))),
+	pg.C("username", pg.Varchar(255).NotNull()),
+	pg.C("email", pg.Varchar(255)),
 	pg.C("email_verified", pg.Boolean().NotNull().Default(false)),
-	pg.C("enabled",        pg.Boolean().NotNull().Default(true)),
-	pg.C("attributes",     pg.JSONB().DefaultEmpty()),
-	pg.C("created_at",     pg.Timestamp().WithTimezone().NotNull().DefaultNow()),
-	pg.C("updated_at",     pg.Timestamp().WithTimezone().NotNull().DefaultNow()),
-	pg.C("deleted_at",     pg.Timestamp().WithTimezone()),
-	pg.C("purged_at",      pg.Timestamp().WithTimezone()),
+	pg.C("enabled", pg.Boolean().NotNull().Default(true)),
+	pg.C("attributes", pg.JSONB().DefaultEmpty()),
+	pg.C("created_at", pg.Timestamp().WithTimezone().NotNull().DefaultNow()),
+	pg.C("updated_at", pg.Timestamp().WithTimezone().NotNull().DefaultNow()),
+	pg.C("deleted_at", pg.Timestamp().WithTimezone()),
+	pg.C("purged_at", pg.Timestamp().WithTimezone()),
 ).WithConstraints(func(t pg.TableRef) []pg.Constraint {
 	return []pg.Constraint{
 		pg.UniqueIndex("users_realm_username_idx").
@@ -142,8 +142,8 @@ type RealmSelect struct {
 // RealmInsert is the insert model. Optional fields (those with DB defaults
 // or that are nullable) use pointer types so the caller can omit them.
 type RealmInsert struct {
-	ID          *uuid.UUID     `db:"id,omitempty"`    // optional — default gen_random_uuid()
-	Name        string         `db:"name"`            // required
+	ID          *uuid.UUID     `db:"id,omitempty"` // optional — default gen_random_uuid()
+	Name        string         `db:"name"`         // required
 	DisplayName *string        `db:"display_name,omitempty"`
 	Enabled     *bool          `db:"enabled,omitempty"` // optional — default true
 	Settings    map[string]any `db:"settings,omitempty"`

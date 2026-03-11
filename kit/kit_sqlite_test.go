@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	_ "github.com/mattn/go-sqlite3"
-	pg "github.com/sofired/grizzle/schema/pg"
 	"github.com/sofired/grizzle/kit"
+	pg "github.com/sofired/grizzle/schema/pg"
 )
 
 // ---------------------------------------------------------------------------
@@ -17,14 +17,14 @@ import (
 
 func TestSQLiteCreateSQL_TypeTranslations(t *testing.T) {
 	tbl := pg.Table("things",
-		pg.C("id",         pg.UUID().PrimaryKey().DefaultRandom()),
-		pg.C("name",       pg.Varchar(128).NotNull()),
-		pg.C("bio",        pg.Text()),
-		pg.C("enabled",    pg.Boolean().NotNull().Default(true)),
-		pg.C("score",      pg.Numeric(10, 2)),
-		pg.C("meta",       pg.JSONB()),
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("name", pg.Varchar(128).NotNull()),
+		pg.C("bio", pg.Text()),
+		pg.C("enabled", pg.Boolean().NotNull().Default(true)),
+		pg.C("score", pg.Numeric(10, 2)),
+		pg.C("meta", pg.JSONB()),
 		pg.C("created_at", pg.Timestamp().WithTimezone().NotNull().DefaultNow()),
-		pg.C("seq",        pg.Serial().PrimaryKey()),
+		pg.C("seq", pg.Serial().PrimaryKey()),
 	).Build()
 
 	ddl := kit.GenerateCreateSQLSQLite(tbl)
@@ -47,9 +47,9 @@ func TestSQLiteCreateSQL_TypeTranslations(t *testing.T) {
 
 func TestSQLiteCreateSQL_Indexes(t *testing.T) {
 	tbl := pg.Table("users",
-		pg.C("id",       pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
 		pg.C("realm_id", pg.UUID().NotNull()),
-		pg.C("email",    pg.Varchar(255)),
+		pg.C("email", pg.Varchar(255)),
 		pg.C("deleted_at", pg.Timestamp().WithTimezone()),
 	).WithConstraints(func(t pg.TableRef) []pg.Constraint {
 		return []pg.Constraint{
@@ -131,11 +131,11 @@ func TestSQLite_MigrateAndStatus(t *testing.T) {
 
 	schema := []*pg.TableDef{
 		pg.Table("realms",
-			pg.C("id",   pg.UUID().PrimaryKey().DefaultRandom()),
+			pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
 			pg.C("name", pg.Varchar(255).NotNull()),
 		).Build(),
 		pg.Table("users",
-			pg.C("id",       pg.UUID().PrimaryKey().DefaultRandom()),
+			pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
 			pg.C("realm_id", pg.UUID().NotNull()),
 			pg.C("username", pg.Varchar(255).NotNull()),
 		).Build(),
@@ -181,7 +181,7 @@ func TestSQLite_DryRun(t *testing.T) {
 
 	schema := []*pg.TableDef{
 		pg.Table("things",
-			pg.C("id",   pg.UUID().PrimaryKey().DefaultRandom()),
+			pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
 			pg.C("name", pg.Varchar(255).NotNull()),
 		).Build(),
 	}
@@ -214,7 +214,7 @@ func TestSQLite_AddColumn_Migration(t *testing.T) {
 	// Initial schema.
 	v1 := []*pg.TableDef{
 		pg.Table("users",
-			pg.C("id",       pg.UUID().PrimaryKey().DefaultRandom()),
+			pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
 			pg.C("username", pg.Varchar(255).NotNull()),
 		).Build(),
 	}
@@ -225,9 +225,9 @@ func TestSQLite_AddColumn_Migration(t *testing.T) {
 	// Add a column.
 	v2 := []*pg.TableDef{
 		pg.Table("users",
-			pg.C("id",       pg.UUID().PrimaryKey().DefaultRandom()),
+			pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
 			pg.C("username", pg.Varchar(255).NotNull()),
-			pg.C("email",    pg.Varchar(255)),
+			pg.C("email", pg.Varchar(255)),
 		).Build(),
 	}
 	result, err := kit.MigrateSQLite(ctx, db, v2...)

@@ -12,10 +12,10 @@ import (
 // typed query helpers.
 func ExampleTable() {
 	posts := pg.Table("posts",
-		pg.C("id",        pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
 		pg.C("author_id", pg.UUID().NotNull().References("users", "id", pg.OnDelete(pg.FKActionCascade))),
-		pg.C("title",     pg.Varchar(255).NotNull()),
-		pg.C("body",      pg.Text().NotNull()),
+		pg.C("title", pg.Varchar(255).NotNull()),
+		pg.C("body", pg.Text().NotNull()),
 		pg.C("published", pg.Boolean().NotNull().Default(false)),
 	).WithConstraints(func(t pg.TableRef) []pg.Constraint {
 		return []pg.Constraint{

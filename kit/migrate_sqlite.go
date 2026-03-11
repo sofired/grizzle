@@ -169,7 +169,7 @@ func loadHistorySQLite(ctx context.Context, db *sql.DB) ([]MigrationRecord, erro
 	if err != nil {
 		return nil, fmt.Errorf("query history: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var records []MigrationRecord
 	for rows.Next() {

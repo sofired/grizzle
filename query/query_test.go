@@ -15,7 +15,9 @@ import (
 )
 
 // assertSQL is a small helper that builds a query and compares the output.
-func assertSQL(t *testing.T, name string, b interface{ Build(dialect.Dialect) (string, []any) }, wantSQL string, wantArgs []any) {
+func assertSQL(t *testing.T, name string, b interface {
+	Build(dialect.Dialect) (string, []any)
+}, wantSQL string, wantArgs []any) {
 	t.Helper()
 	t.Run(name, func(t *testing.T) {
 		gotSQL, gotArgs := b.Build(dialect.Postgres)
@@ -1717,9 +1719,9 @@ func TestSetOp_SharedParameters(t *testing.T) {
 // -------------------------------------------------------------------
 
 var (
-	scoreCol   = expr.IntColumn{ColBase: expr.ColBase{TableAlias: "products", ColName: "score"}}
-	quantCol   = expr.IntColumn{ColBase: expr.ColBase{TableAlias: "orders", ColName: "quantity"}}
-	priceCol   = expr.FloatColumn{ColBase: expr.ColBase{TableAlias: "orders", ColName: "price"}}
+	scoreCol    = expr.IntColumn{ColBase: expr.ColBase{TableAlias: "products", ColName: "score"}}
+	quantCol    = expr.IntColumn{ColBase: expr.ColBase{TableAlias: "orders", ColName: "quantity"}}
+	priceCol    = expr.FloatColumn{ColBase: expr.ColBase{TableAlias: "orders", ColName: "price"}}
 	discountCol = expr.FloatColumn{ColBase: expr.ColBase{TableAlias: "orders", ColName: "discount"}}
 )
 

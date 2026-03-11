@@ -132,9 +132,9 @@ func TestUUID_References(t *testing.T) {
 
 func TestTable_Build(t *testing.T) {
 	tbl := mysql.Table("users",
-		mysql.C("id",         mysql.UUID().PrimaryKey().DefaultRandom()),
-		mysql.C("username",   mysql.Varchar(255).NotNull()),
-		mysql.C("enabled",    mysql.Boolean().NotNull().Default(true)),
+		mysql.C("id", mysql.UUID().PrimaryKey().DefaultRandom()),
+		mysql.C("username", mysql.Varchar(255).NotNull()),
+		mysql.C("enabled", mysql.Boolean().NotNull().Default(true)),
 		mysql.C("created_at", mysql.Timestamp().WithTimezone().NotNull().DefaultNow()),
 	).Build()
 
@@ -159,7 +159,7 @@ func TestTable_Build(t *testing.T) {
 
 func TestTable_WithConstraints(t *testing.T) {
 	tbl := mysql.Table("users",
-		mysql.C("id",       mysql.UUID().PrimaryKey().DefaultRandom()),
+		mysql.C("id", mysql.UUID().PrimaryKey().DefaultRandom()),
 		mysql.C("realm_id", mysql.UUID().NotNull()),
 		mysql.C("username", mysql.Varchar(255).NotNull()),
 	).WithConstraints(func(t mysql.TableRef) []mysql.Constraint {
@@ -204,17 +204,17 @@ func TestSchemaTable(t *testing.T) {
 
 func TestDDL_TypeTranslations(t *testing.T) {
 	tbl := mysql.Table("things",
-		mysql.C("id",         mysql.UUID().PrimaryKey().DefaultRandom()),
-		mysql.C("name",       mysql.Varchar(128).NotNull()),
-		mysql.C("bio",        mysql.Text()),
-		mysql.C("enabled",    mysql.Boolean().NotNull().Default(true)),
-		mysql.C("score",      mysql.Numeric(10, 2)),
-		mysql.C("meta",       mysql.JSON()),
+		mysql.C("id", mysql.UUID().PrimaryKey().DefaultRandom()),
+		mysql.C("name", mysql.Varchar(128).NotNull()),
+		mysql.C("bio", mysql.Text()),
+		mysql.C("enabled", mysql.Boolean().NotNull().Default(true)),
+		mysql.C("score", mysql.Numeric(10, 2)),
+		mysql.C("meta", mysql.JSON()),
 		mysql.C("created_at", mysql.Timestamp().WithTimezone().NotNull().DefaultNow()),
 		mysql.C("updated_at", mysql.Timestamp().NotNull().DefaultNow()),
-		mysql.C("flags",      mysql.TinyInt().NotNull().Default(0)),
-		mysql.C("priority",   mysql.SmallInt()),
-		mysql.C("lat",        mysql.Double()),
+		mysql.C("flags", mysql.TinyInt().NotNull().Default(0)),
+		mysql.C("priority", mysql.SmallInt()),
+		mysql.C("lat", mysql.Double()),
 	).Build()
 
 	ddl := kit.GenerateCreateSQLMySQL(tbl)
@@ -250,9 +250,9 @@ func TestDDL_TypeTranslations(t *testing.T) {
 
 func TestDDL_Indexes(t *testing.T) {
 	tbl := mysql.Table("users",
-		mysql.C("id",       mysql.UUID().PrimaryKey().DefaultRandom()),
+		mysql.C("id", mysql.UUID().PrimaryKey().DefaultRandom()),
 		mysql.C("realm_id", mysql.UUID().NotNull()),
-		mysql.C("email",    mysql.Varchar(255)),
+		mysql.C("email", mysql.Varchar(255)),
 	).WithConstraints(func(t mysql.TableRef) []mysql.Constraint {
 		return []mysql.Constraint{
 			mysql.UniqueIndex("users_realm_email_idx").On(t.Col("realm_id"), t.Col("email")).Build(),
@@ -272,7 +272,7 @@ func TestDDL_Indexes(t *testing.T) {
 
 func TestDDL_ForeignKey(t *testing.T) {
 	tbl := mysql.Table("users",
-		mysql.C("id",       mysql.UUID().PrimaryKey().DefaultRandom()),
+		mysql.C("id", mysql.UUID().PrimaryKey().DefaultRandom()),
 		mysql.C("realm_id", mysql.UUID().NotNull().References("realms", "id",
 			mysql.OnDelete(mysql.FKActionCascade),
 		)),
@@ -290,7 +290,7 @@ func TestDDL_ForeignKey(t *testing.T) {
 
 func TestDDL_CheckConstraint(t *testing.T) {
 	tbl := mysql.Table("products",
-		mysql.C("id",    mysql.UUID().PrimaryKey().DefaultRandom()),
+		mysql.C("id", mysql.UUID().PrimaryKey().DefaultRandom()),
 		mysql.C("price", mysql.Numeric(10, 2).NotNull()),
 	).WithConstraints(func(t mysql.TableRef) []mysql.Constraint {
 		return []mysql.Constraint{

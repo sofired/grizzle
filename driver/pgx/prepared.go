@@ -35,6 +35,7 @@ import (
 //	}
 //
 //	users, err := activeUsers.QueryAll(ctx, db)
+//
 // PreparedSelect holds the pre-built SQL and its bound args.
 // pgx v5 automatically maintains a per-connection prepared statement cache
 // keyed by the statement name — so queries using the same name benefit from

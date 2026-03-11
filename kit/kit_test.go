@@ -6,20 +6,20 @@ import (
 	"strings"
 	"testing"
 
-	pg "github.com/sofired/grizzle/schema/pg"
 	"github.com/sofired/grizzle/kit"
+	pg "github.com/sofired/grizzle/schema/pg"
 )
 
 // --- Test schema fixtures ---
 
 var realmsDef = pg.Table("realms",
-	pg.C("id",           pg.UUID().PrimaryKey().DefaultRandom()),
-	pg.C("name",         pg.Varchar(255).NotNull()),
+	pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+	pg.C("name", pg.Varchar(255).NotNull()),
 	pg.C("display_name", pg.Varchar(255)),
-	pg.C("enabled",      pg.Boolean().NotNull().Default(true)),
-	pg.C("settings",     pg.JSONB().DefaultEmpty()),
-	pg.C("created_at",   pg.Timestamp().WithTimezone().NotNull().DefaultNow()),
-	pg.C("updated_at",   pg.Timestamp().WithTimezone().NotNull().DefaultNow()),
+	pg.C("enabled", pg.Boolean().NotNull().Default(true)),
+	pg.C("settings", pg.JSONB().DefaultEmpty()),
+	pg.C("created_at", pg.Timestamp().WithTimezone().NotNull().DefaultNow()),
+	pg.C("updated_at", pg.Timestamp().WithTimezone().NotNull().DefaultNow()),
 ).WithConstraints(func(t pg.TableRef) []pg.Constraint {
 	return []pg.Constraint{
 		pg.UniqueIndex("realms_name_idx").On(t.Col("name")).Build(),
@@ -28,13 +28,13 @@ var realmsDef = pg.Table("realms",
 })
 
 var usersDef = pg.Table("users",
-	pg.C("id",             pg.UUID().PrimaryKey().DefaultRandom()),
-	pg.C("realm_id",       pg.UUID().NotNull()),
-	pg.C("username",       pg.Varchar(255).NotNull()),
-	pg.C("email",          pg.Varchar(255)),
-	pg.C("enabled",        pg.Boolean().NotNull().Default(true)),
-	pg.C("created_at",     pg.Timestamp().WithTimezone().NotNull().DefaultNow()),
-	pg.C("deleted_at",     pg.Timestamp().WithTimezone()),
+	pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+	pg.C("realm_id", pg.UUID().NotNull()),
+	pg.C("username", pg.Varchar(255).NotNull()),
+	pg.C("email", pg.Varchar(255)),
+	pg.C("enabled", pg.Boolean().NotNull().Default(true)),
+	pg.C("created_at", pg.Timestamp().WithTimezone().NotNull().DefaultNow()),
+	pg.C("deleted_at", pg.Timestamp().WithTimezone()),
 ).WithConstraints(func(t pg.TableRef) []pg.Constraint {
 	return []pg.Constraint{
 		pg.UniqueIndex("users_realm_username_idx").
@@ -120,14 +120,14 @@ func TestDiff_NoChange(t *testing.T) {
 func TestDiff_AddColumn(t *testing.T) {
 	// Old: realms without "description"
 	oldDef := pg.Table("realms",
-		pg.C("id",   pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
 		pg.C("name", pg.Varchar(255).NotNull()),
 	).Build()
 
 	// New: realms with "description" added
 	newDef := pg.Table("realms",
-		pg.C("id",          pg.UUID().PrimaryKey().DefaultRandom()),
-		pg.C("name",        pg.Varchar(255).NotNull()),
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("name", pg.Varchar(255).NotNull()),
 		pg.C("description", pg.Text()),
 	).Build()
 
@@ -143,12 +143,12 @@ func TestDiff_AddColumn(t *testing.T) {
 
 func TestDiff_DropColumn(t *testing.T) {
 	oldDef := pg.Table("realms",
-		pg.C("id",          pg.UUID().PrimaryKey().DefaultRandom()),
-		pg.C("name",        pg.Varchar(255).NotNull()),
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("name", pg.Varchar(255).NotNull()),
 		pg.C("description", pg.Text()),
 	).Build()
 	newDef := pg.Table("realms",
-		pg.C("id",   pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
 		pg.C("name", pg.Varchar(255).NotNull()),
 	).Build()
 
@@ -181,12 +181,12 @@ func TestDiff_AlterColumnType(t *testing.T) {
 
 func TestDiff_AddConstraint(t *testing.T) {
 	oldDef := pg.Table("users",
-		pg.C("id",    pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
 		pg.C("email", pg.Varchar(255)),
 	).Build()
 
 	newDef := pg.Table("users",
-		pg.C("id",    pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
 		pg.C("email", pg.Varchar(255)),
 	).WithConstraints(func(t pg.TableRef) []pg.Constraint {
 		return []pg.Constraint{

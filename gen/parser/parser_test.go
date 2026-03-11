@@ -302,10 +302,10 @@ var T = pg.Table("t", pg.C("id", pg.UUID().PrimaryKey()))`
 		}
 	}
 
-	write("schema.go", src)          // should be parsed
-	write("schema_test.go", src)     // should be skipped
-	write("schema_gen.go", src)      // should be skipped
-	write("other_gen.go", src)       // should be skipped
+	write("schema.go", src)      // should be parsed
+	write("schema_test.go", src) // should be skipped
+	write("schema_gen.go", src)  // should be skipped
+	write("other_gen.go", src)   // should be skipped
 
 	tables, err := parser.ParseDir(dir)
 	if err != nil {

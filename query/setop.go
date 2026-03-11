@@ -150,10 +150,10 @@ func (b *SetOpBuilder) Build(d dialect.Dialect) (string, []any) {
 	// Overall ORDER BY, LIMIT, OFFSET (applied to the combined result set).
 	sb.WriteString(buildOrderBy(ctx, b.orderBy))
 	if b.limit > 0 {
-		sb.WriteString(fmt.Sprintf(" LIMIT %d", b.limit))
+		fmt.Fprintf(&sb, " LIMIT %d", b.limit)
 	}
 	if b.offset > 0 {
-		sb.WriteString(fmt.Sprintf(" OFFSET %d", b.offset))
+		fmt.Fprintf(&sb, " OFFSET %d", b.offset)
 	}
 
 	return sb.String(), ctx.Args()
