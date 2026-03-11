@@ -161,8 +161,7 @@ func queryColumns(ctx context.Context, pool *pgxpool.Pool, schema, table string)
 }
 
 // normalizeSQLType maps information_schema type info to a canonical SQL type string.
-// dataType is the information_schema data_type value, reserved as a fallback for future mappings.
-func normalizeSQLType(udtName, dataType string, charMaxLen, numPrec, numScale *int) string { //nolint:unparam
+func normalizeSQLType(udtName, dataType string, charMaxLen, numPrec, numScale *int) string {
 	switch udtName {
 	case "uuid":
 		return "uuid"

@@ -99,10 +99,6 @@ func (b *UpdateBuilder) Build(d dialect.Dialect) (string, []any) {
 		}
 	}
 
-	if len(allSets) == 0 {
-		return "", nil
-	}
-
 	for i, s := range allSets {
 		if i > 0 {
 			sb.WriteString(", ")
@@ -115,7 +111,7 @@ func (b *UpdateBuilder) Build(d dialect.Dialect) (string, []any) {
 	sb.WriteString(buildWhere(ctx, b.where))
 
 	if b.limit > 0 && d.Name() != "postgres" {
-		fmt.Fprintf(&sb, " LIMIT %d", b.limit)
+		sb.WriteString(fmt.Sprintf(" LIMIT %d", b.limit))
 	}
 
 	if len(b.returning) > 0 && d.SupportsReturning() {

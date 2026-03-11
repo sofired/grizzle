@@ -46,10 +46,10 @@ const (
 type FKAction string
 
 const (
-	FKActionNoAction   FKAction = "NO ACTION"
-	FKActionRestrict   FKAction = "RESTRICT"
-	FKActionCascade    FKAction = "CASCADE"
-	FKActionSetNull    FKAction = "SET NULL"
+	FKActionNoAction FKAction = "NO ACTION"
+	FKActionRestrict FKAction = "RESTRICT"
+	FKActionCascade  FKAction = "CASCADE"
+	FKActionSetNull  FKAction = "SET NULL"
 	FKActionSetDefault FKAction = "SET DEFAULT"
 )
 
@@ -69,13 +69,13 @@ type ColumnDef struct {
 	GoType       GoTypeHint // Go type for generated select model
 	NotNull      bool
 	HasDefault   bool
-	DefaultExpr  string // SQL default expression, e.g. "gen_random_uuid()", "now()", "'true'"
+	DefaultExpr  string     // SQL default expression, e.g. "gen_random_uuid()", "now()", "'true'"
 	PrimaryKey   bool
 	Unique       bool
 	References   *FKRef
-	JsonbGoType  string // For JSONB columns: the Go type hint for $type<T> equivalent
-	GeneratedAs  string // For generated columns: the SQL expression
-	OnUpdateExpr string // Hint for app-layer: set this expression on every UPDATE
+	JsonbGoType  string     // For JSONB columns: the Go type hint for $type<T> equivalent
+	GeneratedAs  string     // For generated columns: the SQL expression
+	OnUpdateExpr string     // Hint for app-layer: set this expression on every UPDATE
 }
 
 // -------------------------------------------------------------------
@@ -91,19 +91,18 @@ func (b *colBuilder) setDefault(expr string) {
 	b.def.HasDefault = true
 	b.def.DefaultExpr = expr
 }
-func (b *colBuilder) setReferences(table, col string, onDelete, onUpdate FKAction) { //nolint:unused
+func (b *colBuilder) setPrimaryKey() {
+	b.def.PrimaryKey = true
+	b.def.NotNull = true   // PK is implicitly NOT NULL
+	b.def.HasDefault = true // PK usually has a default (serial/uuid)
+}
+func (b *colBuilder) setReferences(table, col string, onDelete, onUpdate FKAction) {
 	b.def.References = &FKRef{
 		Table:    table,
 		Column:   col,
 		OnDelete: onDelete,
 		OnUpdate: onUpdate,
 	}
-}
-
-func (b *colBuilder) setPrimaryKey() {
-	b.def.PrimaryKey = true
-	b.def.NotNull = true    // PK is implicitly NOT NULL
-	b.def.HasDefault = true // PK usually has a default (serial/uuid)
 }
 
 // build finalises the column definition, injecting the column name from the map key.
@@ -147,8 +146,8 @@ func UUID() *UUIDBuilder {
 }
 
 func (b *UUIDBuilder) NotNull() *UUIDBuilder    { b.setNotNull(); return b }
-func (b *UUIDBuilder) PrimaryKey() *UUIDBuilder { b.setPrimaryKey(); return b }
-func (b *UUIDBuilder) Unique() *UUIDBuilder     { b.def.Unique = true; return b }
+func (b *UUIDBuilder) PrimaryKey() *UUIDBuilder  { b.setPrimaryKey(); return b }
+func (b *UUIDBuilder) Unique() *UUIDBuilder      { b.def.Unique = true; return b }
 
 // DefaultRandom sets the column default to gen_random_uuid() (PostgreSQL 13+).
 func (b *UUIDBuilder) DefaultRandom() *UUIDBuilder {
@@ -336,7 +335,7 @@ func (b *TimestampBuilder) Build(name string) ColumnDef { return b.build(name) }
 // JSONBBuilder builds a jsonb column definition.
 type JSONBBuilder struct {
 	colBuilder
-	goTypeOverride string //nolint:unused
+	goTypeOverride string
 }
 
 // JSONB starts a jsonb column.

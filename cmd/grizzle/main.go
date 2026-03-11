@@ -21,8 +21,8 @@ import (
 	"strings"
 
 	_ "github.com/go-sql-driver/mysql"
-	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/mattn/go-sqlite3"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/sofired/grizzle/gen/codegen"
 	"github.com/sofired/grizzle/gen/parser"
 	"github.com/sofired/grizzle/kit"
@@ -319,7 +319,7 @@ func runMigrateMySQL(ctx context.Context, dsn string, dryRun bool, tables ...*pg
 	if err != nil {
 		return err
 	}
-	defer func() { _ = db.Close() }()
+	defer db.Close()
 
 	if dryRun {
 		result, err := kit.DryRunMySQL(ctx, db, tables...)
@@ -353,7 +353,7 @@ func runMigrateSQLite(ctx context.Context, dsn string, dryRun bool, tables ...*p
 	if err != nil {
 		return fmt.Errorf("open sqlite3: %w", err)
 	}
-	defer func() { _ = db.Close() }()
+	defer db.Close()
 
 	if dryRun {
 		result, err := kit.DryRunSQLite(ctx, db, tables...)
@@ -409,7 +409,7 @@ func runStatus(args []string) error {
 		if err != nil {
 			return err
 		}
-		defer func() { _ = db.Close() }()
+		defer db.Close()
 		status, err = kit.StatusMySQL(ctx, db, tables...)
 		if err != nil {
 			return err
@@ -419,7 +419,7 @@ func runStatus(args []string) error {
 		if err != nil {
 			return fmt.Errorf("open sqlite3: %w", err)
 		}
-		defer func() { _ = db.Close() }()
+		defer db.Close()
 		status, err = kit.StatusSQLite(ctx, db, tables...)
 		if err != nil {
 			return err

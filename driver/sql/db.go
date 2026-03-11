@@ -54,8 +54,8 @@ var ErrNoRows = sql.ErrNoRows
 
 // DB wraps a *sql.DB together with its dialect and provides G-rizzle helpers.
 type DB struct {
-	db *sql.DB
-	d  dialect.Dialect
+	db  *sql.DB
+	d   dialect.Dialect
 }
 
 // New creates a DB from an existing *sql.DB and the dialect that matches the
@@ -76,18 +76,14 @@ func (w *DB) Dialect() dialect.Dialect { return w.d }
 
 // Query executes a SELECT builder and returns the raw *sql.Rows.
 // Use ScanAll or ScanOne to collect results into typed structs.
-func (w *DB) Query(ctx context.Context, b interface {
-	Build(dialect.Dialect) (string, []any)
-}) (*sql.Rows, error) {
+func (w *DB) Query(ctx context.Context, b interface{ Build(dialect.Dialect) (string, []any) }) (*sql.Rows, error) {
 	q, args := b.Build(w.d)
 	return w.db.QueryContext(ctx, q, args...)
 }
 
 // Exec executes an INSERT, UPDATE, or DELETE builder and returns the number
 // of rows affected.
-func (w *DB) Exec(ctx context.Context, b interface {
-	Build(dialect.Dialect) (string, []any)
-}) (int64, error) {
+func (w *DB) Exec(ctx context.Context, b interface{ Build(dialect.Dialect) (string, []any) }) (int64, error) {
 	q, args := b.Build(w.d)
 	res, err := w.db.ExecContext(ctx, q, args...)
 	if err != nil {
@@ -125,7 +121,7 @@ func ScanAll[T any](rows *sql.Rows, err error) ([]T, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
+	defer rows.Close()
 
 	cols, err := rows.Columns()
 	if err != nil {
@@ -153,7 +149,7 @@ func ScanOne[T any](rows *sql.Rows, err error) (T, error) {
 	if err != nil {
 		return zero, err
 	}
-	defer func() { _ = rows.Close() }()
+	defer rows.Close()
 
 	cols, err := rows.Columns()
 	if err != nil {
@@ -181,7 +177,7 @@ func ScanOneOpt[T any](rows *sql.Rows, err error) (*T, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
+	defer rows.Close()
 
 	cols, err := rows.Columns()
 	if err != nil {
@@ -238,17 +234,13 @@ func (w *DB) Transaction(ctx context.Context, fn func(tx *Tx) error) error {
 func (tx *Tx) Dialect() dialect.Dialect { return tx.d }
 
 // Query executes a SELECT builder within the transaction.
-func (tx *Tx) Query(ctx context.Context, b interface {
-	Build(dialect.Dialect) (string, []any)
-}) (*sql.Rows, error) {
+func (tx *Tx) Query(ctx context.Context, b interface{ Build(dialect.Dialect) (string, []any) }) (*sql.Rows, error) {
 	q, args := b.Build(tx.d)
 	return tx.tx.QueryContext(ctx, q, args...)
 }
 
 // Exec executes an INSERT/UPDATE/DELETE builder within the transaction.
-func (tx *Tx) Exec(ctx context.Context, b interface {
-	Build(dialect.Dialect) (string, []any)
-}) (int64, error) {
+func (tx *Tx) Exec(ctx context.Context, b interface{ Build(dialect.Dialect) (string, []any) }) (int64, error) {
 	q, args := b.Build(tx.d)
 	res, err := tx.tx.ExecContext(ctx, q, args...)
 	if err != nil {

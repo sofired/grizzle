@@ -232,3 +232,4 @@ type {{.UpdateModelName}} struct {
 {{- end}}
 }
 `
+

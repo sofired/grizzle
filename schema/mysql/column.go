@@ -131,23 +131,10 @@ func TinyInt() *TinyIntBuilder {
 	return b
 }
 
-func (b *TinyIntBuilder) NotNull() *TinyIntBuilder { b.def.NotNull = true; return b }
-func (b *TinyIntBuilder) PrimaryKey() *TinyIntBuilder {
-	b.def.PrimaryKey = true
-	b.def.NotNull = true
-	return b
-}
-func (b *TinyIntBuilder) Default(val int) *TinyIntBuilder {
-	b.def.HasDefault = true
-	b.def.DefaultExpr = fmt.Sprintf("%d", val)
-	return b
-}
-func (b *TinyIntBuilder) Build(name string) pg.ColumnDef {
-	if b.def.Name == "" {
-		b.def.Name = name
-	}
-	return b.def
-}
+func (b *TinyIntBuilder) NotNull() *TinyIntBuilder              { b.def.NotNull = true; return b }
+func (b *TinyIntBuilder) PrimaryKey() *TinyIntBuilder           { b.def.PrimaryKey = true; b.def.NotNull = true; return b }
+func (b *TinyIntBuilder) Default(val int) *TinyIntBuilder       { b.def.HasDefault = true; b.def.DefaultExpr = fmt.Sprintf("%d", val); return b }
+func (b *TinyIntBuilder) Build(name string) pg.ColumnDef        { if b.def.Name == "" { b.def.Name = name }; return b.def }
 
 // SmallIntBuilder builds a SMALLINT column definition.
 type SmallIntBuilder struct {
@@ -162,18 +149,9 @@ func SmallInt() *SmallIntBuilder {
 	return b
 }
 
-func (b *SmallIntBuilder) NotNull() *SmallIntBuilder { b.def.NotNull = true; return b }
-func (b *SmallIntBuilder) Default(val int) *SmallIntBuilder {
-	b.def.HasDefault = true
-	b.def.DefaultExpr = fmt.Sprintf("%d", val)
-	return b
-}
-func (b *SmallIntBuilder) Build(name string) pg.ColumnDef {
-	if b.def.Name == "" {
-		b.def.Name = name
-	}
-	return b.def
-}
+func (b *SmallIntBuilder) NotNull() *SmallIntBuilder        { b.def.NotNull = true; return b }
+func (b *SmallIntBuilder) Default(val int) *SmallIntBuilder { b.def.HasDefault = true; b.def.DefaultExpr = fmt.Sprintf("%d", val); return b }
+func (b *SmallIntBuilder) Build(name string) pg.ColumnDef   { if b.def.Name == "" { b.def.Name = name }; return b.def }
 
 // DoubleBuilder builds a DOUBLE column definition.
 type DoubleBuilder struct {
@@ -188,15 +166,10 @@ func Double() *DoubleBuilder {
 	return b
 }
 
-func (b *DoubleBuilder) NotNull() *DoubleBuilder { b.def.NotNull = true; return b }
+func (b *DoubleBuilder) NotNull() *DoubleBuilder        { b.def.NotNull = true; return b }
 func (b *DoubleBuilder) Default(val float64) *DoubleBuilder {
 	b.def.HasDefault = true
 	b.def.DefaultExpr = fmt.Sprintf("%g", val)
 	return b
 }
-func (b *DoubleBuilder) Build(name string) pg.ColumnDef {
-	if b.def.Name == "" {
-		b.def.Name = name
-	}
-	return b.def
-}
+func (b *DoubleBuilder) Build(name string) pg.ColumnDef { if b.def.Name == "" { b.def.Name = name }; return b.def }

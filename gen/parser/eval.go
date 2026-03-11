@@ -135,8 +135,7 @@ func applyBaseType(def *pg.ColumnDef, baseFn string, args []any) error {
 }
 
 // applyMethod applies a single modifier method call to a ColumnDef.
-// The error return is reserved for future cases; unknown modifiers are skipped silently.
-func applyMethod(def *pg.ColumnDef, m MethodCall) error { //nolint:unparam
+func applyMethod(def *pg.ColumnDef, m MethodCall) error {
 	switch m.Name {
 	case "NotNull":
 		def.NotNull = true
