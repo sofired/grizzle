@@ -296,7 +296,8 @@ func dropConstraintSQLSQLite(tableName string, c pg.Constraint) []string {
 // sqliteType maps canonical SQL type strings to SQLite type names.
 // SQLite's type affinity means arbitrary names work, but we translate the
 // common serial types which need "INTEGER" for rowid-alias behaviour.
-func sqliteType(sqlType string, isPK bool) string {
+// isPK is reserved for future PK-specific type handling (e.g. AUTOINCREMENT).
+func sqliteType(sqlType string, isPK bool) string { //nolint:unparam
 	lower := strings.ToLower(sqlType)
 	// serial/bigserial → INTEGER PRIMARY KEY (handled inline in columnDefSQLSQLite)
 	if lower == "serial" || lower == "bigserial" {

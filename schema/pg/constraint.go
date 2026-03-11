@@ -97,7 +97,7 @@ func (b *IndexBuilder) Build() Constraint { return b.c }
 // -------------------------------------------------------------------
 
 // CheckBuilder builds a CHECK constraint.
-type CheckBuilder struct{ c Constraint }
+type CheckBuilder struct{ c Constraint } //nolint:unused
 
 // Check creates a CHECK constraint with the given name and raw SQL expression.
 func Check(name, expr string) Constraint {
