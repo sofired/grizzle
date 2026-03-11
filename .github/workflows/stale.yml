@@ -35,4 +35,4 @@ jobs:
           stale-issue-label: stale
           stale-pr-label: stale
           exempt-issue-labels: "pinned,security,in-progress"
-          exempt-pr-labels: "in-progress"
+          exempt-pr-labels: "in-progress,security"

@@ -23,4 +23,4 @@ Include as much of the following as possible:
 - Proof-of-concept or exploit code (if possible)
 - Potential impact
 
-You can expect an initial response within 5 business days. If the issue is confirmed, we will work on a fix and coordinate a disclosure timeline with you.
+You can expect an initial response within 5 business days. If the issue is confirmed, we aim to publish a fix within 90 days and will coordinate the public disclosure timeline with you.
