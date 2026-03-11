@@ -466,6 +466,16 @@ grizzle status   --dsn "postgres://..." --schema schema.grizzle
 
 ---
 
+## Acknowledgements
+
+G-rizzle is a Go port of [Drizzle ORM](https://orm.drizzle.team), originally
+created by the [Drizzle Team](https://github.com/drizzle-team). The API design,
+schema definition patterns, query builder concepts, and migration toolkit
+architecture in this project are derived from and inspired by their work.
+
+Drizzle ORM is licensed under the [Apache License 2.0](https://github.com/drizzle-team/drizzle-orm/blob/main/LICENSE).
+The Go implementation is original work by the G-rizzle maintainers and contributors.
+
 ## License
 
 MIT
