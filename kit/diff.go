@@ -216,7 +216,12 @@ func constraintsEqual(a, b pg.Constraint) bool {
 		}
 	}
 	// Foreign key fields.
-	if a.FKTable != b.FKTable || a.FKOnDelete != b.FKOnDelete || a.FKOnUpdate != b.FKOnUpdate {
+	// normalizeFKAction converts an empty string (DSL default) to FKActionNoAction, and
+	// treats RESTRICT as equivalent to NO ACTION — both are identical for non-deferred
+	// constraints across all supported databases.
+	if a.FKTable != b.FKTable ||
+		normalizeFKAction(a.FKOnDelete) != normalizeFKAction(b.FKOnDelete) ||
+		normalizeFKAction(a.FKOnUpdate) != normalizeFKAction(b.FKOnUpdate) {
 		return false
 	}
 	if len(a.FKColumns) != len(b.FKColumns) {
@@ -228,4 +233,18 @@ func constraintsEqual(a, b pg.Constraint) bool {
 		}
 	}
 	return true
+}
+
+// normalizeFKAction canonicalises a referential action for comparison purposes.
+// An empty string (the DSL default when no action is specified) is treated as
+// NO ACTION, and RESTRICT is treated as equivalent to NO ACTION because the two
+// are behaviourally identical for non-deferred constraints in every supported
+// database (PostgreSQL, MySQL, SQLite).
+func normalizeFKAction(a pg.FKAction) pg.FKAction {
+	switch a {
+	case "", pg.FKActionRestrict:
+		return pg.FKActionNoAction
+	default:
+		return a
+	}
 }

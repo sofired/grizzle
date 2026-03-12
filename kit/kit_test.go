@@ -344,6 +344,82 @@ func TestDiff_FKConstraint_Unchanged(t *testing.T) {
 	}
 }
 
+func TestDiff_FKConstraint_ImplicitVsExplicitNoAction(t *testing.T) {
+	// A FK defined without OnDelete/OnUpdate (DSL default = "") must compare equal
+	// to a DB-introspected FK where the actions are "NO ACTION" (the normalised form).
+	// Without normalisation, every diff between a live DB and the DSL would produce a
+	// spurious DropConstraint + AddConstraint pair.
+	dslDef := pg.Table("orders",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("customer_id", pg.UUID().NotNull()),
+	).WithConstraints(func(t pg.TableRef) []pg.Constraint {
+		return []pg.Constraint{
+			// Intentionally no OnDelete / OnUpdate — DSL default leaves them as "".
+			pg.ForeignKey("orders_customer_fk").
+				From(t.Col("customer_id")).
+				References("customers", "id").
+				Build(),
+		}
+	})
+
+	introspectedDef := pg.Table("orders",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("customer_id", pg.UUID().NotNull()),
+	).WithConstraints(func(t pg.TableRef) []pg.Constraint {
+		return []pg.Constraint{
+			// Introspectors set explicit "NO ACTION" when no action is stored.
+			pg.ForeignKey("orders_customer_fk").
+				From(t.Col("customer_id")).
+				References("customers", "id").
+				OnDelete(pg.FKActionNoAction).
+				OnUpdate(pg.FKActionNoAction).
+				Build(),
+		}
+	})
+
+	changes := kit.Diff(kit.FromDefs(dslDef), kit.FromDefs(introspectedDef))
+	if len(changes) != 0 {
+		t.Errorf("expected 0 changes (implicit vs explicit NO ACTION must not differ), got %d: %v", len(changes), changes)
+	}
+}
+
+func TestDiff_FKConstraint_RestrictEqualsNoAction(t *testing.T) {
+	// RESTRICT and NO ACTION are behaviourally identical for non-deferred constraints;
+	// diffing should treat them as equal to avoid spurious migrations.
+	restrictDef := pg.Table("orders",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("customer_id", pg.UUID().NotNull()),
+	).WithConstraints(func(t pg.TableRef) []pg.Constraint {
+		return []pg.Constraint{
+			pg.ForeignKey("orders_customer_fk").
+				From(t.Col("customer_id")).
+				References("customers", "id").
+				OnDelete(pg.FKActionRestrict).
+				OnUpdate(pg.FKActionRestrict).
+				Build(),
+		}
+	})
+
+	noActionDef := pg.Table("orders",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("customer_id", pg.UUID().NotNull()),
+	).WithConstraints(func(t pg.TableRef) []pg.Constraint {
+		return []pg.Constraint{
+			pg.ForeignKey("orders_customer_fk").
+				From(t.Col("customer_id")).
+				References("customers", "id").
+				OnDelete(pg.FKActionNoAction).
+				OnUpdate(pg.FKActionNoAction).
+				Build(),
+		}
+	})
+
+	changes := kit.Diff(kit.FromDefs(restrictDef), kit.FromDefs(noActionDef))
+	if len(changes) != 0 {
+		t.Errorf("expected 0 changes (RESTRICT vs NO ACTION must not differ), got %d: %v", len(changes), changes)
+	}
+}
+
 func TestDiff_AddConstraint(t *testing.T) {
 	oldDef := pg.Table("users",
 		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
