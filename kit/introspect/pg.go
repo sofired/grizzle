@@ -340,6 +340,13 @@ func queryViews(ctx context.Context, pool *pgxpool.Pool, schemas []string) ([]*L
 		placeholders[i] = fmt.Sprintf("$%d", i+1)
 		args[i] = s
 	}
+	// Note: information_schema.views.view_definition returns the SQL as
+	// PostgreSQL has normalised/rewritten it (e.g. fully-qualified names,
+	// expression reformatting). This means the stored definition may not
+	// match the original CREATE VIEW statement verbatim. Diffs against a
+	// live database may produce spurious drop+recreate changes unless the
+	// user stores the normalised form. This is a known limitation shared
+	// by most migration toolkits.
 	q := fmt.Sprintf(`
 		SELECT table_schema, table_name, view_definition
 		FROM information_schema.views

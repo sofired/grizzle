@@ -1,6 +1,8 @@
 package kit
 
 import (
+	"strings"
+
 	pg "github.com/sofired/grizzle/schema/pg"
 )
 
@@ -149,7 +151,7 @@ func Diff(old, new Snapshot) []Change {
 		if !exists {
 			continue // handled above
 		}
-		if oldV.SQL != newV.SQL {
+		if normalizeViewSQL(oldV.SQL) != normalizeViewSQL(newV.SQL) {
 			v := *newV
 			changes = append(changes,
 				Change{Kind: ChangeDropView, TableName: name, View: &ViewSnap{Name: oldV.Name, Schema: oldV.Schema, SQL: oldV.SQL}},
@@ -348,4 +350,11 @@ func constraintsEqual(a, b pg.Constraint) bool {
 		}
 	}
 	return true
+}
+
+// normalizeViewSQL trims whitespace and trailing semicolons for comparison
+// purposes. This avoids spurious diffs caused by formatting differences
+// between the stored definition and the live introspected definition.
+func normalizeViewSQL(sql string) string {
+	return strings.TrimRight(strings.TrimSpace(sql), ";")
 }

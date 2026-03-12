@@ -99,6 +99,19 @@ func TestDiff_NoChangeView(t *testing.T) {
 	}
 }
 
+func TestDiff_NoChangeView_TrailingSemicolon(t *testing.T) {
+	// Trailing semicolons and whitespace differences should not produce spurious diffs.
+	v1 := pg.CreateView("my_view", `SELECT id FROM users`)
+	v2 := pg.CreateView("my_view", `SELECT id FROM users;`)
+
+	old := kit.FromSchema(kit.SchemaObjects{Views: []*pg.ViewDef{v1}})
+	newSnap := kit.FromSchema(kit.SchemaObjects{Views: []*pg.ViewDef{v2}})
+	changes := kit.Diff(old, newSnap)
+	if len(changes) != 0 {
+		t.Errorf("expected 0 changes for trailing-semicolon-only difference, got %d: %v", len(changes), changes)
+	}
+}
+
 func TestDiff_ModifiedView(t *testing.T) {
 	v1 := pg.CreateView("my_view", `SELECT id FROM users`)
 	v2 := pg.CreateView("my_view", `SELECT id, username FROM users`)
