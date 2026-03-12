@@ -124,6 +124,30 @@ var UsersT = UsersTable{
 }
 
 // -------------------------------------------------------------------
+// Articles table — used to exercise TsvectorColumn and FTS helpers
+// -------------------------------------------------------------------
+
+// ArticlesTable is what the code generator would produce for an articles table
+// with a pre-computed tsvector search_vector column.
+type ArticlesTable struct {
+	ID           expr.UUIDColumn
+	Title        expr.StringColumn
+	Body         expr.StringColumn
+	SearchVector expr.TsvectorColumn
+}
+
+func (ArticlesTable) GrizTableName() string  { return "articles" }
+func (ArticlesTable) GrizTableAlias() string { return "articles" }
+
+// ArticlesT is the singleton table handle used in FTS tests.
+var ArticlesT = ArticlesTable{
+	ID:           expr.UUIDColumn{ColBase: expr.ColBase{TableAlias: "articles", ColName: "id"}},
+	Title:        expr.StringColumn{ColBase: expr.ColBase{TableAlias: "articles", ColName: "title"}},
+	Body:         expr.StringColumn{ColBase: expr.ColBase{TableAlias: "articles", ColName: "body"}},
+	SearchVector: expr.TsvectorColumn{ColBase: expr.ColBase{TableAlias: "articles", ColName: "search_vector"}},
+}
+
+// -------------------------------------------------------------------
 // Select / Insert model types (in production these come from `grizzle gen`)
 // -------------------------------------------------------------------
 

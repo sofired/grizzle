@@ -145,6 +145,37 @@ func (c StringColumn) Like(pattern string) Expression {
 func (c StringColumn) ILike(pattern string) Expression {
 	return likeExpr{ref: c.ColBase, op: "ILIKE", pattern: pattern}
 }
+
+// NotLike produces a NOT LIKE predicate.
+func (c StringColumn) NotLike(pattern string) Expression {
+	return likeExpr{ref: c.ColBase, op: "NOT LIKE", pattern: pattern}
+}
+
+// NotILike produces a NOT ILIKE predicate (PostgreSQL-specific).
+func (c StringColumn) NotILike(pattern string) Expression {
+	return likeExpr{ref: c.ColBase, op: "NOT ILIKE", pattern: pattern}
+}
+
+// RegexpMatch produces a case-sensitive regex match: col ~ $1 (PostgreSQL-specific).
+func (c StringColumn) RegexpMatch(pattern string) Expression {
+	return regexpExpr{ref: c.ColBase, op: "~", pattern: pattern}
+}
+
+// RegexpMatchI produces a case-insensitive regex match: col ~* $1 (PostgreSQL-specific).
+func (c StringColumn) RegexpMatchI(pattern string) Expression {
+	return regexpExpr{ref: c.ColBase, op: "~*", pattern: pattern}
+}
+
+// NotRegexpMatch produces a case-sensitive regex non-match: col !~ $1 (PostgreSQL-specific).
+func (c StringColumn) NotRegexpMatch(pattern string) Expression {
+	return regexpExpr{ref: c.ColBase, op: "!~", pattern: pattern}
+}
+
+// NotRegexpMatchI produces a case-insensitive regex non-match: col !~* $1 (PostgreSQL-specific).
+func (c StringColumn) NotRegexpMatchI(pattern string) Expression {
+	return regexpExpr{ref: c.ColBase, op: "!~*", pattern: pattern}
+}
+
 func (c StringColumn) In(vals ...string) Expression {
 	if len(vals) == 0 {
 		return Raw("FALSE")
@@ -553,4 +584,71 @@ func (c FloatColumn) SubCol(other FloatColumn) ArithExpr {
 }
 func (c FloatColumn) MulCol(other FloatColumn) ArithExpr {
 	return ArithExpr{left: c.ColBase, op: "*", right: other.ColBase}
+}
+
+// -------------------------------------------------------------------
+// TsvectorColumn (PostgreSQL-specific)
+// -------------------------------------------------------------------
+
+// TsvectorColumn is a typed column handle for TSVECTOR values.
+// It exposes full-text search operators (@@ with various tsquery constructors).
+// These operators are PostgreSQL-specific and are not emitted for MySQL or SQLite.
+type TsvectorColumn struct{ ColBase }
+
+// Matches returns col @@ to_tsquery($1) — matches a tsquery string.
+//
+//	ArticlesT.SearchVector.Matches("grizzle & orm")
+//	// → "articles"."search_vector" @@ to_tsquery($1)
+func (c TsvectorColumn) Matches(query string) Expression {
+	return ftsMatchExpr{ref: c.ColBase, tsFn: "to_tsquery", query: query}
+}
+
+// MatchesWithConfig returns col @@ to_tsquery($config, $query) — uses an explicit
+// text search configuration such as "english" or "simple".
+//
+//	ArticlesT.SearchVector.MatchesWithConfig("english", "grizzle & orm")
+//	// → "articles"."search_vector" @@ to_tsquery($1, $2)
+func (c TsvectorColumn) MatchesWithConfig(config, query string) Expression {
+	return ftsMatchExpr{ref: c.ColBase, tsFn: "to_tsquery", config: config, query: query}
+}
+
+// MatchesPlain returns col @@ plainto_tsquery($1) — converts plain text to a tsquery
+// by treating each word as a term connected with AND.
+//
+//	ArticlesT.SearchVector.MatchesPlain("grizzle orm")
+//	// → "articles"."search_vector" @@ plainto_tsquery($1)
+func (c TsvectorColumn) MatchesPlain(query string) Expression {
+	return ftsMatchExpr{ref: c.ColBase, tsFn: "plainto_tsquery", query: query}
+}
+
+// MatchesPlainWithConfig returns col @@ plainto_tsquery($config, $query).
+func (c TsvectorColumn) MatchesPlainWithConfig(config, query string) Expression {
+	return ftsMatchExpr{ref: c.ColBase, tsFn: "plainto_tsquery", config: config, query: query}
+}
+
+// MatchesPhrase returns col @@ phraseto_tsquery($1) — matches an exact phrase.
+//
+//	ArticlesT.SearchVector.MatchesPhrase("fast full text")
+//	// → "articles"."search_vector" @@ phraseto_tsquery($1)
+func (c TsvectorColumn) MatchesPhrase(query string) Expression {
+	return ftsMatchExpr{ref: c.ColBase, tsFn: "phraseto_tsquery", query: query}
+}
+
+// MatchesPhraseWithConfig returns col @@ phraseto_tsquery($config, $query).
+func (c TsvectorColumn) MatchesPhraseWithConfig(config, query string) Expression {
+	return ftsMatchExpr{ref: c.ColBase, tsFn: "phraseto_tsquery", config: config, query: query}
+}
+
+// MatchesWebSearch returns col @@ websearch_to_tsquery($1) — converts a web-search-style
+// query string (quoting, minus, OR) to a tsquery.
+//
+//	ArticlesT.SearchVector.MatchesWebSearch("grizzle -orm")
+//	// → "articles"."search_vector" @@ websearch_to_tsquery($1)
+func (c TsvectorColumn) MatchesWebSearch(query string) Expression {
+	return ftsMatchExpr{ref: c.ColBase, tsFn: "websearch_to_tsquery", query: query}
+}
+
+// MatchesWebSearchWithConfig returns col @@ websearch_to_tsquery($config, $query).
+func (c TsvectorColumn) MatchesWebSearchWithConfig(config, query string) Expression {
+	return ftsMatchExpr{ref: c.ColBase, tsFn: "websearch_to_tsquery", config: config, query: query}
 }

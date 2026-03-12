@@ -352,3 +352,90 @@ func Round(col SelectableColumn, decimals ...int) FuncExpr {
 	}
 	return FuncExpr{fn: "ROUND", args: []Expression{Col(col)}}
 }
+
+// -------------------------------------------------------------------
+// PostgreSQL full-text search helper functions
+// -------------------------------------------------------------------
+
+// ToTsvector returns to_tsvector(col) or to_tsvector('config', col) —
+// converts a column value to a tsvector for use in FTS expressions or SELECT lists.
+// config is optional; pass it to specify a text search configuration (e.g. "english").
+//
+//	expr.ToTsvector(ArticlesT.Body)                    // to_tsvector("articles"."body")
+//	expr.ToTsvector(ArticlesT.Body, "english")         // to_tsvector($1, "articles"."body")
+func ToTsvector(col SelectableColumn, config ...string) toTsvectorExpr {
+	cfg := ""
+	if len(config) > 0 {
+		cfg = config[0]
+	}
+	return toTsvectorExpr{config: cfg, ref: colSelAsRef{col}}
+}
+
+// ToTsquery returns to_tsquery($1) or to_tsquery($config, $query) as a raw Expression.
+// Useful when you need to pass a tsquery expression as a value in SELECT lists.
+//
+//	expr.ToTsquery("grizzle & orm")             // to_tsquery($1)
+//	expr.ToTsquery("grizzle & orm", "english")  // to_tsquery($1, $2)
+func ToTsquery(query string, config ...string) Expression {
+	return tsQueryFnExpr{fn: "to_tsquery", query: query, config: firstOrEmpty(config)}
+}
+
+// PlainToTsquery returns plainto_tsquery($1) or plainto_tsquery($config, $query).
+//
+//	expr.PlainToTsquery("grizzle orm")
+func PlainToTsquery(query string, config ...string) Expression {
+	return tsQueryFnExpr{fn: "plainto_tsquery", query: query, config: firstOrEmpty(config)}
+}
+
+// PhraseToTsquery returns phraseto_tsquery($1) or phraseto_tsquery($config, $query).
+//
+//	expr.PhraseToTsquery("fast full text search")
+func PhraseToTsquery(query string, config ...string) Expression {
+	return tsQueryFnExpr{fn: "phraseto_tsquery", query: query, config: firstOrEmpty(config)}
+}
+
+// WebsearchToTsquery returns websearch_to_tsquery($1) or websearch_to_tsquery($config, $query).
+//
+//	expr.WebsearchToTsquery("grizzle -orm")
+func WebsearchToTsquery(query string, config ...string) Expression {
+	return tsQueryFnExpr{fn: "websearch_to_tsquery", query: query, config: firstOrEmpty(config)}
+}
+
+// tsQueryFnExpr represents a standalone tsquery constructor: fn($config, $query) or fn($query).
+type tsQueryFnExpr struct {
+	fn     string
+	config string
+	query  string
+}
+
+func (e tsQueryFnExpr) ToSQL(ctx *BuildContext) string {
+	if e.config != "" {
+		return e.fn + "(" + ctx.Add(e.config) + ", " + ctx.Add(e.query) + ")"
+	}
+	return e.fn + "(" + ctx.Add(e.query) + ")"
+}
+
+// TsRank returns ts_rank(col, tsquery_expr) — a ranking function for FTS results.
+// col is the tsvector column; tsq is the tsquery expression (use ToTsquery, PlainToTsquery, etc.).
+//
+//	expr.TsRank(ArticlesT.SearchVector, expr.PlainToTsquery("grizzle orm")).Desc()
+//	// → ts_rank("articles"."search_vector", plainto_tsquery($1)) DESC
+func TsRank(col SelectableColumn, tsq Expression) FuncExpr {
+	return FuncExpr{fn: "ts_rank", args: []Expression{Col(col), tsq}}
+}
+
+// TsRankCd returns ts_rank_cd(col, tsquery_expr) — like TsRank but uses cover density ranking.
+//
+//	expr.TsRankCd(ArticlesT.SearchVector, expr.PlainToTsquery("grizzle orm")).Desc()
+//	// → ts_rank_cd("articles"."search_vector", plainto_tsquery($1)) DESC
+func TsRankCd(col SelectableColumn, tsq Expression) FuncExpr {
+	return FuncExpr{fn: "ts_rank_cd", args: []Expression{Col(col), tsq}}
+}
+
+// firstOrEmpty returns the first element of the slice, or "" if the slice is empty.
+func firstOrEmpty(s []string) string {
+	if len(s) > 0 {
+		return s[0]
+	}
+	return ""
+}
