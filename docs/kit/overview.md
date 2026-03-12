@@ -105,12 +105,16 @@ The diff engine detects and generates SQL for:
 | Dropped table | `DROP TABLE IF EXISTS …` |
 | New column | `ALTER TABLE … ADD COLUMN …` |
 | Dropped column | `ALTER TABLE … DROP COLUMN …` |
-| Column type change | `ALTER TABLE … ALTER COLUMN … TYPE …` |
+| Column type change† | `ALTER TABLE … ALTER COLUMN … TYPE …` |
 | Column nullability change | `ALTER TABLE … ALTER COLUMN … SET / DROP NOT NULL` |
 | Column default change | `ALTER TABLE … ALTER COLUMN … SET / DROP DEFAULT` |
-| Renamed column | `ALTER TABLE … RENAME COLUMN … TO …` |
+| Manually specified renamed column* | `ALTER TABLE … RENAME COLUMN … TO …` |
 | New index | `CREATE [UNIQUE] INDEX …` |
 | Dropped index | `DROP INDEX …` |
+
+\* `kit.Diff` / `diffTable` do **not** auto-detect column renames. Columns are matched by name, so a rename will be reported as a dropped column plus a new column. `RENAME COLUMN` is only generated when a `ChangeRenameColumn` is constructed manually.
+
+† The emitted `ALTER COLUMN … TYPE` statement has no `USING` clause. PostgreSQL will reject type changes that are not implicitly castable (for example, `text` → `integer`). For such cases, write a manual migration that includes a `USING` expression.
 
 ## `grizzle gen` — code generation
 
