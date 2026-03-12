@@ -394,11 +394,14 @@ type ftsMatchExprOnExpr struct {
 }
 
 func (e ftsMatchExprOnExpr) ToSQL(ctx *BuildContext) string {
+	// Render the left side first so its args are bound before the tsquery args,
+	// preserving left-to-right parameter numbering ($1, $2, ...).
+	left := e.left.colRef(ctx)
 	var tsq string
 	if e.config != "" {
 		tsq = e.tsFn + "(" + ctx.Add(e.config) + ", " + ctx.Add(e.query) + ")"
 	} else {
 		tsq = e.tsFn + "(" + ctx.Add(e.query) + ")"
 	}
-	return e.left.colRef(ctx) + " @@ " + tsq
+	return left + " @@ " + tsq
 }
