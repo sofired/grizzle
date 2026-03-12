@@ -19,7 +19,7 @@ func TestNormalizeFKAction(t *testing.T) {
 		{"SET DEFAULT", pg.FKActionSetDefault},
 		{"RESTRICT", pg.FKActionRestrict},
 		{"NO ACTION", pg.FKActionNoAction},
-		{"", pg.FKActionNoAction},    // empty → no action
+		{"", pg.FKActionNoAction},        // empty → no action
 		{"UNKNOWN", pg.FKActionNoAction}, // unmapped → no action
 	}
 	for _, tc := range cases {
