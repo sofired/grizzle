@@ -188,6 +188,28 @@ func TestToTsvector_MatchesWebSearch(t *testing.T) {
 	}
 }
 
+func TestToTsvector_MatchesPhrase(t *testing.T) {
+	e := expr.ToTsvector(ts.ArticlesT.Body).MatchesPhrase("fast full text")
+	got := e.ToSQL(pgCtx())
+	want := `to_tsvector("articles"."body") @@ phraseto_tsquery($1)`
+	if got != want {
+		t.Errorf("ToTsvector.MatchesPhrase: got %q, want %q", got, want)
+	}
+}
+
+func TestToTsvector_AsAlias(t *testing.T) {
+	// ToTsvector satisfies SelectableColumn so it can appear in SELECT lists.
+	e := expr.ToTsvector(ts.ArticlesT.Body, "english").As("body_tsv")
+	got := e.ToSQL(pgCtx())
+	want := `to_tsvector($1, "articles"."body") AS "body_tsv"`
+	if got != want {
+		t.Errorf("ToTsvector.As: got %q, want %q", got, want)
+	}
+	if e.ColumnName() != "body_tsv" {
+		t.Errorf("ColumnName: got %q, want %q", e.ColumnName(), "body_tsv")
+	}
+}
+
 // -----------------------------------------------------------------------
 // Standalone tsquery function helpers
 // -----------------------------------------------------------------------
