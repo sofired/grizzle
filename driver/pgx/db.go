@@ -20,6 +20,8 @@ package pgx
 import (
 	"context"
 	"fmt"
+	"regexp"
+	"sync/atomic"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -27,6 +29,22 @@ import (
 	"github.com/sofired/grizzle/dialect"
 	"github.com/sofired/grizzle/query"
 )
+
+// savepointNameRE matches valid savepoint identifiers: start with a letter or
+// underscore, followed by letters, digits, or underscores, max 63 characters
+// (PostgreSQL's identifier length limit).
+var savepointNameRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,62}$`)
+
+// validateSavepointName returns an error when name contains characters that
+// could be used for SQL injection or otherwise violates PostgreSQL identifier
+// rules. Savepoint names are interpolated directly into SQL statements so they
+// must be strictly validated.
+func validateSavepointName(name string) error {
+	if !savepointNameRE.MatchString(name) {
+		return fmt.Errorf("grizzle: invalid savepoint name %q: must match [A-Za-z_][A-Za-z0-9_]* and be at most 63 characters", name)
+	}
+	return nil
+}
 
 // DB wraps a pgxpool.Pool and provides Grizzle integration helpers.
 type DB struct {
@@ -147,7 +165,8 @@ func ScanOneOpt[T any](rows pgx.Rows, err error) (*T, error) {
 
 // Tx wraps a pgx.Tx with Grizzle helpers.
 type Tx struct {
-	tx pgx.Tx
+	tx      pgx.Tx
+	nestedN atomic.Uint64 // counter for auto-naming nested transactions
 }
 
 // Transaction runs fn inside a database transaction. If fn returns an
@@ -161,6 +180,30 @@ type Tx struct {
 //	})
 func (db *DB) Transaction(ctx context.Context, fn func(tx *Tx) error) error {
 	pgxTx, err := db.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("grizzle: begin transaction: %w", err)
+	}
+
+	tx := &Tx{tx: pgxTx}
+	if err := fn(tx); err != nil {
+		_ = pgxTx.Rollback(ctx)
+		return err
+	}
+	return pgxTx.Commit(ctx)
+}
+
+// TransactionWithOptions is like Transaction but accepts pgx.TxOptions to
+// control isolation level, access mode, and deferrable behaviour.
+//
+//	err := db.TransactionWithOptions(ctx, pgx.TxOptions{
+//	    IsoLevel:   pgx.Serializable,
+//	    AccessMode: pgx.ReadWrite,
+//	}, func(tx *pgxdb.Tx) error {
+//	    _, err := tx.Exec(ctx, updateQuery)
+//	    return err
+//	})
+func (db *DB) TransactionWithOptions(ctx context.Context, opts pgx.TxOptions, fn func(tx *Tx) error) error {
+	pgxTx, err := db.pool.BeginTx(ctx, opts)
 	if err != nil {
 		return fmt.Errorf("grizzle: begin transaction: %w", err)
 	}
@@ -205,6 +248,88 @@ func (tx *Tx) ExecRaw(ctx context.Context, sql string, args ...any) (int64, erro
 		return 0, err
 	}
 	return tag.RowsAffected(), nil
+}
+
+// -------------------------------------------------------------------
+// Savepoints
+// -------------------------------------------------------------------
+
+// Savepoint issues a SAVEPOINT command with the given name. The name must
+// consist of ASCII letters, digits, and underscores, starting with a letter
+// or underscore (PostgreSQL identifier rules). This constraint prevents SQL
+// injection, since the name is interpolated directly into the statement.
+//
+//	if err := tx.Savepoint(ctx, "before_child_insert"); err != nil {
+//	    return err
+//	}
+func (tx *Tx) Savepoint(ctx context.Context, name string) error {
+	if err := validateSavepointName(name); err != nil {
+		return err
+	}
+	_, err := tx.tx.Exec(ctx, "SAVEPOINT "+name)
+	return err
+}
+
+// RollbackToSavepoint issues ROLLBACK TO SAVEPOINT, restoring the transaction
+// state to the point at which the named savepoint was set. The savepoint
+// itself is preserved and may be rolled back to again.
+//
+//	if err := tx.RollbackToSavepoint(ctx, "before_child_insert"); err != nil {
+//	    return err
+//	}
+func (tx *Tx) RollbackToSavepoint(ctx context.Context, name string) error {
+	if err := validateSavepointName(name); err != nil {
+		return err
+	}
+	_, err := tx.tx.Exec(ctx, "ROLLBACK TO SAVEPOINT "+name)
+	return err
+}
+
+// ReleaseSavepoint issues RELEASE SAVEPOINT, destroying the named savepoint
+// (and all savepoints set after it). This does not commit the transaction.
+//
+//	if err := tx.ReleaseSavepoint(ctx, "before_child_insert"); err != nil {
+//	    return err
+//	}
+func (tx *Tx) ReleaseSavepoint(ctx context.Context, name string) error {
+	if err := validateSavepointName(name); err != nil {
+		return err
+	}
+	_, err := tx.tx.Exec(ctx, "RELEASE SAVEPOINT "+name)
+	return err
+}
+
+// NestedTransaction runs fn within an auto-named savepoint. On success the
+// savepoint is released; on failure it is rolled back, leaving the outer
+// transaction intact. Each call to NestedTransaction on the same Tx uses a
+// unique savepoint name so concurrent or sequential calls do not interfere.
+//
+//	err := tx.NestedTransaction(ctx, func(tx *pgxdb.Tx) error {
+//	    _, err := tx.Exec(ctx, insertChildQuery)
+//	    return err
+//	})
+//	if err != nil && !isDuplicateError(err) {
+//	    return err
+//	}
+func (tx *Tx) NestedTransaction(ctx context.Context, fn func(tx *Tx) error) error {
+	n := tx.nestedN.Add(1)
+	name := fmt.Sprintf("sp_%d", n)
+
+	if _, err := tx.tx.Exec(ctx, "SAVEPOINT "+name); err != nil {
+		return fmt.Errorf("grizzle: nested transaction savepoint: %w", err)
+	}
+
+	if err := fn(tx); err != nil {
+		if _, rbErr := tx.tx.Exec(ctx, "ROLLBACK TO SAVEPOINT "+name); rbErr != nil {
+			return fmt.Errorf("grizzle: nested transaction rollback: %w (original error: %w)", rbErr, err)
+		}
+		return err
+	}
+
+	if _, err := tx.tx.Exec(ctx, "RELEASE SAVEPOINT "+name); err != nil {
+		return fmt.Errorf("grizzle: nested transaction release: %w", err)
+	}
+	return nil
 }
 
 // -------------------------------------------------------------------

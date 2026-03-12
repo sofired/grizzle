@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/jackc/pgx/v5"
 	pgxdb "github.com/sofired/grizzle/driver/pgx"
 	ts "github.com/sofired/grizzle/internal/testschema"
 	"github.com/sofired/grizzle/query"
@@ -84,6 +85,76 @@ func ExampleDB_Transaction() {
 			Set("enabled", false).
 			Where(ts.UsersT.DeletedAt.IsNotNull()))
 		return err
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
+// ExampleDB_TransactionWithOptions shows how to start a transaction with a
+// specific isolation level using pgx.TxOptions.
+func ExampleDB_TransactionWithOptions() {
+	ctx := context.Background()
+
+	err := db.TransactionWithOptions(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable}, func(tx *pgxdb.Tx) error {
+		_, err := tx.Exec(ctx, query.Update(ts.UsersT).
+			Set("enabled", false).
+			Where(ts.UsersT.DeletedAt.IsNotNull()))
+		return err
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
+// ExampleTx_Savepoint shows manual savepoint management inside a transaction.
+// Use this when you need fine-grained control over which partial state to roll
+// back to before continuing.
+func ExampleTx_Savepoint() {
+	ctx := context.Background()
+
+	err := db.Transaction(ctx, func(tx *pgxdb.Tx) error {
+		if err := tx.Savepoint(ctx, "before_child"); err != nil {
+			return err
+		}
+
+		_, err := tx.Exec(ctx, query.Update(ts.UsersT).
+			Set("enabled", false).
+			Where(ts.UsersT.DeletedAt.IsNotNull()))
+		if err != nil {
+			// Roll back only to the savepoint, not the whole transaction.
+			if rbErr := tx.RollbackToSavepoint(ctx, "before_child"); rbErr != nil {
+				return rbErr
+			}
+			// continue without this update
+			return nil
+		}
+
+		return tx.ReleaseSavepoint(ctx, "before_child")
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
+// ExampleTx_NestedTransaction shows the automatic savepoint helper. The
+// savepoint is named and managed automatically; on success it is released, on
+// failure it is rolled back.
+func ExampleTx_NestedTransaction() {
+	ctx := context.Background()
+
+	err := db.Transaction(ctx, func(tx *pgxdb.Tx) error {
+		nestedErr := tx.NestedTransaction(ctx, func(tx *pgxdb.Tx) error {
+			_, err := tx.Exec(ctx, query.Update(ts.UsersT).
+				Set("enabled", false).
+				Where(ts.UsersT.DeletedAt.IsNotNull()))
+			return err
+		})
+		if nestedErr != nil {
+			// Nested transaction was rolled back; outer transaction is intact.
+			fmt.Println("nested op failed, continuing:", nestedErr)
+		}
+		return nil
 	})
 	if err != nil {
 		log.Fatal(err)
