@@ -10,6 +10,11 @@ type (
 	// TableDef is the complete, immutable definition of a table.
 	TableDef = pg.TableDef
 
+	// TableBuilder accumulates columns and constraints during construction.
+	// It is returned by Table and SchemaTable; chain .WithConstraints() or
+	// .Build() to finalise the definition.
+	TableBuilder = pg.TableBuilder
+
 	// NamedColumn pairs a column name with its builder (produced by C()).
 	NamedColumn = pg.NamedColumn
 

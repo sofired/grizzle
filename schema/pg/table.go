@@ -42,8 +42,10 @@ func (t TableDef) ColMap() map[string]ColumnDef {
 	return m
 }
 
-// tableBuilder accumulates columns and constraints during construction.
-type tableBuilder struct {
+// TableBuilder accumulates columns and constraints during construction.
+// It is returned by Table and SchemaTable; chain .WithConstraints() or
+// .Build() to finalise the definition.
+type TableBuilder struct {
 	def TableDef
 }
 
@@ -57,7 +59,7 @@ type tableBuilder struct {
 //	        pg.Check("age_check", "age >= 0"),
 //	    }
 //	})
-func (b *tableBuilder) WithConstraints(fn func(t TableRef) []Constraint) *TableDef {
+func (b *TableBuilder) WithConstraints(fn func(t TableRef) []Constraint) *TableDef {
 	ref := TableRef{
 		tableName: b.def.Name,
 		cols:      b.def.ColMap(),
@@ -67,7 +69,7 @@ func (b *tableBuilder) WithConstraints(fn func(t TableRef) []Constraint) *TableD
 }
 
 // Build finalises the table definition without additional constraints.
-func (b *tableBuilder) Build() *TableDef { return &b.def }
+func (b *TableBuilder) Build() *TableDef { return &b.def }
 
 // -------------------------------------------------------------------
 // Table factory
@@ -76,7 +78,7 @@ func (b *tableBuilder) Build() *TableDef { return &b.def }
 // Table declares a PostgreSQL table with the given name and columns.
 // Column order is preserved as declared.
 //
-// Returns a *tableBuilder so you can chain .WithConstraints() or .Build().
+// Returns a *TableBuilder so you can chain .WithConstraints() or .Build().
 //
 //	var Users = pg.Table("users",
 //	    pg.C("id",   pg.UUID().PrimaryKey().DefaultRandom()),
@@ -86,12 +88,12 @@ func (b *tableBuilder) Build() *TableDef { return &b.def }
 //	        pg.UniqueIndex("users_name_idx").On(t.Col("name")).Build(),
 //	    }
 //	})
-func Table(name string, cols ...NamedColumn) *tableBuilder {
+func Table(name string, cols ...NamedColumn) *TableBuilder {
 	defs := make([]ColumnDef, len(cols))
 	for i, nc := range cols {
 		defs[i] = nc.builder.Build(nc.name)
 	}
-	return &tableBuilder{
+	return &TableBuilder{
 		def: TableDef{
 			Name:    name,
 			Columns: defs,
@@ -103,7 +105,7 @@ func Table(name string, cols ...NamedColumn) *tableBuilder {
 // (e.g. "auth", "audit"). The generated DDL will be:
 //
 //	CREATE TABLE <schema>.<name> (...)
-func SchemaTable(schema, name string, cols ...NamedColumn) *tableBuilder {
+func SchemaTable(schema, name string, cols ...NamedColumn) *TableBuilder {
 	b := Table(name, cols...)
 	b.def.Schema = schema
 	return b

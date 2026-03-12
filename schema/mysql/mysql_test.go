@@ -130,6 +130,19 @@ func TestUUID_References(t *testing.T) {
 // Table construction tests
 // ---------------------------------------------------------------------------
 
+// TestTableBuilder_TypeIsNameable verifies that mysql.TableBuilder is an
+// exported, nameable type. This is a compile-time regression guard: if
+// TableBuilder ever becomes unexported again, this test will not compile.
+func TestTableBuilder_TypeIsNameable(t *testing.T) {
+	var b *mysql.TableBuilder = mysql.Table("probe",
+		mysql.C("id", mysql.UUID().PrimaryKey().DefaultRandom()),
+	)
+	tbl := b.Build()
+	if tbl.Name != "probe" {
+		t.Errorf("Name: got %q, want %q", tbl.Name, "probe")
+	}
+}
+
 func TestTable_Build(t *testing.T) {
 	tbl := mysql.Table("users",
 		mysql.C("id", mysql.UUID().PrimaryKey().DefaultRandom()),
