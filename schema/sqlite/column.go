@@ -88,8 +88,12 @@ func UUID() *UUIDBuilder {
 	return b
 }
 
-func (b *UUIDBuilder) NotNull() *UUIDBuilder    { b.def.NotNull = true; return b }
-func (b *UUIDBuilder) PrimaryKey() *UUIDBuilder { b.def.PrimaryKey = true; b.def.NotNull = true; return b }
+func (b *UUIDBuilder) NotNull() *UUIDBuilder { b.def.NotNull = true; return b }
+func (b *UUIDBuilder) PrimaryKey() *UUIDBuilder {
+	b.def.PrimaryKey = true
+	b.def.NotNull = true
+	return b
+}
 
 // DefaultRandom sets the column default to a SQLite-compatible UUID v4 expression.
 func (b *UUIDBuilder) DefaultRandom() *UUIDBuilder {
