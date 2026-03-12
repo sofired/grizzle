@@ -240,6 +240,9 @@ func TestDiff_UnnamedCompositePrimaryKey_Add(t *testing.T) {
 	})
 
 	changes := kit.Diff(kit.FromDefs(oldDef), kit.FromDefs(newDef))
+	if len(changes) != 1 {
+		t.Errorf("expected exactly 1 change, got %d: %v", len(changes), changes)
+	}
 	adds := countKind(changes, kit.ChangeAddConstraint)
 	if adds != 1 {
 		t.Errorf("expected 1 AddConstraint for unnamed PK, got %d: %v", adds, changes)
@@ -264,6 +267,9 @@ func TestDiff_UnnamedCompositePrimaryKey_Drop(t *testing.T) {
 	).Build()
 
 	changes := kit.Diff(kit.FromDefs(oldDef), kit.FromDefs(newDef))
+	if len(changes) != 1 {
+		t.Errorf("expected exactly 1 change, got %d: %v", len(changes), changes)
+	}
 	drops := countKind(changes, kit.ChangeDropConstraint)
 	if drops != 1 {
 		t.Errorf("expected 1 DropConstraint for removed unnamed PK, got %d: %v", drops, changes)
@@ -315,6 +321,89 @@ func TestDiff_TwoUnnamedPKs_MultiTable(t *testing.T) {
 	changes := kit.Diff(snap, snap)
 	if len(changes) != 0 {
 		t.Errorf("expected 0 changes for identical multi-table snapshot with unnamed PKs, got %d: %v", len(changes), changes)
+	}
+}
+
+// TestDiff_TwoUnnamedChecks_NoChange verifies that two unnamed CHECK constraints
+// with different expressions on the same table do not collide in constraintMap
+// (regression for the "check:" empty-key collision fixed in constraintKey).
+func TestDiff_TwoUnnamedChecks_NoChange(t *testing.T) {
+	def := pg.Table("products",
+		pg.C("price", pg.Varchar(50).NotNull()),
+		pg.C("qty", pg.Varchar(50).NotNull()),
+	).WithConstraints(func(t pg.TableRef) []pg.Constraint {
+		return []pg.Constraint{
+			// Both CHECK constraints have no name — they must produce distinct keys.
+			{Kind: pg.KindCheck, CheckExpr: "price > 0"},
+			{Kind: pg.KindCheck, CheckExpr: "qty >= 0"},
+		}
+	})
+
+	snap := kit.FromDefs(def)
+	changes := kit.Diff(snap, snap)
+	if len(changes) != 0 {
+		t.Errorf("expected 0 changes for identical snapshot with two unnamed CHECKs, got %d: %v", len(changes), changes)
+	}
+}
+
+// TestDiff_TwoUnnamedPartialIndexes_NoChange verifies that two unnamed partial
+// indexes with different WHERE expressions do not collide in constraintMap
+// (regression for the WhereExpr omission fixed in constraintKey).
+func TestDiff_TwoUnnamedPartialIndexes_NoChange(t *testing.T) {
+	def := pg.Table("events",
+		pg.C("status", pg.Varchar(50).NotNull()),
+		pg.C("id", pg.UUID().NotNull()),
+	).WithConstraints(func(t pg.TableRef) []pg.Constraint {
+		return []pg.Constraint{
+			// Both indexes have the same column but different WHERE expressions.
+			pg.Index("").On(t.Col("id")).Where("status = 'pending'").Build(),
+			pg.Index("").On(t.Col("id")).Where("status = 'done'").Build(),
+		}
+	})
+
+	snap := kit.FromDefs(def)
+	changes := kit.Diff(snap, snap)
+	if len(changes) != 0 {
+		t.Errorf("expected 0 changes for identical snapshot with two unnamed partial indexes, got %d: %v", len(changes), changes)
+	}
+}
+
+// TestDiff_ModifiedUnnamedPK_DropBeforeAdd verifies that when an unnamed composite
+// primary key changes its columns, the emitted changes are ordered DROP then ADD
+// (not ADD then DROP), since databases require the old PK to be removed before a
+// new one can be created.
+func TestDiff_ModifiedUnnamedPK_DropBeforeAdd(t *testing.T) {
+	oldDef := pg.Table("order_items",
+		pg.C("order_id", pg.UUID().NotNull()),
+		pg.C("item_id", pg.UUID().NotNull()),
+		pg.C("variant_id", pg.UUID().NotNull()),
+	).WithConstraints(func(t pg.TableRef) []pg.Constraint {
+		return []pg.Constraint{
+			pg.CompositePrimaryKey(t.Col("order_id"), t.Col("item_id")),
+		}
+	})
+
+	// New definition adds variant_id to the PK — same-table unnamed PK with
+	// different columns → different synthetic key → drop + re-add.
+	newDef := pg.Table("order_items",
+		pg.C("order_id", pg.UUID().NotNull()),
+		pg.C("item_id", pg.UUID().NotNull()),
+		pg.C("variant_id", pg.UUID().NotNull()),
+	).WithConstraints(func(t pg.TableRef) []pg.Constraint {
+		return []pg.Constraint{
+			pg.CompositePrimaryKey(t.Col("order_id"), t.Col("item_id"), t.Col("variant_id")),
+		}
+	})
+
+	changes := kit.Diff(kit.FromDefs(oldDef), kit.FromDefs(newDef))
+	if len(changes) != 2 {
+		t.Fatalf("expected exactly 2 changes (drop+add), got %d: %v", len(changes), changes)
+	}
+	if changes[0].Kind != kit.ChangeDropConstraint {
+		t.Errorf("expected first change to be DropConstraint, got %s", changes[0].Kind)
+	}
+	if changes[1].Kind != kit.ChangeAddConstraint {
+		t.Errorf("expected second change to be AddConstraint, got %s", changes[1].Kind)
 	}
 }
 

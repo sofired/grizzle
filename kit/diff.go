@@ -121,19 +121,10 @@ func diffTable(tableName string, old, new *TableSnap) []Change {
 	oldCons := constraintMap(old.Constraints)
 	newCons := constraintMap(new.Constraints)
 
-	// Added constraints.
-	for _, nc := range new.Constraints {
-		if _, exists := oldCons[constraintKey(nc)]; !exists {
-			nc := nc
-			changes = append(changes, Change{
-				Kind:       ChangeAddConstraint,
-				TableName:  tableName,
-				Constraint: &nc,
-			})
-		}
-	}
-
 	// Dropped constraints (or changed — drop+re-add).
+	// Drops are emitted before adds so that databases with uniqueness/PK
+	// cardinality restrictions (e.g. "only one primary key per table") can
+	// apply the old constraint removal before the new one is created.
 	for _, oc := range old.Constraints {
 		nc, exists := newCons[constraintKey(oc)]
 		if !exists {
@@ -150,6 +141,19 @@ func diffTable(tableName string, old, new *TableSnap) []Change {
 				Change{Kind: ChangeDropConstraint, TableName: tableName, Constraint: &oc},
 				Change{Kind: ChangeAddConstraint, TableName: tableName, Constraint: &nc},
 			)
+		}
+	}
+
+	// Added constraints (after drops so any replaced unnamed constraint's drop
+	// has already been emitted).
+	for _, nc := range new.Constraints {
+		if _, exists := oldCons[constraintKey(nc)]; !exists {
+			nc := nc
+			changes = append(changes, Change{
+				Kind:       ChangeAddConstraint,
+				TableName:  tableName,
+				Constraint: &nc,
+			})
 		}
 	}
 
@@ -203,14 +207,27 @@ func colMap(cols []pg.ColumnDef) map[string]pg.ColumnDef {
 //
 // Key format:
 //   - Named constraints: "<kind>:<name>"
-//   - Unnamed constraints: "<kind>:<col1>,<col2>,...[:<fkTable>]"
+//   - Unnamed constraints: "<kind>:<col1>,<col2>,...[:<fkTable>][|check:<expr>][|where:<expr>]"
 func constraintKey(c pg.Constraint) string {
+	// For named constraints, the name is sufficient to disambiguate.
 	if c.Name != "" {
 		return string(c.Kind) + ":" + c.Name
 	}
-	key := string(c.Kind) + ":" + strings.Join(c.Columns, ",")
+
+	// For unnamed constraints, incorporate all fields that semantically distinguish
+	// constraints to avoid collisions in constraintMap.
+	key := string(c.Kind) + ":"
+	if len(c.Columns) > 0 {
+		key += strings.Join(c.Columns, ",")
+	}
 	if c.FKTable != "" {
 		key += ":" + c.FKTable
+	}
+	if c.CheckExpr != "" {
+		key += "|check:" + c.CheckExpr
+	}
+	if c.WhereExpr != "" {
+		key += "|where:" + c.WhereExpr
 	}
 	return key
 }
