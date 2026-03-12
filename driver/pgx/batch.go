@@ -117,31 +117,44 @@ type BatchResults struct {
 }
 
 // Exec reads the result of the next queued exec statement and returns the
-// number of rows affected.
+// number of rows affected. It returns an error if the next entry is a query
+// entry (IsQuery=true); call Query instead.
 func (r *BatchResults) Exec() (int64, error) {
 	if r.idx >= len(r.entries) {
 		return 0, fmt.Errorf("grizzle: BatchResults.Exec: no more results")
 	}
-	r.idx++
+	if r.entries[r.idx].isQuery {
+		return 0, fmt.Errorf("grizzle: BatchResults.Exec: next entry is a query entry; call Query instead")
+	}
 	ct, err := r.br.Exec()
 	if err != nil {
 		return 0, err
 	}
+	r.idx++
 	return ct.RowsAffected(), nil
 }
 
 // ExecCommandTag reads the result of the next queued exec statement and returns
-// the raw pgconn.CommandTag.
+// the raw pgconn.CommandTag. It returns an error if the next entry is a query
+// entry (IsQuery=true); call Query instead.
 func (r *BatchResults) ExecCommandTag() (pgconn.CommandTag, error) {
 	if r.idx >= len(r.entries) {
 		return pgconn.CommandTag{}, fmt.Errorf("grizzle: BatchResults.ExecCommandTag: no more results")
 	}
+	if r.entries[r.idx].isQuery {
+		return pgconn.CommandTag{}, fmt.Errorf("grizzle: BatchResults.ExecCommandTag: next entry is a query entry; call Query instead")
+	}
+	ct, err := r.br.Exec()
+	if err != nil {
+		return pgconn.CommandTag{}, err
+	}
 	r.idx++
-	return r.br.Exec()
+	return ct, nil
 }
 
 // Query reads the rows from the next queued query statement. The caller must
-// close the returned pgx.Rows before calling Query or Exec again.
+// close the returned pgx.Rows before calling Query or Exec again. It returns
+// an error if the next entry is an exec entry (IsQuery=false); call Exec instead.
 //
 //	rows, err := results.Query()
 //	users, err := pgxdb.ScanAll[UserSelect](rows, err)
@@ -149,8 +162,15 @@ func (r *BatchResults) Query() (pgx.Rows, error) {
 	if r.idx >= len(r.entries) {
 		return nil, fmt.Errorf("grizzle: BatchResults.Query: no more results")
 	}
+	if !r.entries[r.idx].isQuery {
+		return nil, fmt.Errorf("grizzle: BatchResults.Query: next entry is an exec entry; call Exec instead")
+	}
+	rows, err := r.br.Query()
+	if err != nil {
+		return nil, err
+	}
 	r.idx++
-	return r.br.Query()
+	return rows, nil
 }
 
 // Close closes the underlying pgx.BatchResults. Must be called after all
@@ -198,10 +218,17 @@ type BatchEntry struct {
 
 // Entries returns a snapshot of all queued entries. It is intended for use in
 // unit tests that need to verify generated SQL without a live database.
+// Each returned BatchEntry has its own copy of the Args slice so that callers
+// cannot accidentally mutate the Batch's internal state.
 func (b *Batch) Entries() []BatchEntry {
 	out := make([]BatchEntry, len(b.entries))
 	for i, e := range b.entries {
-		out[i] = BatchEntry{SQL: e.sql, Args: e.args, IsQuery: e.isQuery}
+		var argsCopy []any
+		if e.args != nil {
+			argsCopy = make([]any, len(e.args))
+			copy(argsCopy, e.args)
+		}
+		out[i] = BatchEntry{SQL: e.sql, Args: argsCopy, IsQuery: e.isQuery}
 	}
 	return out
 }
@@ -211,6 +238,18 @@ func (b *Batch) Entries() []BatchEntry {
 // return an error. Use this in unit tests that only need to inspect generated SQL.
 func NewBatchForTest() *Batch {
 	return &Batch{}
+}
+
+// NewBatchResultsForTest returns a BatchResults backed by the provided
+// pgx.BatchResults mock and the given entries. It is intended for unit tests
+// that need to verify entry-type guards and index-advancement behaviour
+// without a live database connection.
+func NewBatchResultsForTest(br pgx.BatchResults, entries []BatchEntry) *BatchResults {
+	internal := make([]batchEntry, len(entries))
+	for i, e := range entries {
+		internal[i] = batchEntry{sql: e.SQL, args: e.Args, isQuery: e.IsQuery}
+	}
+	return &BatchResults{br: br, entries: internal}
 }
 
 // -------------------------------------------------------------------

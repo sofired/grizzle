@@ -5,10 +5,20 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	pgxdb "github.com/sofired/grizzle/driver/pgx"
 	ts "github.com/sofired/grizzle/internal/testschema"
 	"github.com/sofired/grizzle/query"
 )
+
+// stubBatchResults is a minimal pgx.BatchResults mock for unit tests.
+type stubBatchResults struct{}
+
+func (s *stubBatchResults) Exec() (pgconn.CommandTag, error)  { return pgconn.CommandTag{}, nil }
+func (s *stubBatchResults) Query() (pgx.Rows, error)          { return nil, nil }
+func (s *stubBatchResults) QueryRow() pgx.Row                 { return nil }
+func (s *stubBatchResults) Close() error                      { return nil }
 
 // TestBatch_QueueBuildsSQL verifies that Queue / QueueQuery / QueueRaw all
 // accept valid input and that the batch length is tracked correctly.
@@ -150,5 +160,100 @@ func TestBatch_MixedQueueTypes(t *testing.T) {
 		if e.IsQuery != wantIsQuery[i] {
 			t.Errorf("entries[%d].IsQuery = %v, want %v", i, e.IsQuery, wantIsQuery[i])
 		}
+	}
+}
+
+// TestBatchResults_ExecRejectsQueryEntry verifies that calling Exec when the
+// next entry is a query entry returns an error and does not advance idx.
+func TestBatchResults_ExecRejectsQueryEntry(t *testing.T) {
+	entries := []pgxdb.BatchEntry{
+		{SQL: "SELECT 1", Args: nil, IsQuery: true},
+	}
+	r := pgxdb.NewBatchResultsForTest(&stubBatchResults{}, entries)
+
+	_, err := r.Exec()
+	if err == nil {
+		t.Fatal("expected error when calling Exec on a query entry, got nil")
+	}
+	if !strings.Contains(err.Error(), "query entry") {
+		t.Errorf("expected error to mention 'query entry', got: %v", err)
+	}
+}
+
+// TestBatchResults_QueryRejectsExecEntry verifies that calling Query when the
+// next entry is an exec entry returns an error and does not advance idx.
+func TestBatchResults_QueryRejectsExecEntry(t *testing.T) {
+	entries := []pgxdb.BatchEntry{
+		{SQL: "UPDATE users SET enabled = false", Args: nil, IsQuery: false},
+	}
+	r := pgxdb.NewBatchResultsForTest(&stubBatchResults{}, entries)
+
+	_, err := r.Query()
+	if err == nil {
+		t.Fatal("expected error when calling Query on an exec entry, got nil")
+	}
+	if !strings.Contains(err.Error(), "exec entry") {
+		t.Errorf("expected error to mention 'exec entry', got: %v", err)
+	}
+}
+
+// TestBatchResults_ExecCommandTagRejectsQueryEntry verifies that calling
+// ExecCommandTag when the next entry is a query entry returns an error.
+func TestBatchResults_ExecCommandTagRejectsQueryEntry(t *testing.T) {
+	entries := []pgxdb.BatchEntry{
+		{SQL: "SELECT id FROM users", Args: nil, IsQuery: true},
+	}
+	r := pgxdb.NewBatchResultsForTest(&stubBatchResults{}, entries)
+
+	_, err := r.ExecCommandTag()
+	if err == nil {
+		t.Fatal("expected error when calling ExecCommandTag on a query entry, got nil")
+	}
+	if !strings.Contains(err.Error(), "query entry") {
+		t.Errorf("expected error to mention 'query entry', got: %v", err)
+	}
+}
+
+// TestBatchResults_IdxNotAdvancedOnTypeError verifies that idx is not advanced
+// when an entry-type mismatch error is returned, so the caller can call the
+// correct method on the same entry.
+func TestBatchResults_IdxNotAdvancedOnTypeError(t *testing.T) {
+	entries := []pgxdb.BatchEntry{
+		{SQL: "SELECT 1", Args: nil, IsQuery: true},
+		{SQL: "SELECT 2", Args: nil, IsQuery: true},
+	}
+	r := pgxdb.NewBatchResultsForTest(&stubBatchResults{}, entries)
+
+	// Calling Exec on a query entry should fail.
+	_, err := r.Exec()
+	if err == nil {
+		t.Fatal("expected error on first Exec (query entry), got nil")
+	}
+
+	// idx must not have advanced; calling Query for the same entry must succeed.
+	_, err = r.Query()
+	if err != nil {
+		t.Errorf("expected Query to succeed after failed Exec, got: %v", err)
+	}
+}
+
+// TestBatch_EntriesArgsAreCopied verifies that mutating the Args slice returned
+// by Entries does not affect the Batch's internal state.
+func TestBatch_EntriesArgsAreCopied(t *testing.T) {
+	b := pgxdb.NewBatchForTest()
+	b.QueueRaw("UPDATE users SET enabled = $1 WHERE id = $2", false, "some-id")
+
+	entries := b.Entries()
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+
+	// Mutate the returned Args slice.
+	entries[0].Args[0] = "mutated"
+
+	// Re-fetch entries; internal state must be unchanged.
+	fresh := b.Entries()
+	if fresh[0].Args[0] != false {
+		t.Errorf("expected internal arg to remain false, got: %v", fresh[0].Args[0])
 	}
 }
