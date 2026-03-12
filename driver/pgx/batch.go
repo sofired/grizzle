@@ -46,9 +46,10 @@ type Batch struct {
 	}
 }
 
-// Queue adds a builder (INSERT, UPDATE, DELETE, or SELECT) to the batch as
-// an exec-style entry. The number of rows affected is readable via
-// BatchResults.Exec after Send.
+// Queue adds a builder (INSERT, UPDATE, or DELETE) to the batch as an
+// exec-style entry. The number of rows affected is readable via
+// BatchResults.Exec after Send. For SELECT statements whose rows you want
+// to read, use QueueQuery instead.
 func (b *Batch) Queue(bl builder) {
 	sql, args := bl.Build(dialect.Postgres)
 	b.entries = append(b.entries, batchEntry{sql: sql, args: args, isQuery: false})
