@@ -74,6 +74,101 @@ func ExampleScanOneOpt() {
 	fmt.Println(user.Username)
 }
 
+// ExampleBatch_exec demonstrates sending multiple mutation statements in a
+// single round-trip. This is more efficient than issuing each statement
+// separately because all SQL is pipelined to PostgreSQL at once.
+//
+// Use Queue for INSERT / UPDATE / DELETE and read rows-affected via
+// BatchResults.Exec in the same order.
+func ExampleBatch_exec() {
+	ctx := context.Background()
+
+	batch := db.NewBatch()
+	batch.Queue(query.Update(ts.UsersT).
+		Set("enabled", false).
+		Where(ts.UsersT.DeletedAt.IsNotNull()))
+	batch.Queue(query.Update(ts.UsersT).
+		Set("purged_at", nil).
+		Where(ts.UsersT.DeletedAt.IsNull()))
+
+	results, err := batch.Send(ctx)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer results.Close()
+
+	n1, err := results.Exec()
+	if err != nil {
+		log.Fatal(err)
+	}
+	n2, err := results.Exec()
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Printf("disabled %d users, cleared purge flag on %d users\n", n1, n2)
+}
+
+// ExampleBatch_query demonstrates queuing multiple SELECT statements and
+// collecting typed results for each in order using ScanAll.
+func ExampleBatch_query() {
+	ctx := context.Background()
+
+	batch := db.NewBatch()
+	batch.QueueQuery(query.Select().From(ts.UsersT).Where(ts.UsersT.Enabled.IsTrue()))
+	batch.QueueQuery(query.Select().From(ts.UsersT).Where(ts.UsersT.DeletedAt.IsNull()))
+
+	results, err := batch.Send(ctx)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer results.Close()
+
+	activeUsers, err := pgxdb.ScanAll[ts.UserSelect](results.Query())
+	if err != nil {
+		log.Fatal(err)
+	}
+	nonDeletedUsers, err := pgxdb.ScanAll[ts.UserSelect](results.Query())
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Printf("active: %d, non-deleted: %d\n", len(activeUsers), len(nonDeletedUsers))
+}
+
+// ExampleBatch_transaction shows batching inside a transaction — all
+// statements are sent in one round-trip and participate in the same
+// transaction.
+func ExampleBatch_transaction() {
+	ctx := context.Background()
+
+	err := db.Transaction(ctx, func(tx *pgxdb.Tx) error {
+		batch := tx.NewBatch()
+		batch.Queue(query.Update(ts.UsersT).
+			Set("enabled", false).
+			Where(ts.UsersT.DeletedAt.IsNotNull()))
+		batch.Queue(query.Update(ts.RealmsT).
+			Set("enabled", false).
+			Where(ts.RealmsT.Enabled.IsTrue()))
+
+		results, err := batch.Send(ctx)
+		if err != nil {
+			return err
+		}
+		defer results.Close()
+
+		if _, err := results.Exec(); err != nil {
+			return err
+		}
+		if _, err := results.Exec(); err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
 // ExampleDB_Transaction shows the transaction callback pattern.
 // Returning a non-nil error from fn automatically rolls back the transaction.
 func ExampleDB_Transaction() {
