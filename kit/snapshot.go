@@ -56,9 +56,9 @@ const snapshotVersion = "1"
 type Snapshot struct {
 	Version   string                `json:"version"`
 	CreatedAt time.Time             `json:"created_at"`
-	Tables    map[string]*TableSnap `json:"tables"` // keyed by qualified table name
-	Views     map[string]*ViewSnap  `json:"views,omitempty"`  // keyed by qualified view name
-	Enums     map[string]*EnumSnap  `json:"enums,omitempty"`  // keyed by qualified type name
+	Tables map[string]*TableSnap `json:"tables"`          // keyed by qualified table name
+	Views  map[string]*ViewSnap  `json:"views,omitempty"` // keyed by qualified view name
+	Enums  map[string]*EnumSnap  `json:"enums,omitempty"` // keyed by qualified type name
 }
 
 // TableSnap is the snapshot of a single table.

@@ -12,13 +12,9 @@ import (
 // --- Schema fixtures ---
 
 var statusEnum = pg.Enum("status", "pending", "active", "archived")
-var roleEnum = pg.Enum("role", "admin", "user", "guest")
 
 var activeUsersView = pg.CreateView("active_users",
 	`SELECT id, username, email FROM users WHERE enabled = true`)
-
-var recentOrdersView = pg.CreateView("recent_orders",
-	`SELECT * FROM orders WHERE created_at > now() - interval '7 days'`)
 
 // --- FromSchema tests ---
 

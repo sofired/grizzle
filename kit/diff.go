@@ -27,7 +27,7 @@ const (
 
 	// Enum change kinds.
 	ChangeCreateEnum ChangeKind = "create_enum"
-	ChangeAlterEnum  ChangeKind = "alter_enum"  // add values to an existing enum
+	ChangeAlterEnum  ChangeKind = "alter_enum" // add values to an existing enum
 	ChangeDropEnum   ChangeKind = "drop_enum"
 )
 

@@ -4,8 +4,8 @@ package pg
 // Create one with CreateView().
 type ViewDef struct {
 	Name   string
-	Schema string  // PostgreSQL schema namespace; empty = "public"
-	SQL    string  // The SELECT statement body of the view
+	Schema string // PostgreSQL schema namespace; empty = "public"
+	SQL    string // The SELECT statement body of the view
 }
 
 // QualifiedName returns the schema-qualified view name for use in SQL.
