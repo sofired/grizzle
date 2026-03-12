@@ -111,6 +111,11 @@ func (e rawExpr) ToSQL(_ *BuildContext) string { return e.sql }
 // The args are appended to the context's parameter list alongside any
 // parameters already accumulated by other expressions in the query.
 //
+// Mismatch behaviour: if the template contains more $? tokens than args,
+// the extra tokens are emitted literally as "$?" in the generated SQL so
+// the mismatch is visible rather than silently dropped. Extra args beyond
+// the number of $? tokens are ignored.
+//
 // Example (PostgreSQL, called after two parameters are already bound):
 //
 //	expr.RawArgs("tsv @@ websearch_to_tsquery($?)", searchTerm)
