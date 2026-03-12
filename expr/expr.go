@@ -104,6 +104,58 @@ type rawExpr struct{ sql string }
 
 func (e rawExpr) ToSQL(_ *BuildContext) string { return e.sql }
 
+// RawArgs constructs a parameterised raw SQL fragment. Use $? as a
+// dialect-agnostic placeholder in the template; each $? is replaced in
+// order with the corresponding bound-parameter placeholder produced by
+// the active BuildContext ($1/$2/… for PostgreSQL, ? for MySQL/SQLite).
+// The args are appended to the context's parameter list alongside any
+// parameters already accumulated by other expressions in the query.
+//
+// Example (PostgreSQL, called after two parameters are already bound):
+//
+//	expr.RawArgs("tsv @@ websearch_to_tsquery($?)", searchTerm)
+//	// → "tsv @@ websearch_to_tsquery($3)"
+//
+// WARNING: the template string is embedded verbatim. Never interpolate
+// user-controlled identifiers into the template — only bind user values
+// through the $? mechanism.
+func RawArgs(template string, args ...any) Expression {
+	return rawArgsExpr{template: template, args: args}
+}
+
+type rawArgsExpr struct {
+	template string
+	args     []any
+}
+
+const rawPlaceholder = "$?"
+
+func (e rawArgsExpr) ToSQL(ctx *BuildContext) string {
+	const ph = rawPlaceholder
+	t := e.template
+	argIdx := 0
+	var b strings.Builder
+	for {
+		pos := strings.Index(t, ph)
+		if pos < 0 {
+			b.WriteString(t)
+			break
+		}
+		b.WriteString(t[:pos])
+		if argIdx < len(e.args) {
+			b.WriteString(ctx.Add(e.args[argIdx]))
+			argIdx++
+		} else {
+			// More placeholders than args: write the placeholder literally so
+			// the mismatch is visible in the generated SQL rather than silently
+			// omitting it.
+			b.WriteString(ph)
+		}
+		t = t[pos+len(ph):]
+	}
+	return b.String()
+}
+
 // -------------------------------------------------------------------
 // Internal expression types (produced by column operator methods)
 // -------------------------------------------------------------------

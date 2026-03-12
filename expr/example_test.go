@@ -79,3 +79,55 @@ func ExampleRaw() {
 	// Output:
 	// now()
 }
+
+// ExampleRawArgs demonstrates a parameterised raw SQL fragment using $? placeholders.
+// Each $? is replaced in order with the dialect's native placeholder ($1, $2, … for
+// PostgreSQL; ? for MySQL/SQLite) and the corresponding value is bound safely.
+func ExampleRawArgs() {
+	e := expr.RawArgs("tsv @@ websearch_to_tsquery($?)", "grizzle ORM")
+	ctx := expr.NewBuildContext(dialect.Postgres)
+	fmt.Println(e.ToSQL(ctx))
+	fmt.Println(ctx.Args())
+	// Output:
+	// tsv @@ websearch_to_tsquery($1)
+	// [grizzle ORM]
+}
+
+// ExampleRawArgs_multipleParams demonstrates binding multiple parameters in a single
+// RawArgs expression. Placeholders are numbered sequentially in the active context.
+func ExampleRawArgs_multipleParams() {
+	latDelta := 0.5
+	lonDelta := 0.5
+	lat := 37.7749
+	lon := -122.4194
+	e := expr.RawArgs(
+		"lat BETWEEN $? AND $? AND lon BETWEEN $? AND $?",
+		lat-latDelta, lat+latDelta, lon-lonDelta, lon+lonDelta,
+	)
+	ctx := expr.NewBuildContext(dialect.Postgres)
+	fmt.Println(e.ToSQL(ctx))
+	// Output:
+	// lat BETWEEN $1 AND $2 AND lon BETWEEN $3 AND $4
+}
+
+// ExampleRawArgs_composedWithAnd demonstrates RawArgs composing with And alongside
+// ordinary column expressions. Placeholder numbering continues from the context.
+func ExampleRawArgs_composedWithAnd() {
+	cond := expr.And(
+		ts.UsersT.Enabled.IsTrue(),
+		expr.RawArgs("tsv @@ websearch_to_tsquery($?)", "grizzle ORM"),
+	)
+	ctx := expr.NewBuildContext(dialect.Postgres)
+	fmt.Println(cond.ToSQL(ctx))
+	// Output:
+	// ("users"."enabled" = $1 AND tsv @@ websearch_to_tsquery($2))
+}
+
+// ExampleRawArgs_mysql demonstrates that RawArgs uses ? placeholders for MySQL.
+func ExampleRawArgs_mysql() {
+	e := expr.RawArgs("ST_Distance($?, $?) < $?", 37.7749, -122.4194, 10.0)
+	ctx := expr.NewBuildContext(dialect.MySQL)
+	fmt.Println(e.ToSQL(ctx))
+	// Output:
+	// ST_Distance(?, ?) < ?
+}
