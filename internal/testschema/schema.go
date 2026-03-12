@@ -77,8 +77,23 @@ type RealmsTable struct {
 	UpdatedAt   expr.TimestampColumn
 }
 
-func (RealmsTable) GrizTableName() string  { return "realms" }
-func (RealmsTable) GrizTableAlias() string { return "realms" }
+func (t RealmsTable) GrizTableName() string  { return "realms" }
+func (t RealmsTable) GrizTableAlias() string { return t.ID.TableAlias }
+
+// As returns a renamed copy of RealmsTable where every column's TableAlias
+// is set to alias. The underlying table name ("realms") is preserved so the
+// SQL renderer can emit  "realms" AS "alias".
+func (t RealmsTable) As(alias string) RealmsTable {
+	return RealmsTable{
+		ID:          expr.UUIDColumn{ColBase: expr.ColBase{TableAlias: alias, ColName: t.ID.ColName}},
+		Name:        expr.StringColumn{ColBase: expr.ColBase{TableAlias: alias, ColName: t.Name.ColName}},
+		DisplayName: expr.StringColumn{ColBase: expr.ColBase{TableAlias: alias, ColName: t.DisplayName.ColName}},
+		Enabled:     expr.BoolColumn{ColBase: expr.ColBase{TableAlias: alias, ColName: t.Enabled.ColName}},
+		Settings:    expr.JSONBColumn[map[string]any]{ColBase: expr.ColBase{TableAlias: alias, ColName: t.Settings.ColName}},
+		CreatedAt:   expr.TimestampColumn{ColBase: expr.ColBase{TableAlias: alias, ColName: t.CreatedAt.ColName}},
+		UpdatedAt:   expr.TimestampColumn{ColBase: expr.ColBase{TableAlias: alias, ColName: t.UpdatedAt.ColName}},
+	}
+}
 
 // RealmsT is the singleton table handle used in queries.
 var RealmsT = RealmsTable{

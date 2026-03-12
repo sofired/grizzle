@@ -2096,18 +2096,18 @@ func TestCrossJoin_WithWhere(t *testing.T) {
 }
 
 func TestCrossJoin_ChainedWithInnerJoin(t *testing.T) {
-	// A CROSS JOIN followed by an INNER JOIN should produce both clauses.
-	sql, _ := query.Select().
-		From(ts.UsersT).
-		CrossJoin(ts.RealmsT).
-		InnerJoin(ts.RealmsT, ts.UsersT.RealmID.EQCol(ts.RealmsT.ID)).
-		Build(dialect.Postgres)
-	if !strings.Contains(sql, "CROSS JOIN") {
-		t.Errorf("expected CROSS JOIN in: %s", sql)
-	}
-	if !strings.Contains(sql, "INNER JOIN") {
-		t.Errorf("expected INNER JOIN in: %s", sql)
-	}
+	// A CROSS JOIN followed by an INNER JOIN should produce both clauses in order,
+	// using a distinct alias for the INNER JOIN side to avoid the duplicate-table-name
+	// error that Postgres raises when the same table appears twice without aliasing.
+	realms2 := ts.RealmsT.As("r2")
+	assertSQL(t, "CROSS JOIN chained with INNER JOIN",
+		query.Select().
+			From(ts.UsersT).
+			CrossJoin(ts.RealmsT).
+			InnerJoin(realms2, ts.UsersT.RealmID.EQCol(realms2.ID)),
+		`SELECT * FROM "users" CROSS JOIN "realms" INNER JOIN "realms" AS "r2" ON "users"."realm_id" = "r2"."id"`,
+		nil,
+	)
 }
 
 // -------------------------------------------------------------------
