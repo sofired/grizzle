@@ -98,6 +98,22 @@ func TestBatch_SendEmptyReturnsError(t *testing.T) {
 	}
 }
 
+// TestBatch_SendWithNoPoolReturnsError ensures that calling Send on a
+// NewBatchForTest batch (which has no pool) returns a descriptive error
+// rather than panicking.
+func TestBatch_SendWithNoPoolReturnsError(t *testing.T) {
+	b := pgxdb.NewBatchForTest()
+	b.QueueRaw("SELECT 1")
+
+	_, err := b.Send(nil) //nolint:staticcheck // intentional nil ctx for unit test
+	if err == nil {
+		t.Fatal("expected error when sending batch with no pool, got nil")
+	}
+	if !strings.Contains(err.Error(), "no pool") {
+		t.Errorf("expected 'no pool' in error, got: %v", err)
+	}
+}
+
 // TestBatch_QueueRawArgs verifies that args passed to QueueRaw are stored.
 func TestBatch_QueueRawArgs(t *testing.T) {
 	b := pgxdb.NewBatchForTest()

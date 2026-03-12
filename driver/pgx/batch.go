@@ -80,11 +80,15 @@ func (b *Batch) Len() int { return len(b.entries) }
 // Send executes all queued statements in a single round-trip and returns a
 // BatchResults for consuming results in order.
 //
-// The caller must call BatchResults.Close when done, regardless of whether
-// an error was returned.
+// When Send returns a non-nil error, the returned *BatchResults is nil;
+// there is nothing to close. When Send succeeds, the caller must call
+// BatchResults.Close when done reading results.
 func (b *Batch) Send(ctx context.Context) (*BatchResults, error) {
 	if len(b.entries) == 0 {
 		return nil, fmt.Errorf("grizzle: Batch.Send called with no queued statements")
+	}
+	if b.pool == nil {
+		return nil, fmt.Errorf("grizzle: Batch.Send called on a test batch with no pool (use DB.NewBatch or Tx.NewBatch)")
 	}
 
 	pgxBatch := &pgx.Batch{}
@@ -203,7 +207,7 @@ func (b *Batch) Entries() []BatchEntry {
 
 // NewBatchForTest returns a Batch with no pool attached. It is safe to call
 // Queue, QueueQuery, QueueRaw, QueueRawQuery, Len, and Entries, but Send will
-// panic. Use this in unit tests that only need to inspect generated SQL.
+// return an error. Use this in unit tests that only need to inspect generated SQL.
 func NewBatchForTest() *Batch {
 	return &Batch{}
 }
