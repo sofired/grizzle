@@ -141,6 +141,23 @@ func TestRawArgs_noArgs(t *testing.T) {
 	}
 }
 
+func TestRawArgs_moreArgsThanPlaceholders(t *testing.T) {
+	// When there are more args than $? tokens, the extra args are not bound.
+	// The generated SQL only contains references to the args that matched a
+	// placeholder — unused trailing args are silently ignored.
+	e := expr.RawArgs("a = $?", 1, 2, 3) // three args but only one placeholder
+	ctx := expr.NewBuildContext(dialect.Postgres)
+	got := e.ToSQL(ctx)
+	want := "a = $1"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+	// Only one arg is actually bound; the other two are not added to ctx.
+	if len(ctx.Args()) != 1 {
+		t.Errorf("expected 1 arg, got %v", ctx.Args())
+	}
+}
+
 func TestRawArgs_implementsExpression(t *testing.T) {
 	// Compile-time check: RawArgs must satisfy expr.Expression.
 	var _ expr.Expression = expr.RawArgs("$?", 1)
