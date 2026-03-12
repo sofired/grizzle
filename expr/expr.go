@@ -374,6 +374,11 @@ func (e toTsvectorExpr) MatchesPlain(query string) Expression {
 	return ftsMatchExprOnExpr{left: e, tsFn: "plainto_tsquery", config: "", query: query}
 }
 
+// MatchesPhrase returns to_tsvector(...) @@ phraseto_tsquery($1).
+func (e toTsvectorExpr) MatchesPhrase(query string) Expression {
+	return ftsMatchExprOnExpr{left: e, tsFn: "phraseto_tsquery", config: "", query: query}
+}
+
 // MatchesWebSearch returns to_tsvector(...) @@ websearch_to_tsquery($1).
 func (e toTsvectorExpr) MatchesWebSearch(query string) Expression {
 	return ftsMatchExprOnExpr{left: e, tsFn: "websearch_to_tsquery", config: "", query: query}
