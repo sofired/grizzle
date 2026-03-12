@@ -70,11 +70,18 @@ func DryRun(ctx context.Context, pool *pgxpool.Pool, tables ...*pg.TableDef) (Pu
 
 // liveToSnapshot converts an introspect.LiveSnapshot into a kit.Snapshot
 // so the differ can compare apples to apples.
+//
+// Note: views and enums from the live database are intentionally NOT
+// populated here. Push() and DryRun() are table-only APIs; if live views
+// and enums were included, Diff() would generate DROP VIEW / DROP TYPE
+// statements for every view and enum not present in the caller's table list.
+// Users who need full-schema diffs (including views and enums) should use
+// IntrospectPostgres directly and build the target snapshot with FromSchema.
 func liveToSnapshot(live introspect.LiveSnapshot) Snapshot {
 	snap := Snapshot{
 		Tables: make(map[string]*TableSnap, len(live.Tables)),
-		Views:  make(map[string]*ViewSnap, len(live.Views)),
-		Enums:  make(map[string]*EnumSnap, len(live.Enums)),
+		Views:  make(map[string]*ViewSnap),
+		Enums:  make(map[string]*EnumSnap),
 	}
 	for key, t := range live.Tables {
 		if t.Name == MigrationsTable {
@@ -85,20 +92,6 @@ func liveToSnapshot(live introspect.LiveSnapshot) Snapshot {
 			Schema:      t.Schema,
 			Columns:     t.Columns,
 			Constraints: t.Constraints,
-		}
-	}
-	for key, v := range live.Views {
-		snap.Views[key] = &ViewSnap{
-			Name:   v.Name,
-			Schema: v.Schema,
-			SQL:    v.SQL,
-		}
-	}
-	for key, e := range live.Enums {
-		snap.Enums[key] = &EnumSnap{
-			Name:   e.Name,
-			Schema: e.Schema,
-			Values: e.Values,
 		}
 	}
 	return snap

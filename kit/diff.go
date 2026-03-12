@@ -58,14 +58,14 @@ type Change struct {
 // Ordering is deterministic:
 //
 //  1. Create new enums (types needed by tables/columns).
-//  2. Create new views.
-//  3. Create new tables (so FK references resolve).
+//  2. Create new tables (so FK references and view references resolve).
+//  3. Create new views (after tables exist, since views SELECT FROM tables).
 //  4. Alter existing tables (columns first, then constraints).
 //  5. Alter existing enums (add values only).
 //  6. Replace changed views (drop + recreate).
-//  7. Drop removed constraints.
-//  8. Drop removed tables (in reverse to respect FKs — caller may need to reorder).
-//  9. Drop removed views.
+//  7. Drop removed views (before tables, since views depend on tables).
+//  8. Drop removed constraints.
+//  9. Drop removed tables (in reverse to respect FKs — caller may need to reorder).
 //  10. Drop removed enums.
 func Diff(old, new Snapshot) []Change {
 	var changes []Change
@@ -96,19 +96,7 @@ func Diff(old, new Snapshot) []Change {
 		}
 	}
 
-	// Phase 2: new views not in old → CREATE VIEW.
-	for name, newV := range new.Views {
-		if _, exists := old.Views[name]; !exists {
-			v := *newV
-			changes = append(changes, Change{
-				Kind:      ChangeCreateView,
-				TableName: name,
-				View:      &v,
-			})
-		}
-	}
-
-	// Phase 3: new tables not in old → CREATE TABLE.
+	// Phase 2: new tables not in old → CREATE TABLE (must precede Phase 3 views).
 	for name := range new.Tables {
 		if _, exists := old.Tables[name]; !exists {
 			changes = append(changes, Change{
@@ -117,6 +105,18 @@ func Diff(old, new Snapshot) []Change {
 			})
 			// Individual column and constraint adds are implied by CREATE TABLE;
 			// we don't emit separate ADD COLUMN / ADD INDEX changes for new tables.
+		}
+	}
+
+	// Phase 3: new views not in old → CREATE VIEW (after tables so view SELECT FROM works).
+	for name, newV := range new.Views {
+		if _, exists := old.Views[name]; !exists {
+			v := *newV
+			changes = append(changes, Change{
+				Kind:      ChangeCreateView,
+				TableName: name,
+				View:      &v,
+			})
 		}
 	}
 
@@ -161,17 +161,7 @@ func Diff(old, new Snapshot) []Change {
 		}
 	}
 
-	// Phase 7: tables in old but not new → DROP TABLE.
-	for name := range old.Tables {
-		if _, exists := new.Tables[name]; !exists {
-			changes = append(changes, Change{
-				Kind:      ChangeDropTable,
-				TableName: name,
-			})
-		}
-	}
-
-	// Phase 8: views in old but not new → DROP VIEW.
+	// Phase 7: views in old but not new → DROP VIEW (before tables, since views depend on tables).
 	for name, oldV := range old.Views {
 		if _, exists := new.Views[name]; !exists {
 			v := *oldV
@@ -179,6 +169,16 @@ func Diff(old, new Snapshot) []Change {
 				Kind:      ChangeDropView,
 				TableName: name,
 				View:      &v,
+			})
+		}
+	}
+
+	// Phase 8: tables in old but not new → DROP TABLE.
+	for name := range old.Tables {
+		if _, exists := new.Tables[name]; !exists {
+			changes = append(changes, Change{
+				Kind:      ChangeDropTable,
+				TableName: name,
 			})
 		}
 	}

@@ -123,6 +123,72 @@ func TestDiff_ModifiedView(t *testing.T) {
 	}
 }
 
+func TestDiff_Ordering_ViewCreatedAfterTable(t *testing.T) {
+	// When both a table and a view are new, the CREATE TABLE must appear
+	// before CREATE VIEW because the view SELECT FROM the table.
+	tbl := pg.Table("users",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+	).Build()
+	v := pg.CreateView("active_users", `SELECT id FROM users`)
+
+	old := kit.EmptySnapshot()
+	newSnap := kit.FromSchema(kit.SchemaObjects{
+		Tables: []*pg.TableDef{tbl},
+		Views:  []*pg.ViewDef{v},
+	})
+	changes := kit.Diff(old, newSnap)
+
+	createTableIdx := -1
+	createViewIdx := -1
+	for i, c := range changes {
+		switch c.Kind {
+		case kit.ChangeCreateTable:
+			createTableIdx = i
+		case kit.ChangeCreateView:
+			createViewIdx = i
+		}
+	}
+	if createTableIdx < 0 || createViewIdx < 0 {
+		t.Fatalf("expected both ChangeCreateTable and ChangeCreateView, got %v", changes)
+	}
+	if createTableIdx >= createViewIdx {
+		t.Errorf("ChangeCreateTable (idx %d) must precede ChangeCreateView (idx %d)", createTableIdx, createViewIdx)
+	}
+}
+
+func TestDiff_Ordering_ViewDroppedBeforeTable(t *testing.T) {
+	// When both a table and a view are removed, the DROP VIEW must appear
+	// before DROP TABLE because the view depends on the table.
+	tbl := pg.Table("users",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+	).Build()
+	v := pg.CreateView("active_users", `SELECT id FROM users`)
+
+	old := kit.FromSchema(kit.SchemaObjects{
+		Tables: []*pg.TableDef{tbl},
+		Views:  []*pg.ViewDef{v},
+	})
+	newSnap := kit.EmptySnapshot()
+	changes := kit.Diff(old, newSnap)
+
+	dropTableIdx := -1
+	dropViewIdx := -1
+	for i, c := range changes {
+		switch c.Kind {
+		case kit.ChangeDropTable:
+			dropTableIdx = i
+		case kit.ChangeDropView:
+			dropViewIdx = i
+		}
+	}
+	if dropTableIdx < 0 || dropViewIdx < 0 {
+		t.Fatalf("expected both ChangeDropTable and ChangeDropView, got %v", changes)
+	}
+	if dropViewIdx >= dropTableIdx {
+		t.Errorf("ChangeDropView (idx %d) must precede ChangeDropTable (idx %d)", dropViewIdx, dropTableIdx)
+	}
+}
+
 // --- Diff tests for enums ---
 
 func TestDiff_CreateEnum(t *testing.T) {
