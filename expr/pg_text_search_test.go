@@ -223,10 +223,25 @@ func TestToTsquery(t *testing.T) {
 }
 
 func TestToTsqueryWithConfig(t *testing.T) {
-	got := sql(expr.ToTsquery("grizzle & orm", "english"))
+	got := sql(expr.ToTsqueryWithConfig("english", "grizzle & orm"))
 	want := `to_tsquery($1, $2)`
 	if got != want {
-		t.Errorf("ToTsquery(config): got %q, want %q", got, want)
+		t.Errorf("ToTsqueryWithConfig: got %q, want %q", got, want)
+	}
+}
+
+func TestToTsqueryWithConfig_ArgOrder(t *testing.T) {
+	ctx := pgCtx()
+	_ = expr.ToTsqueryWithConfig("english", "grizzle & orm").ToSQL(ctx)
+	args := ctx.Args()
+	if len(args) != 2 {
+		t.Fatalf("expected 2 args, got %d", len(args))
+	}
+	if args[0] != "english" {
+		t.Errorf("arg[0]: got %v, want %q", args[0], "english")
+	}
+	if args[1] != "grizzle & orm" {
+		t.Errorf("arg[1]: got %v, want %q", args[1], "grizzle & orm")
 	}
 }
 
@@ -238,11 +253,27 @@ func TestPlainToTsquery(t *testing.T) {
 	}
 }
 
+func TestPlainToTsqueryWithConfig(t *testing.T) {
+	got := sql(expr.PlainToTsqueryWithConfig("english", "grizzle orm"))
+	want := `plainto_tsquery($1, $2)`
+	if got != want {
+		t.Errorf("PlainToTsqueryWithConfig: got %q, want %q", got, want)
+	}
+}
+
 func TestPhraseToTsquery(t *testing.T) {
 	got := sql(expr.PhraseToTsquery("fast full text search"))
 	want := `phraseto_tsquery($1)`
 	if got != want {
 		t.Errorf("PhraseToTsquery: got %q, want %q", got, want)
+	}
+}
+
+func TestPhraseToTsqueryWithConfig(t *testing.T) {
+	got := sql(expr.PhraseToTsqueryWithConfig("english", "fast full text search"))
+	want := `phraseto_tsquery($1, $2)`
+	if got != want {
+		t.Errorf("PhraseToTsqueryWithConfig: got %q, want %q", got, want)
 	}
 }
 
@@ -254,6 +285,14 @@ func TestWebsearchToTsquery(t *testing.T) {
 	}
 }
 
+func TestWebsearchToTsqueryWithConfig(t *testing.T) {
+	got := sql(expr.WebsearchToTsqueryWithConfig("english", "grizzle -orm"))
+	want := `websearch_to_tsquery($1, $2)`
+	if got != want {
+		t.Errorf("WebsearchToTsqueryWithConfig: got %q, want %q", got, want)
+	}
+}
+
 // -----------------------------------------------------------------------
 // TsRank / TsRankCd
 // -----------------------------------------------------------------------
@@ -262,7 +301,7 @@ func TestTsRank(t *testing.T) {
 	tsq := expr.PlainToTsquery("grizzle orm")
 	rank := expr.TsRank(ts.ArticlesT.SearchVector, tsq)
 	got := rank.ToSQL(pgCtx())
-	want := `ts_rank("articles"."search_vector", plainto_tsquery($1))`
+	want := `TS_RANK("articles"."search_vector", plainto_tsquery($1))`
 	if got != want {
 		t.Errorf("TsRank: got %q, want %q", got, want)
 	}
@@ -272,7 +311,7 @@ func TestTsRankCd(t *testing.T) {
 	tsq := expr.PlainToTsquery("grizzle orm")
 	rank := expr.TsRankCd(ts.ArticlesT.SearchVector, tsq)
 	got := rank.ToSQL(pgCtx())
-	want := `ts_rank_cd("articles"."search_vector", plainto_tsquery($1))`
+	want := `TS_RANK_CD("articles"."search_vector", plainto_tsquery($1))`
 	if got != want {
 		t.Errorf("TsRankCd: got %q, want %q", got, want)
 	}
@@ -282,7 +321,7 @@ func TestTsRank_Desc(t *testing.T) {
 	tsq := expr.PlainToTsquery("grizzle orm")
 	order := expr.TsRank(ts.ArticlesT.SearchVector, tsq).Desc()
 	got := order.ToSQL(pgCtx())
-	want := `ts_rank("articles"."search_vector", plainto_tsquery($1)) DESC`
+	want := `TS_RANK("articles"."search_vector", plainto_tsquery($1)) DESC`
 	if got != want {
 		t.Errorf("TsRank.Desc: got %q, want %q", got, want)
 	}
@@ -411,5 +450,5 @@ func ExampleTsRank() {
 	rank := expr.TsRank(ts.ArticlesT.SearchVector, tsq)
 	fmt.Println(rank.Desc().ToSQL(ctx))
 	// Output:
-	// ts_rank("articles"."search_vector", plainto_tsquery($1)) DESC
+	// TS_RANK("articles"."search_vector", plainto_tsquery($1)) DESC
 }
