@@ -822,3 +822,102 @@ func TestRenameColumn_NilGuard(t *testing.T) {
 		t.Errorf("expected nil for nil cols, got %v", stmts)
 	}
 }
+
+// -------------------------------------------------------------------
+// FK AddConstraint SQL generation — ON UPDATE clause regression tests
+//
+// These tests assert that GenerateChangeSQL / GenerateChangeSQLMySQL emit
+// the correct ON UPDATE clause in ALTER TABLE ... ADD CONSTRAINT SQL, so
+// that constraintsEqual drift detection and DDL generation stay in sync.
+// Without the ON UPDATE clause, applying a migration would silently use the
+// database default (NO ACTION), causing perpetual drop+add drift loops on
+// the next Push/Migrate.
+// -------------------------------------------------------------------
+
+func TestGenerateChangeSQL_AddFK_OnUpdate_Postgres(t *testing.T) {
+	snap := kit.FromDefs(usersDef)
+	fk := pg.Constraint{
+		Kind:       pg.KindForeignKey,
+		Name:       "orders_customer_fk",
+		Columns:    []string{"customer_id"},
+		FKTable:    "customers",
+		FKColumns:  []string{"id"},
+		FKOnDelete: pg.FKActionCascade,
+		FKOnUpdate: pg.FKActionSetNull,
+	}
+	change := kit.Change{
+		Kind:       kit.ChangeAddConstraint,
+		TableName:  "users",
+		Constraint: &fk,
+	}
+	stmts := kit.GenerateChangeSQL(snap, change)
+	if len(stmts) != 1 {
+		t.Fatalf("expected 1 statement, got %d: %v", len(stmts), stmts)
+	}
+	sql := stmts[0]
+	if !strings.Contains(sql, "ON DELETE CASCADE") {
+		t.Errorf("expected ON DELETE CASCADE in FK SQL, got:\n  %s", sql)
+	}
+	if !strings.Contains(sql, "ON UPDATE SET NULL") {
+		t.Errorf("expected ON UPDATE SET NULL in FK SQL, got:\n  %s", sql)
+	}
+}
+
+func TestGenerateChangeSQL_AddFK_OnUpdate_MySQL(t *testing.T) {
+	snap := kit.FromDefs(usersDef)
+	fk := pg.Constraint{
+		Kind:       pg.KindForeignKey,
+		Name:       "orders_customer_fk",
+		Columns:    []string{"customer_id"},
+		FKTable:    "customers",
+		FKColumns:  []string{"id"},
+		FKOnDelete: pg.FKActionCascade,
+		FKOnUpdate: pg.FKActionSetNull,
+	}
+	change := kit.Change{
+		Kind:       kit.ChangeAddConstraint,
+		TableName:  "users",
+		Constraint: &fk,
+	}
+	stmts := kit.GenerateChangeSQLMySQL(snap, change)
+	if len(stmts) != 1 {
+		t.Fatalf("expected 1 statement, got %d: %v", len(stmts), stmts)
+	}
+	sql := stmts[0]
+	if !strings.Contains(sql, "ON DELETE CASCADE") {
+		t.Errorf("expected ON DELETE CASCADE in MySQL FK SQL, got:\n  %s", sql)
+	}
+	if !strings.Contains(sql, "ON UPDATE SET NULL") {
+		t.Errorf("expected ON UPDATE SET NULL in MySQL FK SQL, got:\n  %s", sql)
+	}
+}
+
+func TestGenerateChangeSQL_AddFK_OnUpdate_NoAction_Omitted(t *testing.T) {
+	// NO ACTION is the database default and should not be emitted in the SQL.
+	snap := kit.FromDefs(usersDef)
+	fk := pg.Constraint{
+		Kind:       pg.KindForeignKey,
+		Name:       "orders_customer_fk",
+		Columns:    []string{"customer_id"},
+		FKTable:    "customers",
+		FKColumns:  []string{"id"},
+		FKOnDelete: pg.FKActionNoAction,
+		FKOnUpdate: pg.FKActionNoAction,
+	}
+	change := kit.Change{
+		Kind:       kit.ChangeAddConstraint,
+		TableName:  "users",
+		Constraint: &fk,
+	}
+	stmts := kit.GenerateChangeSQL(snap, change)
+	if len(stmts) != 1 {
+		t.Fatalf("expected 1 statement, got %d: %v", len(stmts), stmts)
+	}
+	sql := stmts[0]
+	if strings.Contains(sql, "ON DELETE") {
+		t.Errorf("NO ACTION ON DELETE should be omitted, got:\n  %s", sql)
+	}
+	if strings.Contains(sql, "ON UPDATE") {
+		t.Errorf("NO ACTION ON UPDATE should be omitted, got:\n  %s", sql)
+	}
+}

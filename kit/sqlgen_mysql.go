@@ -281,6 +281,9 @@ func addConstraintSQLMySQL(tableName string, c pg.Constraint) []string {
 		if c.FKOnDelete != "" && c.FKOnDelete != pg.FKActionNoAction {
 			sql += " ON DELETE " + string(c.FKOnDelete)
 		}
+		if c.FKOnUpdate != "" && c.FKOnUpdate != pg.FKActionNoAction {
+			sql += " ON UPDATE " + string(c.FKOnUpdate)
+		}
 		return []string{sql}
 	}
 	return nil
