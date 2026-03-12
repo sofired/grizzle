@@ -179,6 +179,171 @@ func TestDiff_AlterColumnType(t *testing.T) {
 	}
 }
 
+// -------------------------------------------------------------------
+// FK constraint equality tests
+// -------------------------------------------------------------------
+
+func TestDiff_FKConstraint_TargetTableChange(t *testing.T) {
+	// A FK that changes its referenced table must emit drop+re-add.
+	oldDef := pg.Table("orders",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("customer_id", pg.UUID().NotNull()),
+	).WithConstraints(func(t pg.TableRef) []pg.Constraint {
+		return []pg.Constraint{
+			pg.ForeignKey("orders_customer_fk").
+				From(t.Col("customer_id")).
+				References("customers", "id").
+				Build(),
+		}
+	})
+
+	newDef := pg.Table("orders",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("customer_id", pg.UUID().NotNull()),
+	).WithConstraints(func(t pg.TableRef) []pg.Constraint {
+		return []pg.Constraint{
+			pg.ForeignKey("orders_customer_fk").
+				From(t.Col("customer_id")).
+				References("accounts", "id"). // changed target table
+				Build(),
+		}
+	})
+
+	changes := kit.Diff(kit.FromDefs(oldDef), kit.FromDefs(newDef))
+	drops := countKind(changes, kit.ChangeDropConstraint)
+	adds := countKind(changes, kit.ChangeAddConstraint)
+	if drops != 1 || adds != 1 {
+		t.Errorf("expected 1 DropConstraint + 1 AddConstraint for FK target table change, got %d drops, %d adds: %v", drops, adds, changes)
+	}
+}
+
+func TestDiff_FKConstraint_OnDeleteChange(t *testing.T) {
+	// A FK that changes its ON DELETE action must emit drop+re-add.
+	oldDef := pg.Table("orders",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("customer_id", pg.UUID().NotNull()),
+	).WithConstraints(func(t pg.TableRef) []pg.Constraint {
+		return []pg.Constraint{
+			pg.ForeignKey("orders_customer_fk").
+				From(t.Col("customer_id")).
+				References("customers", "id").
+				OnDelete(pg.FKActionRestrict).
+				Build(),
+		}
+	})
+
+	newDef := pg.Table("orders",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("customer_id", pg.UUID().NotNull()),
+	).WithConstraints(func(t pg.TableRef) []pg.Constraint {
+		return []pg.Constraint{
+			pg.ForeignKey("orders_customer_fk").
+				From(t.Col("customer_id")).
+				References("customers", "id").
+				OnDelete(pg.FKActionCascade). // changed ON DELETE action
+				Build(),
+		}
+	})
+
+	changes := kit.Diff(kit.FromDefs(oldDef), kit.FromDefs(newDef))
+	drops := countKind(changes, kit.ChangeDropConstraint)
+	adds := countKind(changes, kit.ChangeAddConstraint)
+	if drops != 1 || adds != 1 {
+		t.Errorf("expected 1 DropConstraint + 1 AddConstraint for FK ON DELETE change, got %d drops, %d adds: %v", drops, adds, changes)
+	}
+}
+
+func TestDiff_FKConstraint_OnUpdateChange(t *testing.T) {
+	// A FK that changes its ON UPDATE action must emit drop+re-add.
+	oldDef := pg.Table("orders",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("customer_id", pg.UUID().NotNull()),
+	).WithConstraints(func(t pg.TableRef) []pg.Constraint {
+		return []pg.Constraint{
+			pg.ForeignKey("orders_customer_fk").
+				From(t.Col("customer_id")).
+				References("customers", "id").
+				OnUpdate(pg.FKActionNoAction).
+				Build(),
+		}
+	})
+
+	newDef := pg.Table("orders",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("customer_id", pg.UUID().NotNull()),
+	).WithConstraints(func(t pg.TableRef) []pg.Constraint {
+		return []pg.Constraint{
+			pg.ForeignKey("orders_customer_fk").
+				From(t.Col("customer_id")).
+				References("customers", "id").
+				OnUpdate(pg.FKActionSetNull). // changed ON UPDATE action
+				Build(),
+		}
+	})
+
+	changes := kit.Diff(kit.FromDefs(oldDef), kit.FromDefs(newDef))
+	drops := countKind(changes, kit.ChangeDropConstraint)
+	adds := countKind(changes, kit.ChangeAddConstraint)
+	if drops != 1 || adds != 1 {
+		t.Errorf("expected 1 DropConstraint + 1 AddConstraint for FK ON UPDATE change, got %d drops, %d adds: %v", drops, adds, changes)
+	}
+}
+
+func TestDiff_FKConstraint_FKColumnsChange(t *testing.T) {
+	// A FK that changes its referenced columns must emit drop+re-add.
+	oldDef := pg.Table("orders",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("customer_id", pg.UUID().NotNull()),
+	).WithConstraints(func(t pg.TableRef) []pg.Constraint {
+		return []pg.Constraint{
+			pg.ForeignKey("orders_customer_fk").
+				From(t.Col("customer_id")).
+				References("customers", "id").
+				Build(),
+		}
+	})
+
+	newDef := pg.Table("orders",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("customer_id", pg.UUID().NotNull()),
+	).WithConstraints(func(t pg.TableRef) []pg.Constraint {
+		return []pg.Constraint{
+			pg.ForeignKey("orders_customer_fk").
+				From(t.Col("customer_id")).
+				References("customers", "uuid"). // changed referenced column
+				Build(),
+		}
+	})
+
+	changes := kit.Diff(kit.FromDefs(oldDef), kit.FromDefs(newDef))
+	drops := countKind(changes, kit.ChangeDropConstraint)
+	adds := countKind(changes, kit.ChangeAddConstraint)
+	if drops != 1 || adds != 1 {
+		t.Errorf("expected 1 DropConstraint + 1 AddConstraint for FK column change, got %d drops, %d adds: %v", drops, adds, changes)
+	}
+}
+
+func TestDiff_FKConstraint_Unchanged(t *testing.T) {
+	// An identical FK constraint must not emit any changes.
+	def := pg.Table("orders",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("customer_id", pg.UUID().NotNull()),
+	).WithConstraints(func(t pg.TableRef) []pg.Constraint {
+		return []pg.Constraint{
+			pg.ForeignKey("orders_customer_fk").
+				From(t.Col("customer_id")).
+				References("customers", "id").
+				OnDelete(pg.FKActionCascade).
+				Build(),
+		}
+	})
+
+	changes := kit.Diff(kit.FromDefs(def), kit.FromDefs(def))
+	if len(changes) != 0 {
+		t.Errorf("expected 0 changes for identical FK constraint, got %d: %v", len(changes), changes)
+	}
+}
+
 func TestDiff_AddConstraint(t *testing.T) {
 	oldDef := pg.Table("users",
 		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
