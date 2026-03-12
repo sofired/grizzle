@@ -111,7 +111,7 @@ func (b *SelectBuilder) ForKeyShare() *SelectBuilder {
 
 // SkipLocked adds the SKIP LOCKED modifier to the locking clause, causing
 // already-locked rows to be skipped rather than waited on.
-// Supported by PostgreSQL and MySQL (FOR UPDATE / FOR SHARE only).
+// Supported by PostgreSQL and, in this API, by MySQL when used with FOR UPDATE.
 // Commonly used for queue/job-processing patterns.
 //
 //	query.Select().From(JobsT).Limit(1).ForUpdate().SkipLocked()
