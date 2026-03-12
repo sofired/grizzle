@@ -12,19 +12,20 @@ import (
 // Each method returns a modified copy, so builders can be shared and
 // extended without mutating the original.
 type SelectBuilder struct {
-	ctes      []cteClause             // optional WITH clauses (prepended as CTEs)
-	distinct  bool                    // SELECT DISTINCT
-	cols      []expr.SelectableColumn // nil = SELECT *
-	from      TableSource
-	joins     []joinClause
-	where     expr.Expression
-	orderBy   []expr.OrderExpr
-	groupBy   []expr.SelectableColumn
-	having    expr.Expression
-	limit     int  // 0 = no limit
-	offset    int  // 0 = no offset
-	forUpdate bool // append FOR UPDATE
-	forShare  bool // append FOR SHARE
+	ctes       []cteClause             // optional WITH clauses (prepended as CTEs)
+	distinct   bool                    // SELECT DISTINCT
+	distinctOn []expr.SelectableColumn // SELECT DISTINCT ON (cols) — PostgreSQL only
+	cols       []expr.SelectableColumn // nil = SELECT *
+	from       TableSource
+	joins      []joinClause
+	where      expr.Expression
+	orderBy    []expr.OrderExpr
+	groupBy    []expr.SelectableColumn
+	having     expr.Expression
+	limit      int  // 0 = no limit
+	offset     int  // 0 = no offset
+	forUpdate  bool // append FOR UPDATE
+	forShare   bool // append FOR SHARE
 }
 
 // cteClause holds a single WITH name AS (...) entry.
@@ -54,6 +55,33 @@ func Select(cols ...expr.SelectableColumn) *SelectBuilder {
 func (b *SelectBuilder) Distinct() *SelectBuilder {
 	cp := *b
 	cp.distinct = true
+	cp.distinctOn = nil
+	return &cp
+}
+
+// DistinctOn adds a PostgreSQL-specific DISTINCT ON (cols) clause, which
+// returns one row per distinct combination of the given columns, keeping the
+// first row as ordered by the ORDER BY clause.
+//
+// Calling DistinctOn overrides any previous Distinct() call.
+//
+// Note: PostgreSQL requires that the ORDER BY clause begins with the same
+// columns listed in DISTINCT ON. Grizzle does not enforce this at build time,
+// but an incorrect query will be rejected by the database at runtime.
+//
+// DistinctOn is a no-op on MySQL and SQLite, which do not support this syntax.
+//
+//	query.Select(UsersT.ID, UsersT.Username, UsersT.CreatedAt).
+//	    From(UsersT).
+//	    DistinctOn(UsersT.RealmID).
+//	    OrderBy(UsersT.RealmID.Asc(), UsersT.CreatedAt.Desc())
+//	// SELECT DISTINCT ON ("users"."realm_id") "users"."id", "users"."username", "users"."created_at"
+//	// FROM "users"
+//	// ORDER BY "users"."realm_id" ASC, "users"."created_at" DESC
+func (b *SelectBuilder) DistinctOn(cols ...expr.SelectableColumn) *SelectBuilder {
+	cp := *b
+	cp.distinct = false
+	cp.distinctOn = append([]expr.SelectableColumn(nil), cols...)
 	return &cp
 }
 
@@ -280,9 +308,18 @@ func (b *SelectBuilder) buildWith(ctx *expr.BuildContext) string {
 		sb.WriteString(" ")
 	}
 
-	// SELECT [DISTINCT]
+	// SELECT [DISTINCT [ON (cols)]]
 	sb.WriteString("SELECT ")
-	if b.distinct {
+	if len(b.distinctOn) > 0 && ctx.Dialect().Name() == "postgres" {
+		sb.WriteString("DISTINCT ON (")
+		for i, c := range b.distinctOn {
+			if i > 0 {
+				sb.WriteString(", ")
+			}
+			sb.WriteString(selectColSQL(ctx, c))
+		}
+		sb.WriteString(") ")
+	} else if b.distinct {
 		sb.WriteString("DISTINCT ")
 	}
 	if len(b.cols) == 0 {

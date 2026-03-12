@@ -1511,6 +1511,80 @@ func TestSelect_Distinct_Star(t *testing.T) {
 	)
 }
 
+func TestSelect_DistinctOn_SingleColumn(t *testing.T) {
+	assertSQL(t, "SELECT DISTINCT ON single col",
+		query.Select(ts.UsersT.ID, ts.UsersT.Username, ts.UsersT.CreatedAt).
+			From(ts.UsersT).
+			DistinctOn(ts.UsersT.RealmID).
+			OrderBy(ts.UsersT.RealmID.Asc(), ts.UsersT.CreatedAt.Desc()),
+		`SELECT DISTINCT ON ("users"."realm_id") "users"."id", "users"."username", "users"."created_at" FROM "users" ORDER BY "users"."realm_id" ASC, "users"."created_at" DESC`,
+		nil,
+	)
+}
+
+func TestSelect_DistinctOn_MultiColumn(t *testing.T) {
+	assertSQL(t, "SELECT DISTINCT ON multiple cols",
+		query.Select(ts.UsersT.ID, ts.UsersT.Username).
+			From(ts.UsersT).
+			DistinctOn(ts.UsersT.RealmID, ts.UsersT.Username).
+			OrderBy(ts.UsersT.RealmID.Asc(), ts.UsersT.Username.Asc()),
+		`SELECT DISTINCT ON ("users"."realm_id", "users"."username") "users"."id", "users"."username" FROM "users" ORDER BY "users"."realm_id" ASC, "users"."username" ASC`,
+		nil,
+	)
+}
+
+func TestSelect_DistinctOn_WithLimitOffset(t *testing.T) {
+	assertSQL(t, "SELECT DISTINCT ON with LIMIT and OFFSET",
+		query.Select(ts.UsersT.ID, ts.UsersT.CreatedAt).
+			From(ts.UsersT).
+			DistinctOn(ts.UsersT.RealmID).
+			OrderBy(ts.UsersT.RealmID.Asc(), ts.UsersT.CreatedAt.Desc()).
+			Limit(10).
+			Offset(20),
+		`SELECT DISTINCT ON ("users"."realm_id") "users"."id", "users"."created_at" FROM "users" ORDER BY "users"."realm_id" ASC, "users"."created_at" DESC LIMIT 10 OFFSET 20`,
+		nil,
+	)
+}
+
+func TestSelect_DistinctOn_OverridesDistinct(t *testing.T) {
+	// DistinctOn should override a prior Distinct() call.
+	assertSQL(t, "DistinctOn overrides Distinct",
+		query.Select(ts.UsersT.ID).
+			From(ts.UsersT).
+			Distinct().
+			DistinctOn(ts.UsersT.RealmID).
+			OrderBy(ts.UsersT.RealmID.Asc()),
+		`SELECT DISTINCT ON ("users"."realm_id") "users"."id" FROM "users" ORDER BY "users"."realm_id" ASC`,
+		nil,
+	)
+}
+
+func TestSelect_DistinctOn_NoopOnMySQL(t *testing.T) {
+	// DistinctOn is a no-op on MySQL — the DISTINCT ON clause is silently dropped.
+	q := query.Select(ts.UsersT.ID, ts.UsersT.Username).
+		From(ts.UsersT).
+		DistinctOn(ts.UsersT.RealmID).
+		OrderBy(ts.UsersT.RealmID.Asc())
+	sql, _ := q.Build(dialect.MySQL)
+	wantSQL := "SELECT `users`.`id`, `users`.`username` FROM `users` ORDER BY `users`.`realm_id` ASC"
+	if sql != wantSQL {
+		t.Errorf("DistinctOn on MySQL should be a no-op\n got:  %s\nwant: %s", sql, wantSQL)
+	}
+}
+
+func TestSelect_DistinctOn_NoopOnSQLite(t *testing.T) {
+	// DistinctOn is a no-op on SQLite — the DISTINCT ON clause is silently dropped.
+	q := query.Select(ts.UsersT.ID, ts.UsersT.Username).
+		From(ts.UsersT).
+		DistinctOn(ts.UsersT.RealmID).
+		OrderBy(ts.UsersT.RealmID.Asc())
+	sql, _ := q.Build(dialect.SQLite)
+	wantSQL := `SELECT "users"."id", "users"."username" FROM "users" ORDER BY "users"."realm_id" ASC`
+	if sql != wantSQL {
+		t.Errorf("DistinctOn on SQLite should be a no-op\n got:  %s\nwant: %s", sql, wantSQL)
+	}
+}
+
 // -------------------------------------------------------------------
 // NULLS FIRST / NULLS LAST tests
 // -------------------------------------------------------------------
