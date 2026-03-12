@@ -77,6 +77,44 @@ func TestPreparedExec_SQLBuiltOnce(t *testing.T) {
 	}
 }
 
+// TestPreparedSelect_SQLNotName guards against regression where execution used
+// the statement name instead of the SQL string. Passing a name (e.g. "active_users")
+// as the query to pgxpool fails on any connection that hasn't explicitly called
+// Prepare — which is every connection except the one used by validateStatement.
+func TestPreparedSelect_SQLNotName(t *testing.T) {
+	b := query.Select(testschema.UsersT.ID).From(testschema.UsersT)
+
+	reg := pgxdb.NewRegistry(nil)
+	stmt := pgxdb.RegisterSelect[testschema.UserSelect](reg, "active_users", b)
+
+	if stmt.SQL() == stmt.Name() {
+		t.Errorf("SQL() must not equal Name(): got %q for both; "+
+			"execution must use the SQL string, not the statement name", stmt.SQL())
+	}
+	if !strings.Contains(stmt.SQL(), "SELECT") {
+		t.Errorf("SQL() does not look like SQL: %q", stmt.SQL())
+	}
+}
+
+// TestPreparedExec_SQLNotName is the same guard for PreparedExec.
+func TestPreparedExec_SQLNotName(t *testing.T) {
+	id := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	b := query.Update(testschema.UsersT).
+		Set("enabled", false).
+		Where(testschema.UsersT.ID.EQ(id))
+
+	reg := pgxdb.NewRegistry(nil)
+	stmt := pgxdb.RegisterExec(reg, "disable_user", b)
+
+	if stmt.SQL() == stmt.Name() {
+		t.Errorf("SQL() must not equal Name(): got %q for both; "+
+			"execution must use the SQL string, not the statement name", stmt.SQL())
+	}
+	if !strings.Contains(stmt.SQL(), "UPDATE") {
+		t.Errorf("SQL() does not look like SQL: %q", stmt.SQL())
+	}
+}
+
 func TestRegistry_MultipleStatements(t *testing.T) {
 	reg := pgxdb.NewRegistry(nil)
 
