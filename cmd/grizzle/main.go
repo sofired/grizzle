@@ -483,7 +483,7 @@ func openMySQL(dsn string) (*sql.DB, error) {
 func interactiveRenameResolver(out io.Writer, in io.Reader) kit.RenameResolver {
 	scanner := bufio.NewScanner(in)
 	return func(oldName, newName string) bool {
-		fmt.Fprintf(out, "? Did you rename table %q to %q? [y/N] ", oldName, newName)
+		_, _ = fmt.Fprintf(out, "? Did you rename table %q to %q? [y/N] ", oldName, newName)
 		if !scanner.Scan() {
 			return false // EOF or non-interactive — default to no
 		}

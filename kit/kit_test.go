@@ -751,4 +751,3 @@ func TestRenameTable_NilGuard(t *testing.T) {
 		}
 	}
 }
-
