@@ -1,14 +1,19 @@
 // Package sqlite provides the SQLite schema definition DSL for Grizzle.
 //
 // Schemas defined with this package use the same ColumnDef and TableDef types
-// as schema/pg. The kit layer translates canonical SQL types to SQLite-native
-// syntax at DDL-generation time using SQLite's flexible type affinity system:
+// as schema/pg. The kit layer preserves canonical SQL type names in generated
+// DDL and relies on SQLite's flexible type affinity system for storage. In
+// practice, common canonical types will be stored with the following effective
+// affinities in SQLite:
 //
-//   - uuid        → TEXT (SQLite has no native UUID type)
-//   - boolean     → INTEGER (0/1)
-//   - timestamptz → TEXT (ISO-8601 strings are the idiomatic approach)
-//   - timestamp   → TEXT
-//   - json/jsonb  → TEXT
+//   - uuid        → TEXT affinity (SQLite has no native UUID type)
+//   - boolean     → INTEGER affinity (0/1)
+//   - timestamptz → TEXT affinity (ISO-8601 strings are the idiomatic approach)
+//   - timestamp   → TEXT affinity
+//   - json/jsonb  → TEXT affinity
+//
+// Default expressions for canonical types may be translated to SQLite-compatible
+// literals (for example, boolean defaults become 0/1).
 //
 // SQLite's native storage classes are NULL, INTEGER, REAL, TEXT, and BLOB.
 // The affinity types INTEGER, REAL, TEXT, NUMERIC, and BLOB are also supported
