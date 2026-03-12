@@ -300,6 +300,122 @@ var Events = pg.Table("events",
 	}
 }
 
+func TestNewPGTypes_CodegenMapping(t *testing.T) {
+	src := `package testschema
+import pg "github.com/sofired/grizzle/schema/pg"
+var Articles = pg.Table("articles",
+	pg.C("id",            pg.UUID().PrimaryKey().DefaultRandom()),
+	pg.C("published_on",  pg.Date().NotNull()),
+	pg.C("content_hash",  pg.Bytea().NotNull()),
+	pg.C("status",        pg.Enum("article_status").NotNull()),
+	pg.C("tags",          pg.Array(pg.Text())),
+	pg.C("ip_origin",     pg.Inet()),
+	pg.C("search_vec",    pg.Tsvector()),
+	pg.C("booking",       pg.TstzRange()),
+	pg.C("read_time",     pg.Interval()),
+)
+`
+	dir := t.TempDir()
+	f := dir + "/schema.go"
+	if err := writeFile(f, src); err != nil {
+		t.Fatal(err)
+	}
+	tables, err := parser.ParseFile(f)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(tables) != 1 {
+		t.Fatalf("expected 1 table, got %d", len(tables))
+	}
+	gf, err := codegen.GenerateTable(tables[0], codegen.Options{PackageName: "testschema", OutputDir: dir})
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+
+	out := string(gf.Source)
+	t.Logf("generated:\n%s", out)
+
+	checks := []string{
+		"expr.DateColumn",
+		"expr.BytesColumn",
+		"expr.EnumColumn",
+		"expr.ArrayColumn",
+		"expr.InetColumn",
+		"expr.TsvectorColumn",
+		"expr.RangeColumn",
+		"expr.IntervalColumn",
+		// Date column uses time.Time
+		`time.Time`,
+		// Bytea uses []byte
+		`[]byte`,
+	}
+	for _, want := range checks {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in generated output", want)
+		}
+	}
+}
+
+func TestDate_CodegenMapping(t *testing.T) {
+	src := `package testschema
+import pg "github.com/sofired/grizzle/schema/pg"
+var Events = pg.Table("events",
+	pg.C("id",           pg.UUID().PrimaryKey().DefaultRandom()),
+	pg.C("event_date",   pg.Date().NotNull()),
+	pg.C("deleted_date", pg.Date()),
+)
+`
+	dir := t.TempDir()
+	f := dir + "/schema.go"
+	if err := writeFile(f, src); err != nil {
+		t.Fatal(err)
+	}
+	tables, err := parser.ParseFile(f)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	gf, err := codegen.GenerateTable(tables[0], codegen.Options{PackageName: "testschema", OutputDir: dir})
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	out := string(gf.Source)
+	if !strings.Contains(out, "expr.DateColumn") {
+		t.Errorf("expected expr.DateColumn in output:\n%s", out)
+	}
+	if !strings.Contains(out, `"time"`) {
+		t.Errorf("expected time import for DateColumn:\n%s", out)
+	}
+}
+
+func TestRangeTypes_CodegenMapping(t *testing.T) {
+	src := `package testschema
+import pg "github.com/sofired/grizzle/schema/pg"
+var Bookings = pg.Table("bookings",
+	pg.C("id",      pg.BigSerial()),
+	pg.C("window",  pg.TstzRange().NotNull()),
+	pg.C("prices",  pg.NumRange()),
+	pg.C("dates",   pg.DateRange()),
+)
+`
+	dir := t.TempDir()
+	f := dir + "/schema.go"
+	if err := writeFile(f, src); err != nil {
+		t.Fatal(err)
+	}
+	tables, err := parser.ParseFile(f)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	gf, err := codegen.GenerateTable(tables[0], codegen.Options{PackageName: "testschema", OutputDir: dir})
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	out := string(gf.Source)
+	if !strings.Contains(out, "expr.RangeColumn") {
+		t.Errorf("expected expr.RangeColumn in output:\n%s", out)
+	}
+}
+
 // writeFile is a simple helper for writing test files.
 func writeFile(path, content string) error {
 	return os.WriteFile(path, []byte(content), 0644)

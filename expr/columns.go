@@ -554,3 +554,205 @@ func (c FloatColumn) SubCol(other FloatColumn) ArithExpr {
 func (c FloatColumn) MulCol(other FloatColumn) ArithExpr {
 	return ArithExpr{left: c.ColBase, op: "*", right: other.ColBase}
 }
+
+// -------------------------------------------------------------------
+// DateColumn
+// -------------------------------------------------------------------
+
+// DateColumn is a typed column handle for DATE values.
+// PostgreSQL stores date-only values (year, month, day) without time or timezone.
+// The Go value type is time.Time (with the time component always zero-valued).
+type DateColumn struct{ ColBase }
+
+func (c DateColumn) EQ(val time.Time) Expression {
+	return binaryExpr{ref: c.ColBase, op: "=", val: val}
+}
+func (c DateColumn) GT(val time.Time) Expression {
+	return binaryExpr{ref: c.ColBase, op: ">", val: val}
+}
+func (c DateColumn) GTE(val time.Time) Expression {
+	return binaryExpr{ref: c.ColBase, op: ">=", val: val}
+}
+func (c DateColumn) LT(val time.Time) Expression {
+	return binaryExpr{ref: c.ColBase, op: "<", val: val}
+}
+func (c DateColumn) LTE(val time.Time) Expression {
+	return binaryExpr{ref: c.ColBase, op: "<=", val: val}
+}
+func (c DateColumn) Between(lo, hi time.Time) Expression {
+	return betweenExpr{ref: c.ColBase, lo: lo, hi: hi}
+}
+func (c DateColumn) EQCol(other DateColumn) Expression {
+	return colColExpr{left: c.ColBase, op: "=", right: other.ColBase}
+}
+
+// -------------------------------------------------------------------
+// BytesColumn
+// -------------------------------------------------------------------
+
+// BytesColumn is a typed column handle for BYTEA values.
+// The Go value type is []byte.
+type BytesColumn struct{ ColBase }
+
+func (c BytesColumn) EQ(val []byte) Expression {
+	return binaryExpr{ref: c.ColBase, op: "=", val: val}
+}
+func (c BytesColumn) NEQ(val []byte) Expression {
+	return binaryExpr{ref: c.ColBase, op: "<>", val: val}
+}
+func (c BytesColumn) EQCol(other BytesColumn) Expression {
+	return colColExpr{left: c.ColBase, op: "=", right: other.ColBase}
+}
+
+// -------------------------------------------------------------------
+// IntervalColumn
+// -------------------------------------------------------------------
+
+// IntervalColumn is a typed column handle for INTERVAL values.
+// PostgreSQL interval values are scanned as strings (e.g. "1 day 02:03:04").
+type IntervalColumn struct{ ColBase }
+
+func (c IntervalColumn) EQ(val string) Expression {
+	return binaryExpr{ref: c.ColBase, op: "=", val: val}
+}
+func (c IntervalColumn) NEQ(val string) Expression {
+	return binaryExpr{ref: c.ColBase, op: "<>", val: val}
+}
+func (c IntervalColumn) EQCol(other IntervalColumn) Expression {
+	return colColExpr{left: c.ColBase, op: "=", right: other.ColBase}
+}
+
+// -------------------------------------------------------------------
+// EnumColumn
+// -------------------------------------------------------------------
+
+// EnumColumn is a typed column handle for PostgreSQL enum-typed values.
+// Enum values are represented as strings in Go.
+type EnumColumn struct{ ColBase }
+
+func (c EnumColumn) EQ(val string) Expression {
+	return binaryExpr{ref: c.ColBase, op: "=", val: val}
+}
+func (c EnumColumn) NEQ(val string) Expression {
+	return binaryExpr{ref: c.ColBase, op: "<>", val: val}
+}
+func (c EnumColumn) In(vals ...string) Expression {
+	if len(vals) == 0 {
+		return Raw("FALSE")
+	}
+	anys := make([]any, len(vals))
+	for i, v := range vals {
+		anys[i] = v
+	}
+	return inExpr{ref: c.ColBase, vals: anys}
+}
+func (c EnumColumn) NotIn(vals ...string) Expression {
+	if len(vals) == 0 {
+		return Raw("TRUE")
+	}
+	anys := make([]any, len(vals))
+	for i, v := range vals {
+		anys[i] = v
+	}
+	return inExpr{ref: c.ColBase, vals: anys, not: true}
+}
+func (c EnumColumn) EQCol(other EnumColumn) Expression {
+	return colColExpr{left: c.ColBase, op: "=", right: other.ColBase}
+}
+
+// -------------------------------------------------------------------
+// ArrayColumn
+// -------------------------------------------------------------------
+
+// ArrayColumn is a typed column handle for PostgreSQL array columns (e.g. text[], integer[]).
+// Array values are represented as []any in Go for generality.
+// Use pgx or a custom scanner for strongly-typed array scanning.
+type ArrayColumn struct{ ColBase }
+
+func (c ArrayColumn) EQCol(other ArrayColumn) Expression {
+	return colColExpr{left: c.ColBase, op: "=", right: other.ColBase}
+}
+
+// Contains returns col @> val — true when this array contains all elements of val.
+func (c ArrayColumn) Contains(val any) Expression {
+	return jsonbContainsExpr{ref: c.ColBase, val: val}
+}
+
+// ContainedBy returns val @> col — true when val contains all elements of this array.
+func (c ArrayColumn) ContainedBy(val any) Expression {
+	return rawFlipExpr{left: val, op: "@>", ref: c.ColBase}
+}
+
+// Overlaps returns col && val — true when the arrays share any element.
+func (c ArrayColumn) Overlaps(val any) Expression {
+	return binaryExpr{ref: c.ColBase, op: "&&", val: val}
+}
+
+// -------------------------------------------------------------------
+// InetColumn
+// -------------------------------------------------------------------
+
+// InetColumn is a typed column handle for INET values (IPv4/IPv6 host addresses).
+// The Go scan type is string.
+type InetColumn struct{ ColBase }
+
+func (c InetColumn) EQ(val string) Expression {
+	return binaryExpr{ref: c.ColBase, op: "=", val: val}
+}
+func (c InetColumn) NEQ(val string) Expression {
+	return binaryExpr{ref: c.ColBase, op: "<>", val: val}
+}
+func (c InetColumn) EQCol(other InetColumn) Expression {
+	return colColExpr{left: c.ColBase, op: "=", right: other.ColBase}
+}
+
+// -------------------------------------------------------------------
+// TsvectorColumn
+// -------------------------------------------------------------------
+
+// TsvectorColumn is a typed column handle for TSVECTOR values (full-text search document).
+// The Go scan type is string.
+type TsvectorColumn struct{ ColBase }
+
+func (c TsvectorColumn) EQCol(other TsvectorColumn) Expression {
+	return colColExpr{left: c.ColBase, op: "=", right: other.ColBase}
+}
+
+// Matches returns col @@ query — true when the tsvector matches the given tsquery string.
+func (c TsvectorColumn) Matches(query string) Expression {
+	return binaryExpr{ref: c.ColBase, op: "@@", val: query}
+}
+
+// -------------------------------------------------------------------
+// RangeColumn
+// -------------------------------------------------------------------
+
+// RangeColumn is a typed column handle for PostgreSQL range types
+// (int4range, int8range, numrange, tsrange, tstzrange, daterange).
+// Range values are represented as strings in Go (e.g. "[1,10)").
+type RangeColumn struct{ ColBase }
+
+func (c RangeColumn) EQ(val string) Expression {
+	return binaryExpr{ref: c.ColBase, op: "=", val: val}
+}
+func (c RangeColumn) NEQ(val string) Expression {
+	return binaryExpr{ref: c.ColBase, op: "<>", val: val}
+}
+func (c RangeColumn) EQCol(other RangeColumn) Expression {
+	return colColExpr{left: c.ColBase, op: "=", right: other.ColBase}
+}
+
+// Contains returns col @> val — true when the range contains val.
+func (c RangeColumn) Contains(val any) Expression {
+	return jsonbContainsExpr{ref: c.ColBase, val: val}
+}
+
+// ContainedBy returns val @> col — true when val contains this range.
+func (c RangeColumn) ContainedBy(val string) Expression {
+	return rawFlipExpr{left: val, op: "@>", ref: c.ColBase}
+}
+
+// Overlaps returns col && val — true when the ranges overlap.
+func (c RangeColumn) Overlaps(val string) Expression {
+	return binaryExpr{ref: c.ColBase, op: "&&", val: val}
+}
