@@ -264,6 +264,8 @@ func LeadWithOffset(col SelectableColumn, offset int) WindowExpr {
 }
 
 // LeadWithDefault returns a LEAD(col, offset, default) window expression.
+// The defaultVal must be a literal SQL value (integer, float, boolean, or quoted string).
+// For safety, pass only constant values — not user-controlled input.
 //
 //	expr.LeadWithDefault(UsersT.Score, 1, 0)
 //	// → LEAD("users"."score", 1, 0) OVER (...)
@@ -286,6 +288,8 @@ func LagWithOffset(col SelectableColumn, offset int) WindowExpr {
 }
 
 // LagWithDefault returns a LAG(col, offset, default) window expression.
+// The defaultVal must be a literal SQL value (integer, float, boolean, or quoted string).
+// For safety, pass only constant values — not user-controlled input.
 //
 //	expr.LagWithDefault(UsersT.Score, 1, 0)
 //	// → LAG("users"."score", 1, 0) OVER (...)
