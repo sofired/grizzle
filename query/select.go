@@ -182,6 +182,17 @@ func (b *SelectBuilder) FullJoin(t TableSource, on expr.Expression) *SelectBuild
 	return &cp
 }
 
+// CrossJoin adds a CROSS JOIN clause. A CROSS JOIN produces the Cartesian product
+// of the two tables and has no ON condition.
+//
+//	query.Select().From(UsersT).CrossJoin(RealmsT)
+//	// SELECT * FROM "users" CROSS JOIN "realms"
+func (b *SelectBuilder) CrossJoin(t TableSource) *SelectBuilder {
+	cp := *b
+	cp.joins = append(append([]joinClause(nil), cp.joins...), joinClause{kind: joinCross, table: t})
+	return &cp
+}
+
 // JoinRel adds a LEFT JOIN using a RelationDef. This is the idiomatic way to
 // join tables when the ON condition is already encoded in the relation definition.
 //

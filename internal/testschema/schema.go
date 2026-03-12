@@ -187,6 +187,36 @@ type UserUpdate struct {
 	UpdatedAt *time.Time `db:"updated_at"`
 }
 
+// EmployeesTable is a table type used in self-join and CROSS JOIN tests.
+// It mirrors the pattern a code generator would produce for a table that
+// supports table aliasing via As().
+type EmployeesTable struct {
+	ID        expr.UUIDColumn
+	Name      expr.StringColumn
+	ManagerID expr.UUIDColumn
+}
+
+func (t EmployeesTable) GrizTableName() string  { return "employees" }
+func (t EmployeesTable) GrizTableAlias() string { return t.ID.TableAlias }
+
+// As returns a renamed copy of EmployeesTable where every column's TableAlias
+// is set to alias. The underlying table name ("employees") is preserved so the
+// SQL renderer can emit  "employees" AS "alias".
+func (t EmployeesTable) As(alias string) EmployeesTable {
+	return EmployeesTable{
+		ID:        expr.UUIDColumn{ColBase: expr.ColBase{TableAlias: alias, ColName: t.ID.ColName}},
+		Name:      expr.StringColumn{ColBase: expr.ColBase{TableAlias: alias, ColName: t.Name.ColName}},
+		ManagerID: expr.UUIDColumn{ColBase: expr.ColBase{TableAlias: alias, ColName: t.ManagerID.ColName}},
+	}
+}
+
+// EmployeesT is the singleton table handle used in queries.
+var EmployeesT = EmployeesTable{
+	ID:        expr.UUIDColumn{ColBase: expr.ColBase{TableAlias: "employees", ColName: "id"}},
+	Name:      expr.StringColumn{ColBase: expr.ColBase{TableAlias: "employees", ColName: "name"}},
+	ManagerID: expr.UUIDColumn{ColBase: expr.ColBase{TableAlias: "employees", ColName: "manager_id"}},
+}
+
 // -------------------------------------------------------------------
 // Relation definitions
 // -------------------------------------------------------------------

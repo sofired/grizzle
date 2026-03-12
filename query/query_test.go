@@ -2061,3 +2061,131 @@ func TestWithRecursive_AndRegularCTE(t *testing.T) {
 		t.Errorf("expected WITH RECURSIVE (any recursive CTE triggers it), got: %s", sql)
 	}
 }
+
+// -------------------------------------------------------------------
+// CROSS JOIN tests
+// -------------------------------------------------------------------
+
+func TestCrossJoin_Basic(t *testing.T) {
+	assertSQL(t, "CROSS JOIN basic",
+		query.Select().From(ts.UsersT).CrossJoin(ts.RealmsT),
+		`SELECT * FROM "users" CROSS JOIN "realms"`,
+		nil,
+	)
+}
+
+func TestCrossJoin_WithColumns(t *testing.T) {
+	assertSQL(t, "CROSS JOIN with explicit columns",
+		query.Select(ts.UsersT.Username, ts.RealmsT.Name).
+			From(ts.UsersT).
+			CrossJoin(ts.RealmsT),
+		`SELECT "users"."username", "realms"."name" FROM "users" CROSS JOIN "realms"`,
+		nil,
+	)
+}
+
+func TestCrossJoin_WithWhere(t *testing.T) {
+	assertSQL(t, "CROSS JOIN with WHERE",
+		query.Select(ts.UsersT.ID, ts.RealmsT.Name).
+			From(ts.UsersT).
+			CrossJoin(ts.RealmsT).
+			Where(ts.UsersT.Enabled.IsTrue()),
+		`SELECT "users"."id", "realms"."name" FROM "users" CROSS JOIN "realms" WHERE "users"."enabled" = $1`,
+		[]any{true},
+	)
+}
+
+func TestCrossJoin_ChainedWithInnerJoin(t *testing.T) {
+	// A CROSS JOIN followed by an INNER JOIN should produce both clauses.
+	sql, _ := query.Select().
+		From(ts.UsersT).
+		CrossJoin(ts.RealmsT).
+		InnerJoin(ts.RealmsT, ts.UsersT.RealmID.EQCol(ts.RealmsT.ID)).
+		Build(dialect.Postgres)
+	if !strings.Contains(sql, "CROSS JOIN") {
+		t.Errorf("expected CROSS JOIN in: %s", sql)
+	}
+	if !strings.Contains(sql, "INNER JOIN") {
+		t.Errorf("expected INNER JOIN in: %s", sql)
+	}
+}
+
+// -------------------------------------------------------------------
+// Table alias / self-join tests
+// -------------------------------------------------------------------
+
+func TestTableAlias_As_ReturnsAliasedCopy(t *testing.T) {
+	mgr := ts.EmployeesT.As("manager")
+	if mgr.GrizTableName() != "employees" {
+		t.Errorf("GrizTableName: got %q, want %q", mgr.GrizTableName(), "employees")
+	}
+	if mgr.GrizTableAlias() != "manager" {
+		t.Errorf("GrizTableAlias: got %q, want %q", mgr.GrizTableAlias(), "manager")
+	}
+}
+
+func TestTableAlias_ColumnRefsUseAlias(t *testing.T) {
+	mgr := ts.EmployeesT.As("manager")
+	ctx := expr.NewBuildContext(dialect.Postgres)
+	got := mgr.Name.EQ("Alice").ToSQL(ctx)
+	want := `"manager"."name" = $1`
+	if got != want {
+		t.Errorf("column ref with alias: got %q, want %q", got, want)
+	}
+}
+
+func TestTableAlias_OriginalUnchanged(t *testing.T) {
+	// Calling As() must not mutate the original singleton.
+	_ = ts.EmployeesT.As("manager")
+	if ts.EmployeesT.GrizTableAlias() != "employees" {
+		t.Errorf("As() mutated original: GrizTableAlias = %q", ts.EmployeesT.GrizTableAlias())
+	}
+	ctx := expr.NewBuildContext(dialect.Postgres)
+	got := ts.EmployeesT.Name.EQ("Alice").ToSQL(ctx)
+	want := `"employees"."name" = $1`
+	if got != want {
+		t.Errorf("original column ref changed: got %q, want %q", got, want)
+	}
+}
+
+func TestSelfJoin_LeftJoin(t *testing.T) {
+	// SELECT "employees"."name", "manager"."name" AS "manager_name"
+	//   FROM "employees"
+	//   LEFT JOIN "employees" AS "manager"
+	//     ON "employees"."manager_id" = "manager"."id"
+	mgr := ts.EmployeesT.As("manager")
+	assertSQL(t, "self-join via alias",
+		query.Select(
+			ts.EmployeesT.Name,
+			mgr.Name.As("manager_name"),
+		).From(ts.EmployeesT).
+			LeftJoin(mgr, ts.EmployeesT.ManagerID.EQCol(mgr.ID)),
+		`SELECT "employees"."name", "manager"."name" AS "manager_name" FROM "employees" LEFT JOIN "employees" AS "manager" ON "employees"."manager_id" = "manager"."id"`,
+		nil,
+	)
+}
+
+func TestSelfJoin_Where_UsesAlias(t *testing.T) {
+	// Filtering on the aliased table's columns should use the alias in SQL.
+	mgr := ts.EmployeesT.As("manager")
+	assertSQL(t, "self-join where uses alias",
+		query.Select(ts.EmployeesT.Name).
+			From(ts.EmployeesT).
+			LeftJoin(mgr, ts.EmployeesT.ManagerID.EQCol(mgr.ID)).
+			Where(mgr.Name.EQ("Alice")),
+		`SELECT "employees"."name" FROM "employees" LEFT JOIN "employees" AS "manager" ON "employees"."manager_id" = "manager"."id" WHERE "manager"."name" = $1`,
+		[]any{"Alice"},
+	)
+}
+
+func TestSelfJoin_CrossJoin(t *testing.T) {
+	// CROSS JOIN a table with itself using an alias.
+	alias := ts.EmployeesT.As("e2")
+	assertSQL(t, "self cross join via alias",
+		query.Select(ts.EmployeesT.Name, alias.Name.As("other_name")).
+			From(ts.EmployeesT).
+			CrossJoin(alias),
+		`SELECT "employees"."name", "e2"."name" AS "other_name" FROM "employees" CROSS JOIN "employees" AS "e2"`,
+		nil,
+	)
+}

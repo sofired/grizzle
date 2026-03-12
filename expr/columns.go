@@ -41,6 +41,49 @@ func (c ColBase) Asc() OrderExpr { return OrderExpr{ref: c, dir: "ASC"} }
 func (c ColBase) Desc() OrderExpr { return OrderExpr{ref: c, dir: "DESC"} }
 
 // -------------------------------------------------------------------
+// AliasedCol — a column reference with a SELECT alias
+// -------------------------------------------------------------------
+
+// AliasedCol wraps a ColBase and adds a SELECT alias (the AS clause).
+// It implements both SelectableColumn and Expression so it can appear in
+// SELECT lists and produce "table"."col" AS "alias" SQL.
+//
+// Obtain one via ColBase.As or any typed column's As method, e.g.:
+//
+//	mgr.Name.As("manager_name")
+type AliasedCol struct {
+	base  ColBase
+	alias string
+}
+
+// ToSQL implements Expression. Renders: "table"."col" AS "alias".
+func (a AliasedCol) ToSQL(ctx *BuildContext) string {
+	return ctx.ColRef(a.base.TableAlias, a.base.ColName) + " AS " + ctx.Quote(a.alias)
+}
+
+// colRef implements colRefer (no alias — for use inside other expressions).
+func (a AliasedCol) colRef(ctx *BuildContext) string {
+	return ctx.ColRef(a.base.TableAlias, a.base.ColName)
+}
+
+// ColumnName implements SelectableColumn.
+func (a AliasedCol) ColumnName() string { return a.alias }
+
+// TableName implements SelectableColumn.
+func (a AliasedCol) TableName() string { return a.base.TableAlias }
+
+// -------------------------------------------------------------------
+// As method on ColBase — returns an AliasedCol for SELECT aliases
+// -------------------------------------------------------------------
+
+// As returns an AliasedCol that renders "table"."col" AS "alias" in a
+// SELECT list. It does not change the table alias; use EmployeesTable.As
+// (on the table type) to create a renamed copy for self-joins.
+func (c ColBase) As(alias string) AliasedCol {
+	return AliasedCol{base: c, alias: alias}
+}
+
+// -------------------------------------------------------------------
 // OrderExpr
 // -------------------------------------------------------------------
 
