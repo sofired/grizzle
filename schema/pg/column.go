@@ -91,15 +91,6 @@ func (b *colBuilder) setDefault(expr string) {
 	b.def.HasDefault = true
 	b.def.DefaultExpr = expr
 }
-func (b *colBuilder) setReferences(table, col string, onDelete, onUpdate FKAction) { //nolint:unused
-	b.def.References = &FKRef{
-		Table:    table,
-		Column:   col,
-		OnDelete: onDelete,
-		OnUpdate: onUpdate,
-	}
-}
-
 func (b *colBuilder) setPrimaryKey() {
 	b.def.PrimaryKey = true
 	b.def.NotNull = true    // PK is implicitly NOT NULL
@@ -336,7 +327,6 @@ func (b *TimestampBuilder) Build(name string) ColumnDef { return b.build(name) }
 // JSONBBuilder builds a jsonb column definition.
 type JSONBBuilder struct {
 	colBuilder
-	goTypeOverride string //nolint:unused
 }
 
 // JSONB starts a jsonb column.
