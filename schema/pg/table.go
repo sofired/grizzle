@@ -27,11 +27,10 @@ func C(name string, builder ColumnBuilder) NamedColumn {
 // It carries everything needed for migration snapshot generation and
 // Go code generation.
 type TableDef struct {
-	Name         string
-	Schema       string // PostgreSQL schema namespace; empty = "public"
-	Columns      []ColumnDef
-	Constraints  []Constraint
-	PreviousName string // if set, kit treats this as a rename from PreviousName → Name
+	Name        string
+	Schema      string // PostgreSQL schema namespace; empty = "public"
+	Columns     []ColumnDef
+	Constraints []Constraint
 }
 
 // ColMap returns a map of column name → ColumnDef for quick lookups.
@@ -69,16 +68,6 @@ func (b *tableBuilder) WithConstraints(fn func(t TableRef) []Constraint) *TableD
 
 // Build finalises the table definition without additional constraints.
 func (b *tableBuilder) Build() *TableDef { return &b.def }
-
-// RenamedFrom declares that this table was previously known by oldName.
-// When the migration kit diffs two snapshots, it emits ChangeRenameTable
-// instead of a DROP + CREATE pair, preserving all existing data.
-//
-//	var Accounts = pg.Table("accounts", ...).RenamedFrom("users").Build()
-func (b *tableBuilder) RenamedFrom(oldName string) *tableBuilder {
-	b.def.PreviousName = oldName
-	return b
-}
 
 // -------------------------------------------------------------------
 // Table factory
@@ -118,18 +107,6 @@ func SchemaTable(schema, name string, cols ...NamedColumn) *tableBuilder {
 	b := Table(name, cols...)
 	b.def.Schema = schema
 	return b
-}
-
-// RenamedFrom declares that this table was previously known by oldName.
-// This variant is available on a fully-built *TableDef so that it can be
-// chained after WithConstraints:
-//
-//	var Accounts = pg.Table("accounts", ...).
-//	    WithConstraints(...).
-//	    RenamedFrom("users")
-func (t *TableDef) RenamedFrom(oldName string) *TableDef {
-	t.PreviousName = oldName
-	return t
 }
 
 // QualifiedName returns the schema-qualified table name for use in SQL.

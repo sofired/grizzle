@@ -11,10 +11,12 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"database/sql"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -228,8 +230,8 @@ func runDiff(args []string) error {
 	}
 	newSnap := kit.FromDefs(tables...)
 
-	// Compute changes.
-	changes := kit.Diff(old, newSnap)
+	// Compute changes, prompting interactively for probable renames.
+	changes := kit.DiffWithResolver(old, newSnap, interactiveRenameResolver(os.Stderr, os.Stdin))
 	if len(changes) == 0 {
 		fmt.Println("-- No changes")
 		return nil
@@ -472,6 +474,21 @@ func openMySQL(dsn string) (*sql.DB, error) {
 		return nil, fmt.Errorf("open mysql: %w", err)
 	}
 	return db, nil
+}
+
+// interactiveRenameResolver returns a kit.RenameResolver that prompts the user
+// on stderr and reads a y/N response from in, matching Drizzle Kit's behaviour.
+// A non-interactive environment (e.g. CI) that cannot answer the prompt will
+// default to "no" (drop+create), which is the safe choice.
+func interactiveRenameResolver(out io.Writer, in io.Reader) kit.RenameResolver {
+	scanner := bufio.NewScanner(in)
+	return func(oldName, newName string) bool {
+		fmt.Fprintf(out, "? Did you rename table %q to %q? [y/N] ", oldName, newName)
+		if !scanner.Scan() {
+			return false // EOF or non-interactive — default to no
+		}
+		return strings.ToLower(strings.TrimSpace(scanner.Text())) == "y"
+	}
 }
 
 // parseSchemaDir parses schema Go files and evaluates them into *pg.TableDef values.

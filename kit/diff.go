@@ -1,6 +1,8 @@
 package kit
 
 import (
+	"sort"
+
 	pg "github.com/sofired/grizzle/schema/pg"
 )
 
@@ -37,14 +39,27 @@ type Change struct {
 	Constraint *pg.Constraint
 }
 
+// RenameResolver is called by DiffWithResolver when it detects a probable
+// table rename — a table that disappeared from the old snapshot and a new
+// table that appeared in the new snapshot with overlapping columns.
+//
+// Return true to emit ChangeRenameTable (preserves data); return false to
+// emit ChangeDropTable + ChangeCreateTable instead.
+//
+// This mirrors Drizzle Kit's interactive prompt behaviour: at migration
+// generation time, the developer is asked "Did you rename X to Y?" and their
+// answer determines which SQL is generated. The resolver callback is the
+// library-level equivalent; the CLI wires it to an actual terminal prompt.
+type RenameResolver func(oldName, newName string) bool
+
 // Diff computes the ordered list of Changes needed to transition from
 // the old snapshot to the new snapshot. Pass EmptySnapshot() as old
 // when targeting a fresh database.
 //
-// Rename detection: if a table in the new snapshot carries a PreviousName
-// that matches a table in the old snapshot (and that old table is absent from
-// the new snapshot), a ChangeRenameTable is emitted instead of a DROP+CREATE
-// pair. Column/constraint diffs for the renamed table are appended as usual.
+// Renames are not detected automatically — tables that disappear become
+// ChangeDropTable and new tables become ChangeCreateTable. Use
+// DiffWithResolver to enable interactive rename detection, matching
+// Drizzle Kit's behaviour.
 //
 // Ordering is deterministic:
 //  1. Rename tables (must happen before column diffs on the renamed table).
@@ -52,89 +67,99 @@ type Change struct {
 //  3. Alter existing and renamed tables (columns first, then constraints).
 //  4. Drop removed tables (in reverse to respect FKs — caller may need to reorder).
 func Diff(old, new Snapshot) []Change {
+	return DiffWithResolver(old, new, nil)
+}
+
+// DiffWithResolver computes the ordered list of Changes needed to transition
+// from the old snapshot to the new snapshot, with interactive rename detection.
+//
+// When a table disappears from old and a new table appears in new, and the two
+// tables share at least one column name in common, resolver is called to
+// determine whether the change is a rename or a drop+create. If resolver is
+// nil, all such cases are treated as drop+create (equivalent to Diff).
+//
+// The resolver is called at most once per (oldName, newName) pair. Once a
+// rename is confirmed, both tables are marked as handled and no further
+// rename prompt is issued for them.
+func DiffWithResolver(old, new Snapshot, resolver RenameResolver) []Change {
 	var changes []Change
 
-	// Build a set of old table names that are consumed by a rename, so that
-	// they are not also emitted as DROP TABLE.
-	renamedOldNames := make(map[string]bool)
+	// Find all dropped tables (in old, not in new) and created tables (in new, not in old).
+	var dropped, created []string
+	for name := range old.Tables {
+		if _, exists := new.Tables[name]; !exists {
+			dropped = append(dropped, name)
+		}
+	}
+	for name := range new.Tables {
+		if _, exists := old.Tables[name]; !exists {
+			created = append(created, name)
+		}
+	}
+	sort.Strings(dropped)
+	sort.Strings(created)
 
-	// Phase 1: detect renames — new table with PreviousName matching a dropped table.
-	for newName, newT := range new.Tables {
-		if newT.PreviousName == "" {
-			continue
+	// Detect renames: for each dropped table, find created tables that share
+	// column name overlap (the same heuristic Drizzle Kit uses to identify
+	// probable renames before prompting the developer).
+	renamedOld := make(map[string]bool) // old names consumed by a confirmed rename
+	renamedNew := make(map[string]bool) // new names consumed by a confirmed rename
+
+	if resolver != nil && len(dropped) > 0 && len(created) > 0 {
+		for _, oldName := range dropped {
+			oldT := old.Tables[oldName]
+			for _, newName := range created {
+				if renamedNew[newName] {
+					continue // already claimed by a prior rename
+				}
+				newT := new.Tables[newName]
+				if columnOverlap(oldT, newT) == 0 {
+					continue // no shared column names — unrelated tables, skip
+				}
+				if resolver(oldName, newName) {
+					renamedOld[oldName] = true
+					renamedNew[newName] = true
+					changes = append(changes, Change{
+						Kind:         ChangeRenameTable,
+						TableName:    newName,
+						OldTableName: oldName,
+					})
+					// Diff columns/constraints of the renamed table.
+					changes = append(changes, diffTable(newName, oldT, newT)...)
+					break
+				}
+			}
 		}
-		oldName := newT.PreviousName
-		// Qualify the old name if the new table has a schema.
-		if newT.Schema != "" && !containsDot(oldName) {
-			oldName = newT.Schema + "." + oldName
-		}
-		oldT, oldExists := old.Tables[oldName]
-		if !oldExists {
-			continue // previous name not found in old snapshot — treat as create
-		}
-		if _, newExists := new.Tables[oldName]; newExists {
-			continue // old name still exists in new schema — not a rename
-		}
-		// Emit rename.
-		renamedOldNames[oldName] = true
-		changes = append(changes, Change{
-			Kind:         ChangeRenameTable,
-			TableName:    newName,
-			OldTableName: oldName,
-		})
-		// Diff columns/constraints of the renamed table using the new name.
-		changes = append(changes, diffTable(newName, oldT, newT)...)
 	}
 
-	// Phase 2: new tables not in old (and not a rename target) → CREATE TABLE.
-	for name, newT := range new.Tables {
-		if _, exists := old.Tables[name]; exists {
-			continue // present in old — handled in phase 3
-		}
-		if newT.PreviousName != "" {
-			// Check if we already emitted a rename for this table.
-			oldName := newT.PreviousName
-			if newT.Schema != "" && !containsDot(oldName) {
-				oldName = newT.Schema + "." + oldName
-			}
-			if renamedOldNames[oldName] {
-				continue // already handled as a rename
-			}
+	// Phase 2: new tables not claimed by a rename → CREATE TABLE.
+	for _, name := range created {
+		if renamedNew[name] {
+			continue
 		}
 		changes = append(changes, Change{
 			Kind:      ChangeCreateTable,
 			TableName: name,
 		})
-		// Individual column and constraint adds are implied by CREATE TABLE;
-		// we don't emit separate ADD COLUMN / ADD INDEX changes for new tables.
 	}
 
-	// Phase 3: tables present in both (unchanged name) → diff columns and constraints.
-	for name, newT := range new.Tables {
-		oldT, exists := old.Tables[name]
-		if !exists {
-			continue // handled above
+	// Phase 3: tables present in both snapshots → diff columns and constraints.
+	// Process in sorted order for determinism.
+	existing := make([]string, 0, len(new.Tables))
+	for name := range new.Tables {
+		if _, inOld := old.Tables[name]; inOld {
+			existing = append(existing, name)
 		}
-		// Skip if this table was already diffed as part of a rename.
-		if newT.PreviousName != "" {
-			oldName := newT.PreviousName
-			if newT.Schema != "" && !containsDot(oldName) {
-				oldName = newT.Schema + "." + oldName
-			}
-			if renamedOldNames[oldName] {
-				continue
-			}
-		}
-		changes = append(changes, diffTable(name, oldT, newT)...)
+	}
+	sort.Strings(existing)
+	for _, name := range existing {
+		changes = append(changes, diffTable(name, old.Tables[name], new.Tables[name])...)
 	}
 
-	// Phase 4: tables in old but not new → DROP TABLE (unless consumed by rename).
-	for name := range old.Tables {
-		if _, exists := new.Tables[name]; exists {
+	// Phase 4: dropped tables not consumed by a rename → DROP TABLE.
+	for _, name := range dropped {
+		if renamedOld[name] {
 			continue
-		}
-		if renamedOldNames[name] {
-			continue // consumed by a rename — do not drop
 		}
 		changes = append(changes, Change{
 			Kind:      ChangeDropTable,
@@ -145,14 +170,27 @@ func Diff(old, new Snapshot) []Change {
 	return changes
 }
 
-// containsDot reports whether s contains a "." character.
-func containsDot(s string) bool {
-	for _, r := range s {
-		if r == '.' {
-			return true
+// columnOverlap returns the Jaccard similarity of column name sets between
+// two table snapshots. Returns 0 if either table has no columns.
+func columnOverlap(a, b *TableSnap) float64 {
+	if len(a.Columns) == 0 || len(b.Columns) == 0 {
+		return 0
+	}
+	aNames := make(map[string]bool, len(a.Columns))
+	for _, c := range a.Columns {
+		aNames[c.Name] = true
+	}
+	shared := 0
+	for _, c := range b.Columns {
+		if aNames[c.Name] {
+			shared++
 		}
 	}
-	return false
+	if shared == 0 {
+		return 0
+	}
+	union := len(aNames) + len(b.Columns) - shared
+	return float64(shared) / float64(union)
 }
 
 // diffTable computes column- and constraint-level changes for one table.

@@ -500,56 +500,27 @@ func TestRenameColumn_NilGuard(t *testing.T) {
 }
 
 // -------------------------------------------------------------------
-// RenamedFrom DSL
+// ChangeRenameTable — DiffWithResolver detection
 // -------------------------------------------------------------------
 
-func TestRenamedFrom_Builder(t *testing.T) {
-	// RenamedFrom on *tableBuilder should set PreviousName.
-	td := pg.Table("accounts",
-		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
-	).RenamedFrom("users").Build()
+// alwaysRename is a RenameResolver that always confirms the rename.
+func alwaysRename(_ string, _ string) bool { return true }
 
-	if td.PreviousName != "users" {
-		t.Errorf("expected PreviousName=users, got %q", td.PreviousName)
-	}
-	if td.Name != "accounts" {
-		t.Errorf("expected Name=accounts, got %q", td.Name)
-	}
-}
+// neverRename is a RenameResolver that always rejects the rename (drop+create).
+func neverRename(_ string, _ string) bool { return false }
 
-func TestRenamedFrom_TableDef(t *testing.T) {
-	// RenamedFrom on *TableDef (chained after WithConstraints) should set PreviousName.
-	td := pg.Table("accounts",
-		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
-	).WithConstraints(func(t pg.TableRef) []pg.Constraint {
-		return nil
-	}).RenamedFrom("users")
-
-	if td.PreviousName != "users" {
-		t.Errorf("expected PreviousName=users, got %q", td.PreviousName)
-	}
-}
-
-// -------------------------------------------------------------------
-// ChangeRenameTable — Diff detection
-// -------------------------------------------------------------------
-
-func TestDiff_RenameTable_DetectsRename(t *testing.T) {
-	// Old schema has "users".
+func TestDiffWithResolver_RenameTable_ResolverConfirms(t *testing.T) {
+	// When the resolver returns true, a rename should be emitted instead of drop+create.
 	oldDef := pg.Table("users",
 		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
 		pg.C("name", pg.Varchar(255).NotNull()),
 	).Build()
-
-	// New schema has "accounts" declared as renamed from "users".
 	newDef := pg.Table("accounts",
 		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
 		pg.C("name", pg.Varchar(255).NotNull()),
-	).RenamedFrom("users").Build()
+	).Build()
 
-	old := kit.FromDefs(oldDef)
-	newSnap := kit.FromDefs(newDef)
-	changes := kit.Diff(old, newSnap)
+	changes := kit.DiffWithResolver(kit.FromDefs(oldDef), kit.FromDefs(newDef), alwaysRename)
 
 	renames := countKind(changes, kit.ChangeRenameTable)
 	creates := countKind(changes, kit.ChangeCreateTable)
@@ -559,13 +530,12 @@ func TestDiff_RenameTable_DetectsRename(t *testing.T) {
 		t.Errorf("expected 1 RenameTable, got %d: %v", renames, changes)
 	}
 	if creates != 0 {
-		t.Errorf("expected 0 CreateTable (not drop+create), got %d", creates)
+		t.Errorf("expected 0 CreateTable, got %d", creates)
 	}
 	if drops != 0 {
-		t.Errorf("expected 0 DropTable (not drop+create), got %d", drops)
+		t.Errorf("expected 0 DropTable, got %d", drops)
 	}
 
-	// Find the rename change and verify old/new names.
 	for _, c := range changes {
 		if c.Kind == kit.ChangeRenameTable {
 			if c.OldTableName != "users" {
@@ -578,43 +548,16 @@ func TestDiff_RenameTable_DetectsRename(t *testing.T) {
 	}
 }
 
-func TestDiff_RenameTable_WithColumnAlter(t *testing.T) {
-	// Rename + simultaneous column type change should produce both changes.
-	oldDef := pg.Table("users",
-		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
-		pg.C("code", pg.Varchar(50).NotNull()),
-	).Build()
-
-	newDef := pg.Table("accounts",
-		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
-		pg.C("code", pg.Varchar(100).NotNull()), // widened
-	).RenamedFrom("users").Build()
-
-	changes := kit.Diff(kit.FromDefs(oldDef), kit.FromDefs(newDef))
-
-	renames := countKind(changes, kit.ChangeRenameTable)
-	alters := countKind(changes, kit.ChangeAlterColumnType)
-
-	if renames != 1 {
-		t.Errorf("expected 1 RenameTable, got %d", renames)
-	}
-	if alters != 1 {
-		t.Errorf("expected 1 AlterColumnType, got %d", alters)
-	}
-}
-
-func TestDiff_RenameTable_NoPreviousName_FallsBackToDropCreate(t *testing.T) {
-	// Without RenamedFrom, a table that disappears and a new one appears
-	// should remain drop + create (existing behaviour).
+func TestDiffWithResolver_RenameTable_ResolverRejects(t *testing.T) {
+	// When the resolver returns false, drop+create should be emitted.
 	oldDef := pg.Table("users",
 		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
 	).Build()
-
 	newDef := pg.Table("accounts",
 		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
-	).Build() // no RenamedFrom
+	).Build()
 
-	changes := kit.Diff(kit.FromDefs(oldDef), kit.FromDefs(newDef))
+	changes := kit.DiffWithResolver(kit.FromDefs(oldDef), kit.FromDefs(newDef), neverRename)
 
 	renames := countKind(changes, kit.ChangeRenameTable)
 	creates := countKind(changes, kit.ChangeCreateTable)
@@ -631,31 +574,94 @@ func TestDiff_RenameTable_NoPreviousName_FallsBackToDropCreate(t *testing.T) {
 	}
 }
 
-func TestDiff_RenameTable_OldNameStillExists_FallsBackToCreate(t *testing.T) {
-	// If PreviousName exists in the new snapshot too, it's not a rename.
+func TestDiff_RenameTable_NilResolver_FallsBackToDropCreate(t *testing.T) {
+	// Diff (nil resolver) must always emit drop+create, never a rename.
 	oldDef := pg.Table("users",
 		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
 	).Build()
+	newDef := pg.Table("accounts",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+	).Build()
 
-	// "users" still in new snapshot AND "accounts" declares PreviousName="users".
+	changes := kit.Diff(kit.FromDefs(oldDef), kit.FromDefs(newDef))
+
+	if countKind(changes, kit.ChangeRenameTable) != 0 {
+		t.Errorf("Diff with nil resolver must not emit ChangeRenameTable")
+	}
+	if countKind(changes, kit.ChangeDropTable) != 1 || countKind(changes, kit.ChangeCreateTable) != 1 {
+		t.Errorf("expected drop+create, got %v", changes)
+	}
+}
+
+func TestDiffWithResolver_RenameTable_NoColumnOverlap_SkipsPrompt(t *testing.T) {
+	// Tables with no column names in common are not rename candidates.
+	// The resolver should never be called, and the result should be drop+create.
+	called := false
+	resolver := func(_, _ string) bool { called = true; return true }
+
+	oldDef := pg.Table("users",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+	).Build()
+	newDef := pg.Table("accounts",
+		pg.C("account_id", pg.UUID().PrimaryKey().DefaultRandom()), // no shared column names
+	).Build()
+
+	changes := kit.DiffWithResolver(kit.FromDefs(oldDef), kit.FromDefs(newDef), resolver)
+
+	if called {
+		t.Error("resolver should not be called when tables share no column names")
+	}
+	if countKind(changes, kit.ChangeRenameTable) != 0 {
+		t.Errorf("expected no renames for unrelated tables, got %v", changes)
+	}
+}
+
+func TestDiffWithResolver_RenameTable_WithColumnAlter(t *testing.T) {
+	// Rename confirmed by resolver + simultaneous column type change → both changes emitted.
+	oldDef := pg.Table("users",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("code", pg.Varchar(50).NotNull()),
+	).Build()
+	newDef := pg.Table("accounts",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("code", pg.Varchar(100).NotNull()), // widened
+	).Build()
+
+	changes := kit.DiffWithResolver(kit.FromDefs(oldDef), kit.FromDefs(newDef), alwaysRename)
+
+	if countKind(changes, kit.ChangeRenameTable) != 1 {
+		t.Errorf("expected 1 RenameTable, got %d", countKind(changes, kit.ChangeRenameTable))
+	}
+	if countKind(changes, kit.ChangeAlterColumnType) != 1 {
+		t.Errorf("expected 1 AlterColumnType, got %d", countKind(changes, kit.ChangeAlterColumnType))
+	}
+}
+
+func TestDiffWithResolver_RenameTable_OldNameStillExists_NotACandidate(t *testing.T) {
+	// If the old table name still exists in the new schema, it is present in
+	// both snapshots and is not in the "dropped" set — so the resolver is never
+	// called for it, and the new table is treated as a fresh create.
+	oldDef := pg.Table("users",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+	).Build()
 	newUsersDef := pg.Table("users",
 		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
 	).Build()
 	newAccountsDef := pg.Table("accounts",
 		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
-	).RenamedFrom("users").Build()
+	).Build()
 
-	changes := kit.Diff(kit.FromDefs(oldDef), kit.FromDefs(newUsersDef, newAccountsDef))
+	changes := kit.DiffWithResolver(
+		kit.FromDefs(oldDef),
+		kit.FromDefs(newUsersDef, newAccountsDef),
+		alwaysRename, // even with an eager resolver, "users" is not dropped so no prompt
+	)
 
-	// "accounts" should be treated as a new table (not a rename) since "users" still exists.
-	renames := countKind(changes, kit.ChangeRenameTable)
-	creates := countKind(changes, kit.ChangeCreateTable)
-
-	if renames != 0 {
-		t.Errorf("expected 0 RenameTable (old name still exists), got %d", renames)
+	if countKind(changes, kit.ChangeRenameTable) != 0 {
+		t.Errorf("expected 0 RenameTable when old name still exists, got %d", countKind(changes, kit.ChangeRenameTable))
 	}
-	if creates != 1 {
-		t.Errorf("expected 1 CreateTable for accounts, got %d", creates)
+	if countKind(changes, kit.ChangeCreateTable) != 1 {
+		t.Errorf("expected 1 CreateTable for accounts, got %d", countKind(changes, kit.ChangeCreateTable))
 	}
 }
 
@@ -746,18 +752,3 @@ func TestRenameTable_NilGuard(t *testing.T) {
 	}
 }
 
-func TestRenameTable_SnapshotPreservesPreviousName(t *testing.T) {
-	// Verify that PreviousName survives a snapshot round-trip.
-	td := pg.Table("accounts",
-		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
-	).RenamedFrom("users").Build()
-
-	snap := kit.FromDefs(td)
-	ts := snap.Tables["accounts"]
-	if ts == nil {
-		t.Fatal("accounts table not in snapshot")
-	}
-	if ts.PreviousName != "users" {
-		t.Errorf("expected PreviousName=users in snapshot, got %q", ts.PreviousName)
-	}
-}
