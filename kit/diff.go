@@ -56,6 +56,7 @@ type Change struct {
 // when targeting a fresh database.
 //
 // Ordering is deterministic:
+//
 //  1. Create new enums (types needed by tables/columns).
 //  2. Create new views.
 //  3. Create new tables (so FK references resolve).
@@ -65,7 +66,7 @@ type Change struct {
 //  7. Drop removed constraints.
 //  8. Drop removed tables (in reverse to respect FKs — caller may need to reorder).
 //  9. Drop removed views.
-// 10. Drop removed enums.
+//  10. Drop removed enums.
 func Diff(old, new Snapshot) []Change {
 	var changes []Change
 
