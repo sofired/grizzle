@@ -675,7 +675,7 @@ func (c ArrayColumn) EQCol(other ArrayColumn) Expression {
 
 // Contains returns col @> val — true when this array contains all elements of val.
 func (c ArrayColumn) Contains(val any) Expression {
-	return jsonbContainsExpr{ref: c.ColBase, val: val}
+	return binaryExpr{ref: c.ColBase, op: "@>", val: val}
 }
 
 // ContainedBy returns val @> col — true when val contains all elements of this array.
@@ -744,7 +744,7 @@ func (c RangeColumn) EQCol(other RangeColumn) Expression {
 
 // Contains returns col @> val — true when the range contains val.
 func (c RangeColumn) Contains(val any) Expression {
-	return jsonbContainsExpr{ref: c.ColBase, val: val}
+	return binaryExpr{ref: c.ColBase, op: "@>", val: val}
 }
 
 // ContainedBy returns val @> col — true when val contains this range.
