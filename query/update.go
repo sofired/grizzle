@@ -138,10 +138,20 @@ func (b *UpdateBuilder) Build(d dialect.Dialect) (string, []any) {
 // structSetsForUpdate extracts db-tagged fields for SET clauses.
 // ALL nil pointer fields are skipped regardless of omitempty — in an update
 // struct, nil always means "leave this column unchanged".
+// Returns empty cols/vals for nil, nil-pointer, or non-struct inputs.
 func structSetsForUpdate(row any) (cols []string, vals []any) {
 	rv := reflect.ValueOf(row)
+	if !rv.IsValid() {
+		return
+	}
 	if rv.Kind() == reflect.Ptr {
+		if rv.IsNil() {
+			return
+		}
 		rv = rv.Elem()
+	}
+	if rv.Kind() != reflect.Struct {
+		return
 	}
 	rt := rv.Type()
 	for i := 0; i < rt.NumField(); i++ {

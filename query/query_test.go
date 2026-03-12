@@ -490,6 +490,35 @@ func TestUpdate_SetStruct(t *testing.T) {
 }
 
 // -------------------------------------------------------------------
+// structSetsForUpdate guard tests
+// -------------------------------------------------------------------
+
+func TestUpdate_SetStruct_Nil(t *testing.T) {
+	// Passing untyped nil must not panic and must produce no SQL.
+	got, _ := query.Update(ts.UsersT).SetStruct(nil).Build(dialect.Postgres)
+	if got != "" {
+		t.Errorf("expected empty SQL for nil input, got: %s", got)
+	}
+}
+
+func TestUpdate_SetStruct_NilPointer(t *testing.T) {
+	// Passing a nil pointer must not panic and must produce no SQL.
+	var p *ts.UserUpdate
+	got, _ := query.Update(ts.UsersT).SetStruct(p).Build(dialect.Postgres)
+	if got != "" {
+		t.Errorf("expected empty SQL for nil-pointer input, got: %s", got)
+	}
+}
+
+func TestUpdate_SetStruct_NonStruct(t *testing.T) {
+	// Passing a non-struct value must not panic and must produce no SQL.
+	got, _ := query.Update(ts.UsersT).SetStruct(42).Build(dialect.Postgres)
+	if got != "" {
+		t.Errorf("expected empty SQL for non-struct input, got: %s", got)
+	}
+}
+
+// -------------------------------------------------------------------
 // DELETE tests
 // -------------------------------------------------------------------
 
