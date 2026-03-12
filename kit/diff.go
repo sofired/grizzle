@@ -1,6 +1,8 @@
 package kit
 
 import (
+	"strings"
+
 	pg "github.com/sofired/grizzle/schema/pg"
 )
 
@@ -121,7 +123,7 @@ func diffTable(tableName string, old, new *TableSnap) []Change {
 
 	// Added constraints.
 	for _, nc := range new.Constraints {
-		if _, exists := oldCons[nc.Name]; !exists {
+		if _, exists := oldCons[constraintKey(nc)]; !exists {
 			nc := nc
 			changes = append(changes, Change{
 				Kind:       ChangeAddConstraint,
@@ -133,7 +135,7 @@ func diffTable(tableName string, old, new *TableSnap) []Change {
 
 	// Dropped constraints (or changed — drop+re-add).
 	for _, oc := range old.Constraints {
-		nc, exists := newCons[oc.Name]
+		nc, exists := newCons[constraintKey(oc)]
 		if !exists {
 			oc := oc
 			changes = append(changes, Change{
@@ -195,10 +197,28 @@ func colMap(cols []pg.ColumnDef) map[string]pg.ColumnDef {
 	return m
 }
 
+// constraintKey returns a stable map key for a constraint that avoids collisions
+// between different constraint kinds sharing a name, and correctly handles unnamed
+// constraints (e.g. CompositePrimaryKey which always has Name="").
+//
+// Key format:
+//   - Named constraints: "<kind>:<name>"
+//   - Unnamed constraints: "<kind>:<col1>,<col2>,...[:<fkTable>]"
+func constraintKey(c pg.Constraint) string {
+	if c.Name != "" {
+		return string(c.Kind) + ":" + c.Name
+	}
+	key := string(c.Kind) + ":" + strings.Join(c.Columns, ",")
+	if c.FKTable != "" {
+		key += ":" + c.FKTable
+	}
+	return key
+}
+
 func constraintMap(cons []pg.Constraint) map[string]pg.Constraint {
 	m := make(map[string]pg.Constraint, len(cons))
 	for _, c := range cons {
-		m[c.Name] = c
+		m[constraintKey(c)] = c
 	}
 	return m
 }

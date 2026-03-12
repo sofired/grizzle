@@ -201,6 +201,122 @@ func TestDiff_AddConstraint(t *testing.T) {
 	}
 }
 
+// --- constraintKey / unnamed constraint diffing tests ---
+
+// TestDiff_UnnamedCompositePrimaryKey verifies that an unnamed CompositePrimaryKey
+// (Name="") survives a no-change diff without being spuriously dropped and re-added.
+func TestDiff_UnnamedCompositePrimaryKey_NoChange(t *testing.T) {
+	def := pg.Table("order_items",
+		pg.C("order_id", pg.UUID().NotNull()),
+		pg.C("item_id", pg.UUID().NotNull()),
+	).WithConstraints(func(t pg.TableRef) []pg.Constraint {
+		return []pg.Constraint{
+			pg.CompositePrimaryKey(t.Col("order_id"), t.Col("item_id")),
+		}
+	})
+
+	snap := kit.FromDefs(def)
+	changes := kit.Diff(snap, snap)
+	if len(changes) != 0 {
+		t.Errorf("expected 0 changes for identical snapshots with unnamed PK, got %d: %v", len(changes), changes)
+	}
+}
+
+// TestDiff_UnnamedCompositePrimaryKey_Add verifies that adding an unnamed
+// CompositePrimaryKey produces exactly one AddConstraint change.
+func TestDiff_UnnamedCompositePrimaryKey_Add(t *testing.T) {
+	oldDef := pg.Table("order_items",
+		pg.C("order_id", pg.UUID().NotNull()),
+		pg.C("item_id", pg.UUID().NotNull()),
+	).Build()
+
+	newDef := pg.Table("order_items",
+		pg.C("order_id", pg.UUID().NotNull()),
+		pg.C("item_id", pg.UUID().NotNull()),
+	).WithConstraints(func(t pg.TableRef) []pg.Constraint {
+		return []pg.Constraint{
+			pg.CompositePrimaryKey(t.Col("order_id"), t.Col("item_id")),
+		}
+	})
+
+	changes := kit.Diff(kit.FromDefs(oldDef), kit.FromDefs(newDef))
+	adds := countKind(changes, kit.ChangeAddConstraint)
+	if adds != 1 {
+		t.Errorf("expected 1 AddConstraint for unnamed PK, got %d: %v", adds, changes)
+	}
+}
+
+// TestDiff_UnnamedCompositePrimaryKey_Drop verifies that removing an unnamed
+// CompositePrimaryKey produces exactly one DropConstraint change.
+func TestDiff_UnnamedCompositePrimaryKey_Drop(t *testing.T) {
+	oldDef := pg.Table("order_items",
+		pg.C("order_id", pg.UUID().NotNull()),
+		pg.C("item_id", pg.UUID().NotNull()),
+	).WithConstraints(func(t pg.TableRef) []pg.Constraint {
+		return []pg.Constraint{
+			pg.CompositePrimaryKey(t.Col("order_id"), t.Col("item_id")),
+		}
+	})
+
+	newDef := pg.Table("order_items",
+		pg.C("order_id", pg.UUID().NotNull()),
+		pg.C("item_id", pg.UUID().NotNull()),
+	).Build()
+
+	changes := kit.Diff(kit.FromDefs(oldDef), kit.FromDefs(newDef))
+	drops := countKind(changes, kit.ChangeDropConstraint)
+	if drops != 1 {
+		t.Errorf("expected 1 DropConstraint for removed unnamed PK, got %d: %v", drops, changes)
+	}
+}
+
+// TestDiff_SameNameDifferentKind verifies that two constraints with the same
+// non-empty Name but different Kinds are treated as distinct (no collision).
+func TestDiff_SameNameDifferentKind_NoChange(t *testing.T) {
+	// A table with both a CHECK constraint and a UNIQUE constraint both named "foo_con".
+	// The constraint key must distinguish them by kind.
+	def := pg.Table("items",
+		pg.C("status", pg.Varchar(50).NotNull()),
+		pg.C("code", pg.Varchar(50).NotNull()),
+	).WithConstraints(func(t pg.TableRef) []pg.Constraint {
+		return []pg.Constraint{
+			pg.Check("items_con", "status IN ('active','inactive')"),
+			pg.UniqueConstraint("items_code_uniq", t.Col("code")),
+		}
+	})
+
+	snap := kit.FromDefs(def)
+	changes := kit.Diff(snap, snap)
+	if len(changes) != 0 {
+		t.Errorf("expected 0 changes for identical snapshot with same-named constraints, got %d: %v", len(changes), changes)
+	}
+}
+
+// TestDiff_TwoUnnamedPKsDifferentColumns verifies that two tables each with an
+// unnamed CompositePrimaryKey over different columns do not interfere with each
+// other in a multi-table diff.
+func TestDiff_TwoUnnamedPKs_MultiTable(t *testing.T) {
+	defA := pg.Table("ta",
+		pg.C("x", pg.UUID().NotNull()),
+		pg.C("y", pg.UUID().NotNull()),
+	).WithConstraints(func(t pg.TableRef) []pg.Constraint {
+		return []pg.Constraint{pg.CompositePrimaryKey(t.Col("x"), t.Col("y"))}
+	})
+
+	defB := pg.Table("tb",
+		pg.C("p", pg.UUID().NotNull()),
+		pg.C("q", pg.UUID().NotNull()),
+	).WithConstraints(func(t pg.TableRef) []pg.Constraint {
+		return []pg.Constraint{pg.CompositePrimaryKey(t.Col("p"), t.Col("q"))}
+	})
+
+	snap := kit.FromDefs(defA, defB)
+	changes := kit.Diff(snap, snap)
+	if len(changes) != 0 {
+		t.Errorf("expected 0 changes for identical multi-table snapshot with unnamed PKs, got %d: %v", len(changes), changes)
+	}
+}
+
 // --- SQL generation tests ---
 
 func TestGenerateCreateSQL_BasicTable(t *testing.T) {
