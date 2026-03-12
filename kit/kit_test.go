@@ -270,25 +270,26 @@ func TestDiff_UnnamedCompositePrimaryKey_Drop(t *testing.T) {
 	}
 }
 
-// TestDiff_SameNameDifferentKind verifies that two constraints with the same
-// non-empty Name but different Kinds are treated as distinct (no collision).
+// TestDiff_SameNameDifferentKind_NoChange verifies that two constraints that share
+// the same non-empty Name but have different Kinds are treated as distinct entries
+// (no key collision) — both must survive a no-change diff.
 func TestDiff_SameNameDifferentKind_NoChange(t *testing.T) {
-	// A table with both a CHECK constraint and a UNIQUE constraint both named "foo_con".
-	// The constraint key must distinguish them by kind.
+	// "shared_con" is used for both a CHECK and a UNIQUE constraint on the same table.
+	// Without the kind prefix in the key, the second entry would overwrite the first.
 	def := pg.Table("items",
 		pg.C("status", pg.Varchar(50).NotNull()),
 		pg.C("code", pg.Varchar(50).NotNull()),
 	).WithConstraints(func(t pg.TableRef) []pg.Constraint {
 		return []pg.Constraint{
-			pg.Check("items_con", "status IN ('active','inactive')"),
-			pg.UniqueConstraint("items_code_uniq", t.Col("code")),
+			pg.Check("shared_con", "status IN ('active','inactive')"),
+			pg.UniqueConstraint("shared_con", t.Col("code")),
 		}
 	})
 
 	snap := kit.FromDefs(def)
 	changes := kit.Diff(snap, snap)
 	if len(changes) != 0 {
-		t.Errorf("expected 0 changes for identical snapshot with same-named constraints, got %d: %v", len(changes), changes)
+		t.Errorf("expected 0 changes for identical snapshot with same-named constraints of different kinds, got %d: %v", len(changes), changes)
 	}
 }
 
