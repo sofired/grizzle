@@ -1714,6 +1714,77 @@ func TestSetOp_SharedParameters(t *testing.T) {
 	}
 }
 
+func TestSetOp_OrderByCols_UnqualifiedAsc(t *testing.T) {
+	a := query.Select(ts.UsersT.Username).From(ts.UsersT)
+	b := query.Select(ts.RealmsT.Name).From(ts.RealmsT)
+	assertSQL(t, "union order by unqualified asc",
+		a.Union(b).OrderByCols(expr.ColAsc("username")),
+		`(SELECT "users"."username" FROM "users") UNION (SELECT "realms"."name" FROM "realms") ORDER BY "username" ASC`,
+		nil,
+	)
+}
+
+func TestSetOp_OrderByCols_UnqualifiedDesc(t *testing.T) {
+	a := query.Select(ts.UsersT.Username).From(ts.UsersT)
+	b := query.Select(ts.RealmsT.Name).From(ts.RealmsT)
+	assertSQL(t, "union order by unqualified desc",
+		a.Union(b).OrderByCols(expr.ColDesc("username")),
+		`(SELECT "users"."username" FROM "users") UNION (SELECT "realms"."name" FROM "realms") ORDER BY "username" DESC`,
+		nil,
+	)
+}
+
+func TestSetOp_OrderByCols_Multiple(t *testing.T) {
+	a := query.Select(ts.UsersT.Username).From(ts.UsersT)
+	b := query.Select(ts.RealmsT.Name).From(ts.RealmsT)
+	assertSQL(t, "union order by multiple unqualified cols",
+		a.Union(b).OrderByCols(expr.ColAsc("username"), expr.ColDesc("email")),
+		`(SELECT "users"."username" FROM "users") UNION (SELECT "realms"."name" FROM "realms") ORDER BY "username" ASC, "email" DESC`,
+		nil,
+	)
+}
+
+func TestSetOp_OrderByCols_WithLimitOffset(t *testing.T) {
+	a := query.Select(ts.UsersT.Username).From(ts.UsersT)
+	b := query.Select(ts.RealmsT.Name).From(ts.RealmsT)
+	assertSQL(t, "union order by unqualified with limit offset",
+		a.Union(b).OrderByCols(expr.ColAsc("username")).Limit(10).Offset(20),
+		`(SELECT "users"."username" FROM "users") UNION (SELECT "realms"."name" FROM "realms") ORDER BY "username" ASC LIMIT 10 OFFSET 20`,
+		nil,
+	)
+}
+
+func TestSetOp_OrderByCols_NullsFirst(t *testing.T) {
+	a := query.Select(ts.UsersT.Username).From(ts.UsersT)
+	b := query.Select(ts.RealmsT.Name).From(ts.RealmsT)
+	assertSQL(t, "union order by unqualified nulls first",
+		a.Union(b).OrderByCols(expr.ColAsc("username").NullsFirst()),
+		`(SELECT "users"."username" FROM "users") UNION (SELECT "realms"."name" FROM "realms") ORDER BY "username" ASC NULLS FIRST`,
+		nil,
+	)
+}
+
+func TestSetOp_OrderByCols_NullsLast(t *testing.T) {
+	a := query.Select(ts.UsersT.Username).From(ts.UsersT)
+	b := query.Select(ts.RealmsT.Name).From(ts.RealmsT)
+	assertSQL(t, "union order by unqualified nulls last",
+		a.Union(b).OrderByCols(expr.ColDesc("username").NullsLast()),
+		`(SELECT "users"."username" FROM "users") UNION (SELECT "realms"."name" FROM "realms") ORDER BY "username" DESC NULLS LAST`,
+		nil,
+	)
+}
+
+func TestSetOp_OrderByCols_TakesPrecedenceOverOrderBy(t *testing.T) {
+	// When both OrderBy and OrderByCols are set, OrderByCols (unqualified) wins.
+	a := query.Select(ts.UsersT.Username).From(ts.UsersT)
+	b := query.Select(ts.RealmsT.Name).From(ts.RealmsT)
+	assertSQL(t, "orderByCols takes precedence over orderBy",
+		a.Union(b).OrderBy(ts.UsersT.Username.Asc()).OrderByCols(expr.ColAsc("username")),
+		`(SELECT "users"."username" FROM "users") UNION (SELECT "realms"."name" FROM "realms") ORDER BY "username" ASC`,
+		nil,
+	)
+}
+
 // -------------------------------------------------------------------
 // Arithmetic expressions
 // -------------------------------------------------------------------

@@ -17,17 +17,23 @@ import (
 //	admin  := query.Select(AdminsT.Email).From(AdminsT)
 //
 //	sql, args := active.Union(admin).
-//	    OrderBy(UsersT.Email.Asc()).
+//	    OrderByCols(expr.ColAsc("email")).
 //	    Build(dialect.Postgres)
-//	// SELECT "users"."email" FROM "users" WHERE "users"."active" = $1
+//	// (SELECT "users"."email" FROM "users" WHERE "users"."active" = $1)
 //	// UNION
 //	// (SELECT "admins"."email" FROM "admins")
-//	// ORDER BY "users"."email" ASC
+//	// ORDER BY "email" ASC
+//
+// Use [SetOpBuilder.OrderByCols] (with [expr.ColAsc] / [expr.ColDesc]) rather
+// than [SetOpBuilder.OrderBy] for set operations. PostgreSQL rejects
+// table-qualified column references in ORDER BY clauses on combined result sets
+// because no source table is in scope after the set operation.
 type SetOpBuilder struct {
-	parts   []setPart
-	orderBy []expr.OrderExpr
-	limit   int
-	offset  int
+	parts       []setPart
+	orderBy     []expr.OrderExpr
+	orderByCols []expr.UnqualifiedOrderExpr
+	limit       int
+	offset      int
 }
 
 type setPart struct {
@@ -102,11 +108,31 @@ func (b *SetOpBuilder) addPart(op string, sel *SelectBuilder) *SetOpBuilder {
 // Result shaping
 // -------------------------------------------------------------------
 
-// OrderBy sets the ORDER BY for the overall combined result.
-// Column references used here must match the column names in the first SELECT.
+// OrderBy sets the ORDER BY for the overall combined result using
+// table-qualified column references (e.g. "users"."email" ASC).
+//
+// WARNING: PostgreSQL rejects table-qualified column references in the ORDER BY
+// clause of a set operation (UNION / INTERSECT / EXCEPT) because the combined
+// result set has no source table in scope. Use [SetOpBuilder.OrderByCols] with
+// [expr.ColAsc] / [expr.ColDesc] to emit unqualified column names instead.
 func (b *SetOpBuilder) OrderBy(exprs ...expr.OrderExpr) *SetOpBuilder {
 	cp := *b
 	cp.orderBy = exprs
+	return &cp
+}
+
+// OrderByCols sets the ORDER BY for the overall combined result using
+// unqualified column names. This is the correct form for PostgreSQL set
+// operations (UNION / INTERSECT / EXCEPT), where table-qualified references
+// are rejected.
+//
+// Use [expr.ColAsc] and [expr.ColDesc] to construct the entries:
+//
+//	active.Union(admin).OrderByCols(expr.ColAsc("email"), expr.ColDesc("created_at"))
+//	// ORDER BY "email" ASC, "created_at" DESC
+func (b *SetOpBuilder) OrderByCols(exprs ...expr.UnqualifiedOrderExpr) *SetOpBuilder {
+	cp := *b
+	cp.orderByCols = exprs
 	return &cp
 }
 
@@ -148,7 +174,12 @@ func (b *SetOpBuilder) Build(d dialect.Dialect) (string, []any) {
 	}
 
 	// Overall ORDER BY, LIMIT, OFFSET (applied to the combined result set).
-	sb.WriteString(buildOrderBy(ctx, b.orderBy))
+	// OrderByCols (unqualified) takes precedence over OrderBy (qualified) when both are set.
+	if len(b.orderByCols) > 0 {
+		sb.WriteString(buildUnqualifiedOrderBy(ctx, b.orderByCols))
+	} else {
+		sb.WriteString(buildOrderBy(ctx, b.orderBy))
+	}
 	if b.limit > 0 {
 		fmt.Fprintf(&sb, " LIMIT %d", b.limit)
 	}

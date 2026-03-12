@@ -72,6 +72,59 @@ func (o OrderExpr) NullsLast() OrderExpr {
 }
 
 // -------------------------------------------------------------------
+// UnqualifiedOrderExpr
+// -------------------------------------------------------------------
+
+// UnqualifiedOrderExpr is an ORDER BY entry that always emits an unqualified
+// (table-free) column reference. Use this in set operations (UNION / INTERSECT /
+// EXCEPT) where PostgreSQL rejects table-qualified names because the combined
+// result set has no source table in scope.
+//
+// Construct values with [ColAsc] or [ColDesc].
+type UnqualifiedOrderExpr struct {
+	col   string // raw column name, will be quoted
+	dir   string // "ASC" or "DESC"
+	nulls string // "NULLS FIRST", "NULLS LAST", or ""
+}
+
+// ColAsc returns an ascending ORDER BY for a plain column name (no table qualifier).
+// Intended for use with [SetOpBuilder.OrderByCols].
+//
+//	active.Union(admin).OrderByCols(expr.ColAsc("email"))
+func ColAsc(col string) UnqualifiedOrderExpr {
+	return UnqualifiedOrderExpr{col: col, dir: "ASC"}
+}
+
+// ColDesc returns a descending ORDER BY for a plain column name (no table qualifier).
+// Intended for use with [SetOpBuilder.OrderByCols].
+//
+//	active.Union(admin).OrderByCols(expr.ColDesc("created_at"))
+func ColDesc(col string) UnqualifiedOrderExpr {
+	return UnqualifiedOrderExpr{col: col, dir: "DESC"}
+}
+
+// NullsFirst returns a copy of the expression with NULLS FIRST appended.
+func (o UnqualifiedOrderExpr) NullsFirst() UnqualifiedOrderExpr {
+	o.nulls = "NULLS FIRST"
+	return o
+}
+
+// NullsLast returns a copy of the expression with NULLS LAST appended.
+func (o UnqualifiedOrderExpr) NullsLast() UnqualifiedOrderExpr {
+	o.nulls = "NULLS LAST"
+	return o
+}
+
+// ToUnqualifiedSQL renders the ORDER BY entry as an unqualified column reference.
+func (o UnqualifiedOrderExpr) ToUnqualifiedSQL(ctx *BuildContext) string {
+	s := ctx.Quote(o.col) + " " + o.dir
+	if o.nulls != "" {
+		s += " " + o.nulls
+	}
+	return s
+}
+
+// -------------------------------------------------------------------
 // SelectableColumn — implemented by all column types
 // -------------------------------------------------------------------
 

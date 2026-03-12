@@ -81,6 +81,20 @@ func buildOrderBy(ctx *expr.BuildContext, exprs []expr.OrderExpr) string {
 	return s
 }
 
+func buildUnqualifiedOrderBy(ctx *expr.BuildContext, exprs []expr.UnqualifiedOrderExpr) string {
+	if len(exprs) == 0 {
+		return ""
+	}
+	s := " ORDER BY "
+	for i, o := range exprs {
+		if i > 0 {
+			s += ", "
+		}
+		s += o.ToUnqualifiedSQL(ctx)
+	}
+	return s
+}
+
 // Build is a convenience wrapper to produce SQL + args from a dialect in one call.
 type Builder interface {
 	Build(d dialect.Dialect) (string, []any)
