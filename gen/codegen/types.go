@@ -92,7 +92,8 @@ func applyBaseType(info *ColumnInfo, chain *parser.ChainResult) error {
 		info.GoType = "bool"
 		info.GoTypePtr = "*bool"
 
-	case "Integer", "SmallInt", "Serial", "SmallSerial":
+	case "Integer", "SmallInt", "Serial", "SmallSerial",
+		"TinyInt": // MySQL-specific: TINYINT (1-byte signed integer)
 		info.ColType = "expr.IntColumn"
 		info.GoType = "int"
 		info.GoTypePtr = "*int"
@@ -102,7 +103,8 @@ func applyBaseType(info *ColumnInfo, chain *parser.ChainResult) error {
 		info.GoType = "int64"
 		info.GoTypePtr = "*int64"
 
-	case "Numeric", "Real", "DoublePrecision":
+	case "Numeric", "Real", "DoublePrecision",
+		"Double": // MySQL-specific: DOUBLE (double-precision float)
 		info.ColType = "expr.FloatColumn"
 		info.GoType = "float64"
 		info.GoTypePtr = "*float64"

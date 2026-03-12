@@ -300,6 +300,53 @@ var Events = pg.Table("events",
 	}
 }
 
+func TestMySQLSpecificColumnTypes(t *testing.T) {
+	// mysql.TinyInt(), mysql.SmallInt(), and mysql.Double() are MySQL-specific
+	// builders (not aliases of pg builders). The parser captures their BaseFn
+	// as "TinyInt", "SmallInt" (already covered by the pg alias), and "Double".
+	// applyBaseType() must handle all three without returning "unknown column builder".
+	src := `package testschema
+import "github.com/sofired/grizzle/schema/mysql"
+var Items = mysql.Table("items",
+	mysql.C("id",       mysql.UUID().PrimaryKey().DefaultRandom()),
+	mysql.C("flags",    mysql.TinyInt().NotNull()),
+	mysql.C("priority", mysql.SmallInt()),
+	mysql.C("score",    mysql.Double().NotNull()),
+)
+`
+	dir := t.TempDir()
+	f := dir + "/schema.go"
+	if err := writeFile(f, src); err != nil {
+		t.Fatal(err)
+	}
+	tables, err := parser.ParseFile(f)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(tables) != 1 {
+		t.Fatalf("expected 1 table, got %d", len(tables))
+	}
+	gf, err := codegen.GenerateTable(tables[0], codegen.Options{PackageName: "testschema", OutputDir: dir})
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+
+	src2 := string(gf.Source)
+
+	// TinyInt and SmallInt → IntColumn + int
+	if !strings.Contains(src2, "expr.IntColumn") {
+		t.Errorf("expected expr.IntColumn for TinyInt/SmallInt in output:\n%s", src2)
+	}
+
+	// Double → FloatColumn + float64
+	if !strings.Contains(src2, "expr.FloatColumn") {
+		t.Errorf("expected expr.FloatColumn for Double in output:\n%s", src2)
+	}
+	if !strings.Contains(src2, "float64") {
+		t.Errorf("expected float64 for Double in output:\n%s", src2)
+	}
+}
+
 // writeFile is a simple helper for writing test files.
 func writeFile(path, content string) error {
 	return os.WriteFile(path, []byte(content), 0644)
