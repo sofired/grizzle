@@ -31,10 +31,11 @@ type Snapshot struct {
 
 // TableSnap is the snapshot of a single table.
 type TableSnap struct {
-	Name        string          `json:"name"`
-	Schema      string          `json:"schema,omitempty"`
-	Columns     []pg.ColumnDef  `json:"columns"`
-	Constraints []pg.Constraint `json:"constraints,omitempty"`
+	Name         string          `json:"name"`
+	Schema       string          `json:"schema,omitempty"`
+	Columns      []pg.ColumnDef  `json:"columns"`
+	Constraints  []pg.Constraint `json:"constraints,omitempty"`
+	PreviousName string          `json:"previous_name,omitempty"` // rename hint: was previously this name
 }
 
 // QualifiedName returns the schema-qualified name used as the map key.
@@ -55,10 +56,11 @@ func FromDefs(tables ...*pg.TableDef) Snapshot {
 	}
 	for _, t := range tables {
 		ts := &TableSnap{
-			Name:        t.Name,
-			Schema:      t.Schema,
-			Columns:     t.Columns,
-			Constraints: t.Constraints,
+			Name:         t.Name,
+			Schema:       t.Schema,
+			Columns:      t.Columns,
+			Constraints:  t.Constraints,
+			PreviousName: t.PreviousName,
 		}
 		snap.Tables[ts.QualifiedName()] = ts
 	}

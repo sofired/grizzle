@@ -44,6 +44,13 @@ func GenerateChangeSQL(snap Snapshot, c Change) []string {
 	case ChangeDropTable:
 		return []string{fmt.Sprintf("DROP TABLE IF EXISTS %s", quoteTable(c.TableName))}
 
+	case ChangeRenameTable:
+		return []string{fmt.Sprintf(
+			"ALTER TABLE %s RENAME TO %s",
+			quoteTable(c.OldTableName),
+			quoteTable(c.TableName),
+		)}
+
 	case ChangeAddColumn:
 		if c.NewCol == nil {
 			return nil

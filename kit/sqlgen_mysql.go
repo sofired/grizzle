@@ -57,6 +57,14 @@ func GenerateChangeSQLMySQL(snap Snapshot, c Change) []string {
 	case ChangeDropTable:
 		return []string{fmt.Sprintf("DROP TABLE IF EXISTS %s", qiMySQL(c.TableName))}
 
+	case ChangeRenameTable:
+		// MySQL: RENAME TABLE old TO new
+		return []string{fmt.Sprintf(
+			"RENAME TABLE %s TO %s",
+			quoteTableMySQL(c.OldTableName),
+			quoteTableMySQL(c.TableName),
+		)}
+
 	case ChangeAddColumn:
 		if c.NewCol == nil {
 			return nil
