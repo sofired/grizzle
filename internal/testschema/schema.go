@@ -188,6 +188,64 @@ type UserUpdate struct {
 }
 
 // -------------------------------------------------------------------
+// Sessions table — used in DELETE…USING tests
+// -------------------------------------------------------------------
+
+// SessionsTable represents the sessions table.
+type SessionsTable struct {
+	ID        expr.UUIDColumn
+	UserID    expr.UUIDColumn
+	Token     expr.StringColumn
+	CreatedAt expr.TimestampColumn
+	ExpiresAt expr.TimestampColumn
+}
+
+func (SessionsTable) GrizTableName() string  { return "sessions" }
+func (SessionsTable) GrizTableAlias() string { return "sessions" }
+
+var SessionsT = SessionsTable{
+	ID:        expr.UUIDColumn{ColBase: expr.ColBase{TableAlias: "sessions", ColName: "id"}},
+	UserID:    expr.UUIDColumn{ColBase: expr.ColBase{TableAlias: "sessions", ColName: "user_id"}},
+	Token:     expr.StringColumn{ColBase: expr.ColBase{TableAlias: "sessions", ColName: "token"}},
+	CreatedAt: expr.TimestampColumn{ColBase: expr.ColBase{TableAlias: "sessions", ColName: "created_at"}},
+	ExpiresAt: expr.TimestampColumn{ColBase: expr.ColBase{TableAlias: "sessions", ColName: "expires_at"}},
+}
+
+// -------------------------------------------------------------------
+// Orders and Shipments tables — used in UPDATE…FROM tests
+// -------------------------------------------------------------------
+
+// OrdersTable represents the orders table.
+type OrdersTable struct {
+	ID     expr.UUIDColumn
+	Status expr.StringColumn
+}
+
+func (OrdersTable) GrizTableName() string  { return "orders" }
+func (OrdersTable) GrizTableAlias() string { return "orders" }
+
+var OrdersT = OrdersTable{
+	ID:     expr.UUIDColumn{ColBase: expr.ColBase{TableAlias: "orders", ColName: "id"}},
+	Status: expr.StringColumn{ColBase: expr.ColBase{TableAlias: "orders", ColName: "status"}},
+}
+
+// ShipmentsTable represents the shipments table.
+type ShipmentsTable struct {
+	ID         expr.UUIDColumn
+	OrderID    expr.UUIDColumn
+	ShippedAt  expr.TimestampColumn
+}
+
+func (ShipmentsTable) GrizTableName() string  { return "shipments" }
+func (ShipmentsTable) GrizTableAlias() string { return "shipments" }
+
+var ShipmentsT = ShipmentsTable{
+	ID:        expr.UUIDColumn{ColBase: expr.ColBase{TableAlias: "shipments", ColName: "id"}},
+	OrderID:   expr.UUIDColumn{ColBase: expr.ColBase{TableAlias: "shipments", ColName: "order_id"}},
+	ShippedAt: expr.TimestampColumn{ColBase: expr.ColBase{TableAlias: "shipments", ColName: "shipped_at"}},
+}
+
+// -------------------------------------------------------------------
 // Relation definitions
 // -------------------------------------------------------------------
 

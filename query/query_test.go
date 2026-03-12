@@ -2061,3 +2061,142 @@ func TestWithRecursive_AndRegularCTE(t *testing.T) {
 		t.Errorf("expected WITH RECURSIVE (any recursive CTE triggers it), got: %s", sql)
 	}
 }
+
+// -------------------------------------------------------------------
+// UPDATE…FROM tests (PostgreSQL)
+// -------------------------------------------------------------------
+
+func TestUpdate_From_Basic(t *testing.T) {
+	assertSQL(t, "update from basic",
+		query.Update(ts.OrdersT).
+			Set("status", "shipped").
+			From(ts.ShipmentsT).
+			Where(expr.And(
+				ts.OrdersT.ID.EQCol(ts.ShipmentsT.OrderID),
+				ts.ShipmentsT.ShippedAt.IsNotNull(),
+			)),
+		`UPDATE "orders" SET "status" = $1 FROM "shipments" WHERE ("orders"."id" = "shipments"."order_id" AND "shipments"."shipped_at" IS NOT NULL)`,
+		[]any{"shipped"},
+	)
+}
+
+func TestUpdate_From_MultipleTables(t *testing.T) {
+	assertSQL(t, "update from multiple tables",
+		query.Update(ts.OrdersT).
+			Set("status", "active").
+			From(ts.ShipmentsT, ts.UsersT).
+			Where(ts.OrdersT.ID.EQCol(ts.ShipmentsT.OrderID)),
+		`UPDATE "orders" SET "status" = $1 FROM "shipments", "users" WHERE "orders"."id" = "shipments"."order_id"`,
+		[]any{"active"},
+	)
+}
+
+func TestUpdate_From_WithReturning(t *testing.T) {
+	assertSQL(t, "update from with returning",
+		query.Update(ts.OrdersT).
+			Set("status", "shipped").
+			From(ts.ShipmentsT).
+			Where(ts.OrdersT.ID.EQCol(ts.ShipmentsT.OrderID)).
+			Returning(ts.OrdersT.ID),
+		`UPDATE "orders" SET "status" = $1 FROM "shipments" WHERE "orders"."id" = "shipments"."order_id" RETURNING "orders"."id"`,
+		[]any{"shipped"},
+	)
+}
+
+func TestUpdate_From_IgnoredOnMySQL(t *testing.T) {
+	q := query.Update(ts.OrdersT).
+		Set("status", "shipped").
+		From(ts.ShipmentsT).
+		Where(ts.OrdersT.ID.EQCol(ts.ShipmentsT.OrderID))
+	got, _ := q.Build(dialect.MySQL)
+	if strings.Contains(got, "FROM") {
+		t.Errorf("FROM clause should be ignored on MySQL: %s", got)
+	}
+}
+
+func TestUpdate_From_IgnoredOnSQLite(t *testing.T) {
+	q := query.Update(ts.OrdersT).
+		Set("status", "shipped").
+		From(ts.ShipmentsT).
+		Where(ts.OrdersT.ID.EQCol(ts.ShipmentsT.OrderID))
+	got, _ := q.Build(dialect.SQLite)
+	if strings.Contains(got, "FROM") {
+		t.Errorf("FROM clause should be ignored on SQLite: %s", got)
+	}
+}
+
+func TestUpdate_From_NotSetNoFrom(t *testing.T) {
+	// Without From(), output must not contain FROM.
+	q := query.Update(ts.OrdersT).Set("status", "shipped")
+	got, _ := q.Build(dialect.Postgres)
+	if strings.Contains(got, " FROM ") {
+		t.Errorf("no FROM expected when From() not called: %s", got)
+	}
+}
+
+// -------------------------------------------------------------------
+// DELETE…USING tests (PostgreSQL)
+// -------------------------------------------------------------------
+
+func TestDelete_Using_Basic(t *testing.T) {
+	assertSQL(t, "delete using basic",
+		query.DeleteFrom(ts.SessionsT).
+			Using(ts.UsersT).
+			Where(expr.And(
+				ts.SessionsT.UserID.EQCol(ts.UsersT.ID),
+				ts.UsersT.DeletedAt.IsNotNull(),
+			)),
+		`DELETE FROM "sessions" USING "users" WHERE ("sessions"."user_id" = "users"."id" AND "users"."deleted_at" IS NOT NULL)`,
+		nil,
+	)
+}
+
+func TestDelete_Using_MultipleTables(t *testing.T) {
+	assertSQL(t, "delete using multiple tables",
+		query.DeleteFrom(ts.SessionsT).
+			Using(ts.UsersT, ts.RealmsT).
+			Where(ts.SessionsT.UserID.EQCol(ts.UsersT.ID)),
+		`DELETE FROM "sessions" USING "users", "realms" WHERE "sessions"."user_id" = "users"."id"`,
+		nil,
+	)
+}
+
+func TestDelete_Using_WithReturning(t *testing.T) {
+	assertSQL(t, "delete using with returning",
+		query.DeleteFrom(ts.SessionsT).
+			Using(ts.UsersT).
+			Where(ts.SessionsT.UserID.EQCol(ts.UsersT.ID)).
+			Returning(ts.SessionsT.ID),
+		`DELETE FROM "sessions" USING "users" WHERE "sessions"."user_id" = "users"."id" RETURNING "sessions"."id"`,
+		nil,
+	)
+}
+
+func TestDelete_Using_IgnoredOnMySQL(t *testing.T) {
+	q := query.DeleteFrom(ts.SessionsT).
+		Using(ts.UsersT).
+		Where(ts.SessionsT.UserID.EQCol(ts.UsersT.ID))
+	got, _ := q.Build(dialect.MySQL)
+	if strings.Contains(got, "USING") {
+		t.Errorf("USING clause should be ignored on MySQL: %s", got)
+	}
+}
+
+func TestDelete_Using_IgnoredOnSQLite(t *testing.T) {
+	q := query.DeleteFrom(ts.SessionsT).
+		Using(ts.UsersT).
+		Where(ts.SessionsT.UserID.EQCol(ts.UsersT.ID))
+	got, _ := q.Build(dialect.SQLite)
+	if strings.Contains(got, "USING") {
+		t.Errorf("USING clause should be ignored on SQLite: %s", got)
+	}
+}
+
+func TestDelete_Using_NotSetNoUsing(t *testing.T) {
+	// Without Using(), output must not contain USING.
+	q := query.DeleteFrom(ts.SessionsT).Where(ts.SessionsT.UserID.IsNotNull())
+	got, _ := q.Build(dialect.Postgres)
+	if strings.Contains(got, "USING") {
+		t.Errorf("no USING expected when Using() not called: %s", got)
+	}
+}

@@ -14,6 +14,7 @@ type UpdateBuilder struct {
 	table     TableSource
 	sets      []setClause // explicit col = val pairs
 	setStruct any         // alternative: set via struct reflection
+	from      []TableSource
 	where     expr.Expression
 	returning []expr.SelectableColumn
 	limit     int // 0 = no limit; MySQL/SQLite only
@@ -50,6 +51,26 @@ func (b *UpdateBuilder) Set(col string, val any) *UpdateBuilder {
 func (b *UpdateBuilder) SetStruct(row any) *UpdateBuilder {
 	cp := *b
 	cp.setStruct = row
+	return &cp
+}
+
+// From adds one or more tables to the FROM clause of the UPDATE statement
+// (PostgreSQL UPDATE … FROM syntax). This allows WHERE conditions to reference
+// columns from the additional tables.
+//
+// On dialects that do not support UPDATE … FROM (MySQL, SQLite), the FROM
+// tables are silently ignored.
+//
+//	query.Update(OrdersT).
+//	    Set("status", "shipped").
+//	    From(ShipmentsT).
+//	    Where(expr.And(
+//	        OrdersT.ID.EQCol(ShipmentsT.OrderID),
+//	        ShipmentsT.ShippedAt.IsNotNull(),
+//	    ))
+func (b *UpdateBuilder) From(tables ...TableSource) *UpdateBuilder {
+	cp := *b
+	cp.from = append(append([]TableSource(nil), cp.from...), tables...)
 	return &cp
 }
 
@@ -110,6 +131,16 @@ func (b *UpdateBuilder) Build(d dialect.Dialect) (string, []any) {
 		sb.WriteString(ctx.Quote(s.col))
 		sb.WriteString(" = ")
 		sb.WriteString(ctx.Add(s.val))
+	}
+
+	if len(b.from) > 0 && d.Name() == "postgres" {
+		sb.WriteString(" FROM ")
+		for i, t := range b.from {
+			if i > 0 {
+				sb.WriteString(", ")
+			}
+			sb.WriteString(ctx.Quote(t.GrizTableName()))
+		}
 	}
 
 	sb.WriteString(buildWhere(ctx, b.where))
