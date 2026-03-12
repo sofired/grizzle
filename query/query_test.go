@@ -1685,6 +1685,35 @@ func TestSelect_SkipLocked_NoWait_MutuallyExclusive(t *testing.T) {
 	}
 }
 
+func TestSelect_ForKeyShare_SkipLocked(t *testing.T) {
+	q := query.Select().From(ts.UsersT).ForKeyShare().SkipLocked()
+	got, _ := q.Build(dialect.Postgres)
+	want := `SELECT * FROM "users" FOR KEY SHARE SKIP LOCKED`
+	if got != want {
+		t.Errorf("SQL mismatch\n got:  %s\nwant: %s", got, want)
+	}
+}
+
+func TestSelect_ForShare_Of_Postgres(t *testing.T) {
+	q := query.Select().From(ts.UsersT).LeftJoin(ts.RealmsT, ts.UsersT.RealmID.EQCol(ts.RealmsT.ID)).
+		ForShare().Of(ts.UsersT)
+	got, _ := q.Build(dialect.Postgres)
+	want := `SELECT * FROM "users" LEFT JOIN "realms" ON "users"."realm_id" = "realms"."id" FOR SHARE OF "users"`
+	if got != want {
+		t.Errorf("SQL mismatch\n got:  %s\nwant: %s", got, want)
+	}
+}
+
+func TestSelect_ForShare_Of_MySQL_Dropped(t *testing.T) {
+	// OF is not valid for MySQL LOCK IN SHARE MODE — it should be silently suppressed.
+	q := query.Select().From(ts.UsersT).ForShare().Of(ts.UsersT)
+	got, _ := q.Build(dialect.MySQL)
+	want := "SELECT * FROM `users` LOCK IN SHARE MODE"
+	if got != want {
+		t.Errorf("SQL mismatch\n got:  %s\nwant: %s", got, want)
+	}
+}
+
 // -------------------------------------------------------------------
 // UPDATE / DELETE LIMIT tests
 // -------------------------------------------------------------------
