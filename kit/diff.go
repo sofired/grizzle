@@ -215,5 +215,17 @@ func constraintsEqual(a, b pg.Constraint) bool {
 			return false
 		}
 	}
+	// Foreign key fields.
+	if a.FKTable != b.FKTable || a.FKOnDelete != b.FKOnDelete || a.FKOnUpdate != b.FKOnUpdate {
+		return false
+	}
+	if len(a.FKColumns) != len(b.FKColumns) {
+		return false
+	}
+	for i := range a.FKColumns {
+		if a.FKColumns[i] != b.FKColumns[i] {
+			return false
+		}
+	}
 	return true
 }
