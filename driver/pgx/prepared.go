@@ -16,8 +16,11 @@ import (
 // Pre-validation means any SQL error (wrong column name, type mismatch, bad
 // syntax) is surfaced at server startup rather than during a live request.
 //
-// The statement name is visible in pg_stat_statements and pg_prepared_statements,
-// making it easy to track query performance in production.
+// The name is a human-readable label used for logging and error messages.
+// At execution time, queries run by SQL so that pgx v5's per-connection
+// statement cache (QueryExecModeCacheStatement) automatically prepares and
+// reuses the plan on each pool connection — avoiding the cross-connection
+// named-statement mismatch that arises when using pgxpool.
 //
 // Example (static active-users list):
 //
@@ -37,9 +40,6 @@ import (
 //	users, err := activeUsers.QueryAll(ctx, db)
 //
 // PreparedSelect holds the pre-built SQL and its bound args.
-// pgx v5 automatically maintains a per-connection prepared statement cache
-// keyed by the statement name — so queries using the same name benefit from
-// the server-side parse cache on every subsequent execution.
 type PreparedSelect[T any] struct {
 	name string
 	sql  string
@@ -57,7 +57,7 @@ func PrepareSelect[T any](ctx context.Context, db *DB, name string, b *query.Sel
 	return &PreparedSelect[T]{name: name, sql: sql, args: args}, nil
 }
 
-// Name returns the statement name (visible in pg_stat_statements).
+// Name returns the statement name used for logging and error messages.
 func (p *PreparedSelect[T]) Name() string { return p.name }
 
 // SQL returns the pre-built SQL string.
@@ -65,20 +65,20 @@ func (p *PreparedSelect[T]) SQL() string { return p.sql }
 
 // QueryAll executes the prepared query and returns all matching rows.
 func (p *PreparedSelect[T]) QueryAll(ctx context.Context, db *DB) ([]T, error) {
-	rows, err := db.Pool().Query(ctx, p.name, p.args...)
+	rows, err := db.Pool().Query(ctx, p.sql, p.args...)
 	return ScanAll[T](rows, err)
 }
 
 // QueryOne executes the prepared query and expects exactly one row.
 // Returns an error if zero or more than one row is returned.
 func (p *PreparedSelect[T]) QueryOne(ctx context.Context, db *DB) (T, error) {
-	rows, err := db.Pool().Query(ctx, p.name, p.args...)
+	rows, err := db.Pool().Query(ctx, p.sql, p.args...)
 	return ScanOne[T](rows, err)
 }
 
 // QueryOpt executes the prepared query and returns nil if no rows are found.
 func (p *PreparedSelect[T]) QueryOpt(ctx context.Context, db *DB) (*T, error) {
-	rows, err := db.Pool().Query(ctx, p.name, p.args...)
+	rows, err := db.Pool().Query(ctx, p.sql, p.args...)
 	return ScanOneOpt[T](rows, err)
 }
 
@@ -131,7 +131,7 @@ func (p *PreparedExec) SQL() string { return p.sql }
 
 // Exec runs the prepared mutation and returns the number of rows affected.
 func (p *PreparedExec) Exec(ctx context.Context, db *DB) (int64, error) {
-	tag, err := db.Pool().Exec(ctx, p.name, p.args...)
+	tag, err := db.Pool().Exec(ctx, p.sql, p.args...)
 	if err != nil {
 		return 0, err
 	}
@@ -140,7 +140,7 @@ func (p *PreparedExec) Exec(ctx context.Context, db *DB) (int64, error) {
 
 // ExecTx runs the prepared mutation inside an existing transaction.
 func (p *PreparedExec) ExecTx(ctx context.Context, tx *Tx) (int64, error) {
-	tag, err := tx.tx.Exec(ctx, p.name, p.args...)
+	tag, err := tx.tx.Exec(ctx, p.sql, p.args...)
 	if err != nil {
 		return 0, err
 	}
@@ -222,12 +222,15 @@ func RegisterExec(reg *Registry, name string, b interface {
 // Internal helpers
 // -------------------------------------------------------------------
 
-// validateStatement prepares a statement on a single pooled connection to
-// check its SQL validity. The connection is immediately released back to the pool.
+// validateStatement prepares a named statement on a single pooled connection to
+// check its SQL validity, then immediately releases the connection back to the pool.
+// It is used only for startup validation; execution later uses the SQL string
+// directly so that pgx's per-connection statement cache works correctly across
+// all pool connections.
 //
-// pgx v5's Conn.Prepare sends a Parse message to PostgreSQL, which validates
-// the SQL without executing it — wrong column names, type errors, and syntax
-// problems are all caught here.
+// pgx v5's Conn.Prepare sends a Parse + Describe message to PostgreSQL, which
+// validates the SQL without executing it — wrong column names, type errors, and
+// syntax problems are all caught here.
 func validateStatement(ctx context.Context, db *DB, name, sql string) error {
 	conn, err := db.Pool().Acquire(ctx)
 	if err != nil {
