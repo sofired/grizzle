@@ -344,6 +344,43 @@ func TestDiff_FKConstraint_Unchanged(t *testing.T) {
 	}
 }
 
+func TestDiff_FKConstraint_EmptyActionEqualsNoAction(t *testing.T) {
+	// A schema FK with empty FKOnDelete/FKOnUpdate ("") must be considered equal to a
+	// live/introspected FK whose action was normalised to "NO ACTION".  Without this
+	// normalisation constraintsEqual would emit a spurious drop+re-add every run.
+	schemaTable := pg.Table("orders",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("customer_id", pg.UUID().NotNull()),
+	).WithConstraints(func(t pg.TableRef) []pg.Constraint {
+		// Build a FK without explicitly setting ON DELETE/ON UPDATE — fields stay "".
+		return []pg.Constraint{
+			pg.ForeignKey("orders_customer_fk").
+				From(t.Col("customer_id")).
+				References("customers", "id").
+				Build(),
+		}
+	})
+
+	// schemaSnap has FKOnDelete="" / FKOnUpdate="" (as built from the schema DSL).
+	schemaSnap := kit.FromDefs(schemaTable)
+
+	// liveSnap simulates what introspection returns: the same table/constraint, but
+	// FKOnDelete and FKOnUpdate are "NO ACTION" instead of "".
+	liveSnap := kit.FromDefs(schemaTable)
+	liveTable := liveSnap.Tables["orders"]
+	for i := range liveTable.Constraints {
+		if liveTable.Constraints[i].Kind == pg.KindForeignKey {
+			liveTable.Constraints[i].FKOnDelete = pg.FKActionNoAction
+			liveTable.Constraints[i].FKOnUpdate = pg.FKActionNoAction
+		}
+	}
+
+	changes := kit.Diff(liveSnap, schemaSnap)
+	if len(changes) != 0 {
+		t.Errorf("expected 0 changes when schema FK has empty action and live FK has NO ACTION, got %d: %v", len(changes), changes)
+	}
+}
+
 func TestDiff_AddConstraint(t *testing.T) {
 	oldDef := pg.Table("users",
 		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),

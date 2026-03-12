@@ -216,7 +216,20 @@ func constraintsEqual(a, b pg.Constraint) bool {
 		}
 	}
 	// Foreign key fields.
-	if a.FKTable != b.FKTable || a.FKOnDelete != b.FKOnDelete || a.FKOnUpdate != b.FKOnUpdate {
+	// normFKAction treats "" and "NO ACTION" as equivalent: SQL generation omits the ON
+	// DELETE/UPDATE clause for both, and introspection normalises unknown actions to
+	// FKActionNoAction.  Without this normalisation a schema FK with FKOnDelete ""
+	// would never equal a live FK with FKOnDelete "NO ACTION", causing a perpetual
+	// drop+re-add diff on every migration run.
+	normFKAction := func(a pg.FKAction) pg.FKAction {
+		if a == "" {
+			return pg.FKActionNoAction
+		}
+		return a
+	}
+	if a.FKTable != b.FKTable ||
+		normFKAction(a.FKOnDelete) != normFKAction(b.FKOnDelete) ||
+		normFKAction(a.FKOnUpdate) != normFKAction(b.FKOnUpdate) {
 		return false
 	}
 	if len(a.FKColumns) != len(b.FKColumns) {
