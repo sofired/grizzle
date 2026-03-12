@@ -57,8 +57,13 @@ type AliasedCol struct {
 }
 
 // ToSQL implements Expression. Renders: "table"."col" AS "alias".
+// If alias is empty, only the column reference is rendered (no AS clause).
 func (a AliasedCol) ToSQL(ctx *BuildContext) string {
-	return ctx.ColRef(a.base.TableAlias, a.base.ColName) + " AS " + ctx.Quote(a.alias)
+	ref := ctx.ColRef(a.base.TableAlias, a.base.ColName)
+	if a.alias == "" {
+		return ref
+	}
+	return ref + " AS " + ctx.Quote(a.alias)
 }
 
 // colRef implements colRefer (no alias — for use inside other expressions).
