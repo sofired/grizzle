@@ -126,6 +126,12 @@ func (b *SetOpBuilder) OrderBy(exprs ...expr.OrderExpr) *SetOpBuilder {
 // operations (UNION / INTERSECT / EXCEPT), where table-qualified references
 // are rejected.
 //
+// PostgreSQL requires that ORDER BY entries for set operations refer only to
+// output column names of the first SELECT in the set, or to positional
+// ordinals (1-based) of those output columns. Callers are responsible for
+// ensuring that the names passed to [expr.ColAsc] / [expr.ColDesc] match the
+// projected column names of the first SELECT (or intentionally use ordinals).
+//
 // Use [expr.ColAsc] and [expr.ColDesc] to construct the entries:
 //
 //	active.Union(admin).OrderByCols(expr.ColAsc("email"), expr.ColDesc("created_at"))

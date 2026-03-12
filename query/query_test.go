@@ -1735,11 +1735,11 @@ func TestSetOp_OrderByCols_UnqualifiedDesc(t *testing.T) {
 }
 
 func TestSetOp_OrderByCols_Multiple(t *testing.T) {
-	a := query.Select(ts.UsersT.Username).From(ts.UsersT)
-	b := query.Select(ts.RealmsT.Name).From(ts.RealmsT)
+	a := query.Select(ts.UsersT.Username, ts.UsersT.Email).From(ts.UsersT)
+	b := query.Select(ts.RealmsT.Name, ts.RealmsT.DisplayName).From(ts.RealmsT)
 	assertSQL(t, "union order by multiple unqualified cols",
 		a.Union(b).OrderByCols(expr.ColAsc("username"), expr.ColDesc("email")),
-		`(SELECT "users"."username" FROM "users") UNION (SELECT "realms"."name" FROM "realms") ORDER BY "username" ASC, "email" DESC`,
+		`(SELECT "users"."username", "users"."email" FROM "users") UNION (SELECT "realms"."name", "realms"."display_name" FROM "realms") ORDER BY "username" ASC, "email" DESC`,
 		nil,
 	)
 }
