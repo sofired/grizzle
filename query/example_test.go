@@ -93,8 +93,8 @@ func ExampleInsertInto_upsert() {
 	}
 	sql, _ := query.InsertInto(ts.UsersT).
 		Values(row).
-		OnConflict("realm_id", "username").
-		DoUpdateSetExcluded("email", "enabled").
+		OnConflictStr("realm_id", "username").
+		DoUpdateSetExcludedStr("email", "enabled").
 		Build(dialect.Postgres)
 	fmt.Println(sql)
 	// Output:

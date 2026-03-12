@@ -81,7 +81,7 @@ func ExampleDB_Transaction() {
 
 	err := db.Transaction(ctx, func(tx *pgxdb.Tx) error {
 		_, err := tx.Exec(ctx, query.Update(ts.UsersT).
-			Set("enabled", false).
+			Set(ts.UsersT.Enabled, false).
 			Where(ts.UsersT.DeletedAt.IsNotNull()))
 		return err
 	})

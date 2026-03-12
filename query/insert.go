@@ -30,6 +30,10 @@ type upsertClause struct {
 	excluded  []string    // DO UPDATE SET col = EXCLUDED.col
 }
 
+// colName extracts the column name from either an expr.SelectableColumn or a string.
+// This is used by the typed overloads of OnConflict, DoUpdateSetExcluded, and DoUpdateSet.
+func colName(c expr.SelectableColumn) string { return c.ColumnName() }
+
 // InsertInto starts an INSERT INTO <table> query.
 func InsertInto(t TableSource) *InsertBuilder {
 	return &InsertBuilder{table: t}
@@ -68,13 +72,31 @@ func (b *InsertBuilder) ValueSlice(rows any) *InsertBuilder {
 	return &cp
 }
 
-// OnConflict sets the conflict target to one or more column names.
+// OnConflict sets the conflict target to one or more typed column references.
 // Must be followed by DoNothing(), DoUpdateSet(), DoUpdateSetExcluded(),
 // or DoUpdateSetStruct() to complete the upsert clause.
 //
 //	query.InsertInto(UsersT).Values(row).
-//	    OnConflict("realm_id", "username").DoUpdateSetExcluded("email", "enabled")
-func (b *InsertBuilder) OnConflict(cols ...string) *InsertBuilder {
+//	    OnConflict(UsersT.RealmID, UsersT.Username).DoUpdateSetExcluded(UsersT.Email, UsersT.Enabled)
+func (b *InsertBuilder) OnConflict(cols ...expr.SelectableColumn) *InsertBuilder {
+	names := make([]string, len(cols))
+	for i, c := range cols {
+		names[i] = colName(c)
+	}
+	cp := *b
+	u := b.upsertCopy()
+	u.conflictCols = names
+	u.conflictConstraint = ""
+	cp.upsert = u
+	return &cp
+}
+
+// OnConflictStr sets the conflict target to one or more raw column name strings.
+// Prefer OnConflict with typed column references for compile-time safety.
+//
+//	query.InsertInto(UsersT).Values(row).
+//	    OnConflictStr("realm_id", "username").DoUpdateSetExcludedStr("email", "enabled")
+func (b *InsertBuilder) OnConflictStr(cols ...string) *InsertBuilder {
 	cp := *b
 	u := b.upsertCopy()
 	u.conflictCols = cols
@@ -107,11 +129,25 @@ func (b *InsertBuilder) DoNothing() *InsertBuilder {
 	return &cp
 }
 
-// DoUpdateSet adds an explicit col = val assignment to the DO UPDATE SET clause.
-// Call multiple times to set multiple columns.
+// DoUpdateSet adds an explicit col = val assignment to the DO UPDATE SET clause
+// using a typed column reference. Call multiple times to set multiple columns.
 //
-//	.OnConflict("email").DoUpdateSet("enabled", true).DoUpdateSet("username", "alice")
-func (b *InsertBuilder) DoUpdateSet(col string, val any) *InsertBuilder {
+//	.OnConflict(UsersT.Email).DoUpdateSet(UsersT.Enabled, true).DoUpdateSet(UsersT.Username, "alice")
+func (b *InsertBuilder) DoUpdateSet(col expr.SelectableColumn, val any) *InsertBuilder {
+	cp := *b
+	u := b.upsertCopy()
+	u.doNothing = false
+	u.sets = append(append([]setClause(nil), u.sets...), setClause{col: colName(col), val: val})
+	cp.upsert = u
+	return &cp
+}
+
+// DoUpdateSetStr adds an explicit col = val assignment to the DO UPDATE SET clause
+// using a raw column name string. Call multiple times to set multiple columns.
+// Prefer DoUpdateSet with typed column references for compile-time safety.
+//
+//	.OnConflictStr("email").DoUpdateSetStr("enabled", true).DoUpdateSetStr("username", "alice")
+func (b *InsertBuilder) DoUpdateSetStr(col string, val any) *InsertBuilder {
 	cp := *b
 	u := b.upsertCopy()
 	u.doNothing = false
@@ -120,12 +156,29 @@ func (b *InsertBuilder) DoUpdateSet(col string, val any) *InsertBuilder {
 	return &cp
 }
 
-// DoUpdateSetExcluded adds SET col = EXCLUDED.col for each named column.
+// DoUpdateSetExcluded adds SET col = EXCLUDED.col for each typed column reference.
 // This is the most common upsert pattern — overwrite with the values that
 // were proposed for insertion.
 //
-//	.OnConflict("realm_id", "username").DoUpdateSetExcluded("email", "enabled")
-func (b *InsertBuilder) DoUpdateSetExcluded(cols ...string) *InsertBuilder {
+//	.OnConflict(UsersT.RealmID, UsersT.Username).DoUpdateSetExcluded(UsersT.Email, UsersT.Enabled)
+func (b *InsertBuilder) DoUpdateSetExcluded(cols ...expr.SelectableColumn) *InsertBuilder {
+	names := make([]string, len(cols))
+	for i, c := range cols {
+		names[i] = colName(c)
+	}
+	cp := *b
+	u := b.upsertCopy()
+	u.doNothing = false
+	u.excluded = append(append([]string(nil), u.excluded...), names...)
+	cp.upsert = u
+	return &cp
+}
+
+// DoUpdateSetExcludedStr adds SET col = EXCLUDED.col for each named column string.
+// Prefer DoUpdateSetExcluded with typed column references for compile-time safety.
+//
+//	.OnConflictStr("realm_id", "username").DoUpdateSetExcludedStr("email", "enabled")
+func (b *InsertBuilder) DoUpdateSetExcludedStr(cols ...string) *InsertBuilder {
 	cp := *b
 	u := b.upsertCopy()
 	u.doNothing = false

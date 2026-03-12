@@ -29,10 +29,22 @@ func Update(t TableSource) *UpdateBuilder {
 	return &UpdateBuilder{table: t}
 }
 
-// Set adds a col = val assignment. Call multiple times to set multiple columns.
+// Set adds a col = val assignment using a typed column reference.
+// Call multiple times to set multiple columns.
 //
-//	query.Update(UsersT).Set("name", "Alice").Set("enabled", true)
-func (b *UpdateBuilder) Set(col string, val any) *UpdateBuilder {
+//	query.Update(UsersT).Set(UsersT.Username, "Alice").Set(UsersT.Enabled, true)
+func (b *UpdateBuilder) Set(col expr.SelectableColumn, val any) *UpdateBuilder {
+	cp := *b
+	cp.sets = append(append([]setClause(nil), cp.sets...), setClause{col: col.ColumnName(), val: val})
+	return &cp
+}
+
+// SetStr adds a col = val assignment using a raw column name string.
+// Call multiple times to set multiple columns.
+// Prefer Set with typed column references for compile-time safety.
+//
+//	query.Update(UsersT).SetStr("name", "Alice").SetStr("enabled", true)
+func (b *UpdateBuilder) SetStr(col string, val any) *UpdateBuilder {
 	cp := *b
 	cp.sets = append(append([]setClause(nil), cp.sets...), setClause{col: col, val: val})
 	return &cp

@@ -182,7 +182,7 @@ func TestExec_Update(t *testing.T) {
 	ctx := context.Background()
 	db := openTestDB(t)
 
-	upd := query.Update(usersT).Set("name", "Alicia").Where(idCol.EQ(1))
+	upd := query.Update(usersT).Set(nameCol, "Alicia").Where(idCol.EQ(1))
 	n, err := db.Exec(ctx, upd)
 	if err != nil {
 		t.Fatalf("Exec update: %v", err)

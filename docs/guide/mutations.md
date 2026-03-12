@@ -56,11 +56,11 @@ n, err := d.Exec(ctx, query.InsertInto(db.UsersT).Values(row))
 ### PostgreSQL — ON CONFLICT
 
 ```go
-// Conflict on column list → DO UPDATE SET excluded columns
+// Conflict on column list → DO UPDATE SET excluded columns (typed, compile-time safe)
 query.InsertInto(db.UsersT).
     Values(row).
-    OnConflict("realm_id", "username").
-    DoUpdateSetExcluded("email", "enabled")
+    OnConflict(db.UsersT.RealmID, db.UsersT.Username).
+    DoUpdateSetExcluded(db.UsersT.Email, db.UsersT.Enabled)
 // ON CONFLICT ("realm_id", "username")
 // DO UPDATE SET "email" = EXCLUDED."email", "enabled" = EXCLUDED."enabled"
 
@@ -70,19 +70,23 @@ query.InsertInto(db.UsersT).
     OnConflictConstraint("users_realm_username_idx").
     DoNothing()
 
-// Explicit SET values on conflict
+// Explicit SET values on conflict (typed)
 query.InsertInto(db.UsersT).
     Values(row).
-    OnConflict("email").
-    DoUpdateSet("enabled", true).
-    DoUpdateSet("updated_at", time.Now())
+    OnConflict(db.UsersT.Email).
+    DoUpdateSet(db.UsersT.Enabled, true).
+    DoUpdateSet(db.UsersT.UpdatedAt, time.Now())
 
 // Struct-based SET on conflict
 query.InsertInto(db.UsersT).
     Values(row).
-    OnConflict("email").
+    OnConflict(db.UsersT.Email).
     DoUpdateSetStruct(UserUpdate{Enabled: ptr(true)})
 ```
+
+::: tip Migration from string-based API
+`OnConflict`, `DoUpdateSetExcluded`, `DoUpdateSet`, and `Set` now accept typed column references (`expr.SelectableColumn`) for compile-time column name safety. If you need the old string-based API, use the `*Str` variants: `OnConflictStr`, `DoUpdateSetExcludedStr`, `DoUpdateSetStr`, and `SetStr`.
+:::
 
 ### MySQL / SQLite — INSERT IGNORE
 
@@ -103,8 +107,8 @@ query.InsertInto(db.UsersT).Values(row).IgnoreConflicts()
 
 ```go
 sql, args := query.Update(db.UsersT).
-    Set("email", "new@example.com").
-    Set("updated_at", time.Now()).
+    Set(db.UsersT.Email, "new@example.com").
+    Set(db.UsersT.UpdatedAt, time.Now()).
     Where(db.UsersT.ID.EQ(userID)).
     Build(dialect.Postgres)
 // UPDATE "users" SET "email" = $1, "updated_at" = $2 WHERE "users"."id" = $3
@@ -146,7 +150,7 @@ result, err := pgxdb.ScanOne[db.UserSelect](rows, err)
 
 // Without RETURNING
 n, err := d.Exec(ctx,
-    query.Update(db.UsersT).Set("enabled", false).Where(db.UsersT.ID.EQ(userID)),
+    query.Update(db.UsersT).Set(db.UsersT.Enabled, false).Where(db.UsersT.ID.EQ(userID)),
 )
 ```
 

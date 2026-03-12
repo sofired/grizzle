@@ -16,7 +16,7 @@ err := db.Transaction(ctx, func(tx *pgxdb.Tx) error {
 
     _, err = tx.Exec(ctx,
         query.Update(db.UsersT).
-            Set("credits", credits-cost).
+            Set(db.UsersT.Credits, credits-cost).
             Where(db.UsersT.ID.EQ(userID)),
     )
     return err // commit if nil, rollback if error
@@ -54,7 +54,7 @@ err := db.Transaction(ctx, func(tx *pgxdb.Tx) error {
     for _, u := range users {
         _, err = tx.Exec(ctx,
             query.Update(db.UsersT).
-                Set("enabled", false).
+                Set(db.UsersT.Enabled, false).
                 Where(db.UsersT.ID.EQ(u.ID)),
         )
         if err != nil {

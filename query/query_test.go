@@ -291,7 +291,7 @@ func TestUpsert_DoNothing(t *testing.T) {
 	assertSQL(t, "on conflict do nothing",
 		query.InsertInto(ts.RealmsT).
 			Values(row).
-			OnConflict("name").DoNothing(),
+			OnConflictStr("name").DoNothing(),
 		`INSERT INTO "realms" ("name") VALUES ($1) ON CONFLICT ("name") DO NOTHING`,
 		[]any{name},
 	)
@@ -354,8 +354,8 @@ func TestUpsert_DoUpdateSetExcluded(t *testing.T) {
 	assertSQL(t, "on conflict do update set excluded",
 		query.InsertInto(ts.RealmsT).
 			Values(row).
-			OnConflict("name").
-			DoUpdateSetExcluded("enabled"),
+			OnConflictStr("name").
+			DoUpdateSetExcludedStr("enabled"),
 		`INSERT INTO "realms" ("name", "enabled") VALUES ($1, $2) ON CONFLICT ("name") DO UPDATE SET "enabled" = EXCLUDED."enabled"`,
 		[]any{name, enabled},
 	)
@@ -368,8 +368,8 @@ func TestUpsert_DoUpdateSetExplicit(t *testing.T) {
 	assertSQL(t, "on conflict do update set explicit",
 		query.InsertInto(ts.RealmsT).
 			Values(row).
-			OnConflict("name").
-			DoUpdateSet("enabled", enabled),
+			OnConflictStr("name").
+			DoUpdateSetStr("enabled", enabled),
 		`INSERT INTO "realms" ("name") VALUES ($1) ON CONFLICT ("name") DO UPDATE SET "enabled" = $2`,
 		[]any{name, enabled},
 	)
@@ -383,9 +383,9 @@ func TestUpsert_DoUpdateSetMixed(t *testing.T) {
 	assertSQL(t, "on conflict do update set mixed",
 		query.InsertInto(ts.RealmsT).
 			Values(row).
-			OnConflict("name").
-			DoUpdateSet("display_name", displayName).
-			DoUpdateSetExcluded("enabled"),
+			OnConflictStr("name").
+			DoUpdateSetStr("display_name", displayName).
+			DoUpdateSetExcludedStr("enabled"),
 		`INSERT INTO "realms" ("name") VALUES ($1) ON CONFLICT ("name") DO UPDATE SET "display_name" = $2, "enabled" = EXCLUDED."enabled"`,
 		[]any{name, displayName},
 	)
@@ -411,8 +411,8 @@ func TestUpsert_MultiColConflictTarget(t *testing.T) {
 	assertSQL(t, "multi-col conflict target",
 		query.InsertInto(ts.UsersT).
 			Values(row).
-			OnConflict("realm_id", "username").
-			DoUpdateSetExcluded("email", "enabled"),
+			OnConflictStr("realm_id", "username").
+			DoUpdateSetExcludedStr("email", "enabled"),
 		`INSERT INTO "users" ("realm_id", "username") VALUES ($1, $2) ON CONFLICT ("realm_id", "username") DO UPDATE SET "email" = EXCLUDED."email", "enabled" = EXCLUDED."enabled"`,
 		[]any{realmID, username},
 	)
@@ -424,8 +424,8 @@ func TestUpsert_WithReturning(t *testing.T) {
 	assertSQL(t, "upsert with returning",
 		query.InsertInto(ts.RealmsT).
 			Values(row).
-			OnConflict("name").
-			DoUpdateSetExcluded("name").
+			OnConflictStr("name").
+			DoUpdateSetExcludedStr("name").
 			Returning(ts.RealmsT.ID),
 		`INSERT INTO "realms" ("name") VALUES ($1) ON CONFLICT ("name") DO UPDATE SET "name" = EXCLUDED."name" RETURNING "realms"."id"`,
 		[]any{name},
@@ -441,10 +441,60 @@ func TestUpsert_DoUpdateSetStruct(t *testing.T) {
 	assertSQL(t, "upsert do update set struct",
 		query.InsertInto(ts.UsersT).
 			Values(row).
-			OnConflict("realm_id", "username").
+			OnConflictStr("realm_id", "username").
 			DoUpdateSetStruct(upd),
 		`INSERT INTO "users" ("realm_id", "username") VALUES ($1, $2) ON CONFLICT ("realm_id", "username") DO UPDATE SET "email" = $3`,
 		[]any{realmID, username, newEmail},
+	)
+}
+
+// -------------------------------------------------------------------
+// Type-safe column reference tests (typed API)
+// -------------------------------------------------------------------
+
+func TestUpsert_TypedOnConflict(t *testing.T) {
+	realmID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	username := "alice"
+	row := ts.UserInsert{RealmID: realmID, Username: username}
+	assertSQL(t, "typed on conflict",
+		query.InsertInto(ts.UsersT).
+			Values(row).
+			OnConflict(ts.UsersT.RealmID, ts.UsersT.Username).
+			DoUpdateSetExcluded(ts.UsersT.Email, ts.UsersT.Enabled),
+		`INSERT INTO "users" ("realm_id", "username") VALUES ($1, $2) ON CONFLICT ("realm_id", "username") DO UPDATE SET "email" = EXCLUDED."email", "enabled" = EXCLUDED."enabled"`,
+		[]any{realmID, username},
+	)
+}
+
+func TestUpsert_TypedDoUpdateSet(t *testing.T) {
+	name := "test-realm"
+	row := ts.RealmInsert{Name: name}
+	enabled := true
+	displayName := "Test Realm"
+	assertSQL(t, "typed do update set",
+		query.InsertInto(ts.RealmsT).
+			Values(row).
+			OnConflict(ts.RealmsT.Name).
+			DoUpdateSet(ts.RealmsT.Enabled, enabled).
+			DoUpdateSet(ts.RealmsT.DisplayName, displayName),
+		`INSERT INTO "realms" ("name") VALUES ($1) ON CONFLICT ("name") DO UPDATE SET "enabled" = $2, "display_name" = $3`,
+		[]any{name, enabled, displayName},
+	)
+}
+
+func TestUpsert_TypedMixed(t *testing.T) {
+	// Typed conflict target + typed EXCLUDED + typed explicit set
+	name := "test-realm"
+	displayName := "Test Realm"
+	row := ts.RealmInsert{Name: name}
+	assertSQL(t, "typed mixed",
+		query.InsertInto(ts.RealmsT).
+			Values(row).
+			OnConflict(ts.RealmsT.Name).
+			DoUpdateSet(ts.RealmsT.DisplayName, displayName).
+			DoUpdateSetExcluded(ts.RealmsT.Enabled),
+		`INSERT INTO "realms" ("name") VALUES ($1) ON CONFLICT ("name") DO UPDATE SET "display_name" = $2, "enabled" = EXCLUDED."enabled"`,
+		[]any{name, displayName},
 	)
 }
 
@@ -456,8 +506,8 @@ func TestUpdate_SetExplicit(t *testing.T) {
 	id := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 	assertSQL(t, "update set",
 		query.Update(ts.UsersT).
-			Set("username", "[deleted]").
-			Set("enabled", false).
+			SetStr("username", "[deleted]").
+			SetStr("enabled", false).
 			Where(ts.UsersT.ID.EQ(id)),
 		`UPDATE "users" SET "username" = $1, "enabled" = $2 WHERE "users"."id" = $3`,
 		[]any{"[deleted]", false, id},
@@ -486,6 +536,18 @@ func TestUpdate_SetStruct(t *testing.T) {
 			Returning(ts.UsersT.ID),
 		`UPDATE "users" SET "username" = $1, "enabled" = $2, "deleted_at" = $3, "updated_at" = $4 WHERE ("users"."id" = $5 AND "users"."deleted_at" IS NOT NULL AND "users"."purged_at" IS NULL) RETURNING "users"."id"`,
 		[]any{uname, enabled, now, now, id},
+	)
+}
+
+func TestUpdate_TypedSet(t *testing.T) {
+	id := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	assertSQL(t, "typed update set",
+		query.Update(ts.UsersT).
+			Set(ts.UsersT.Username, "[deleted]").
+			Set(ts.UsersT.Enabled, false).
+			Where(ts.UsersT.ID.EQ(id)),
+		`UPDATE "users" SET "username" = $1, "enabled" = $2 WHERE "users"."id" = $3`,
+		[]any{"[deleted]", false, id},
 	)
 }
 
@@ -730,7 +792,7 @@ func TestMySQL_NoReturning(t *testing.T) {
 func TestMySQL_UpdateNoReturning(t *testing.T) {
 	id := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 	sql, _ := query.Update(ts.UsersT).
-		Set("username", "alice").
+		SetStr("username", "alice").
 		Where(ts.UsersT.ID.EQ(id)).
 		Returning(ts.UsersT.ID).
 		Build(dialect.MySQL)
@@ -756,8 +818,8 @@ func TestMySQL_UpsertDuplicateKey(t *testing.T) {
 	row := ts.UserInsert{RealmID: realmID, Username: username}
 	sql, args := query.InsertInto(ts.UsersT).
 		Values(row).
-		OnConflict("realm_id", "username").
-		DoUpdateSetExcluded("email", "enabled").
+		OnConflictStr("realm_id", "username").
+		DoUpdateSetExcludedStr("email", "enabled").
 		Build(dialect.MySQL)
 	if !strings.Contains(sql, "ON DUPLICATE KEY UPDATE") {
 		t.Errorf("MySQL upsert should use ON DUPLICATE KEY UPDATE, got: %s", sql)
@@ -780,8 +842,8 @@ func TestMySQL_UpsertExplicitSet(t *testing.T) {
 	enabled := true
 	sql, _ := query.InsertInto(ts.RealmsT).
 		Values(row).
-		OnConflict("name").
-		DoUpdateSet("enabled", enabled).
+		OnConflictStr("name").
+		DoUpdateSetStr("enabled", enabled).
 		Build(dialect.MySQL)
 	if !strings.Contains(sql, "ON DUPLICATE KEY UPDATE") {
 		t.Errorf("expected ON DUPLICATE KEY UPDATE, got: %s", sql)
@@ -1565,7 +1627,7 @@ func TestSelect_ForShare_MySQL(t *testing.T) {
 
 func TestUpdate_Limit_MySQL(t *testing.T) {
 	q := query.Update(ts.UsersT).
-		Set("enabled", false).
+		SetStr("enabled", false).
 		Where(ts.UsersT.DeletedAt.IsNotNull()).
 		Limit(100)
 	got, _ := q.Build(dialect.MySQL)
@@ -1577,7 +1639,7 @@ func TestUpdate_Limit_MySQL(t *testing.T) {
 
 func TestUpdate_Limit_Postgres_Ignored(t *testing.T) {
 	q := query.Update(ts.UsersT).
-		Set("enabled", false).
+		SetStr("enabled", false).
 		Limit(100)
 	got, _ := q.Build(dialect.Postgres)
 	if strings.Contains(got, "LIMIT") {

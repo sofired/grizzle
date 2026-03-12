@@ -51,7 +51,7 @@ func TestPreparedSelect_SQLBuiltOnce(t *testing.T) {
 func TestPreparedExec_SQLBuiltOnce(t *testing.T) {
 	id := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 	b := query.Update(testschema.UsersT).
-		Set("enabled", false).
+		Set(testschema.UsersT.Enabled, false).
 		Where(testschema.UsersT.ID.EQ(id))
 
 	reg := pgxdb.NewRegistry(nil)
