@@ -447,7 +447,7 @@ func (b *TimeBuilder) WithTimezone() *TimeBuilder {
 	return b
 }
 
-func (b *TimeBuilder) NotNull() *TimeBuilder { b.setNotNull(); return b }
+func (b *TimeBuilder) NotNull() *TimeBuilder       { b.setNotNull(); return b }
 func (b *TimeBuilder) Build(name string) ColumnDef { return b.build(name) }
 
 // -------------------------------------------------------------------
@@ -465,7 +465,7 @@ func Bytea() *ByteaBuilder {
 	return b
 }
 
-func (b *ByteaBuilder) NotNull() *ByteaBuilder { b.setNotNull(); return b }
+func (b *ByteaBuilder) NotNull() *ByteaBuilder      { b.setNotNull(); return b }
 func (b *ByteaBuilder) Build(name string) ColumnDef { return b.build(name) }
 
 // -------------------------------------------------------------------
@@ -514,8 +514,8 @@ func Enum(typeName string) *EnumBuilder {
 	return b
 }
 
-func (b *EnumBuilder) NotNull() *EnumBuilder    { b.setNotNull(); return b }
-func (b *EnumBuilder) Unique() *EnumBuilder     { b.def.Unique = true; return b }
+func (b *EnumBuilder) NotNull() *EnumBuilder { b.setNotNull(); return b }
+func (b *EnumBuilder) Unique() *EnumBuilder  { b.def.Unique = true; return b }
 func (b *EnumBuilder) Default(val string) *EnumBuilder {
 	b.setDefault(fmt.Sprintf("'%s'::%s", val, b.def.SQLType))
 	return b
@@ -568,7 +568,7 @@ func Inet() *InetBuilder {
 	return b
 }
 
-func (b *InetBuilder) NotNull() *InetBuilder { b.setNotNull(); return b }
+func (b *InetBuilder) NotNull() *InetBuilder       { b.setNotNull(); return b }
 func (b *InetBuilder) Build(name string) ColumnDef { return b.build(name) }
 
 // CidrBuilder builds a cidr column definition.
@@ -583,7 +583,7 @@ func Cidr() *CidrBuilder {
 	return b
 }
 
-func (b *CidrBuilder) NotNull() *CidrBuilder { b.setNotNull(); return b }
+func (b *CidrBuilder) NotNull() *CidrBuilder       { b.setNotNull(); return b }
 func (b *CidrBuilder) Build(name string) ColumnDef { return b.build(name) }
 
 // MacaddrBuilder builds a macaddr column definition.
@@ -598,7 +598,7 @@ func Macaddr() *MacaddrBuilder {
 	return b
 }
 
-func (b *MacaddrBuilder) NotNull() *MacaddrBuilder { b.setNotNull(); return b }
+func (b *MacaddrBuilder) NotNull() *MacaddrBuilder    { b.setNotNull(); return b }
 func (b *MacaddrBuilder) Build(name string) ColumnDef { return b.build(name) }
 
 // -------------------------------------------------------------------
@@ -617,7 +617,7 @@ func Tsvector() *TsvectorBuilder {
 	return b
 }
 
-func (b *TsvectorBuilder) NotNull() *TsvectorBuilder { b.setNotNull(); return b }
+func (b *TsvectorBuilder) NotNull() *TsvectorBuilder   { b.setNotNull(); return b }
 func (b *TsvectorBuilder) Build(name string) ColumnDef { return b.build(name) }
 
 // TsqueryBuilder builds a tsquery column definition.
@@ -632,7 +632,7 @@ func Tsquery() *TsqueryBuilder {
 	return b
 }
 
-func (b *TsqueryBuilder) NotNull() *TsqueryBuilder { b.setNotNull(); return b }
+func (b *TsqueryBuilder) NotNull() *TsqueryBuilder    { b.setNotNull(); return b }
 func (b *TsqueryBuilder) Build(name string) ColumnDef { return b.build(name) }
 
 // -------------------------------------------------------------------
