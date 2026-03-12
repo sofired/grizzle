@@ -105,6 +105,20 @@ func applyBaseType(def *pg.ColumnDef, baseFn string, args []any) error {
 		def.SQLType = "double precision"
 		def.GoType = pg.GoTypeFloat64
 
+	// SQLite-specific: REAL storage class (64-bit IEEE 754 float).
+	case "Real":
+		def.SQLType = "real"
+		def.GoType = pg.GoTypeFloat64
+
+	// SQLite-specific: BLOB storage class (raw binary data).
+	case "Blob":
+		def.SQLType = "blob"
+		def.GoType = pg.GoTypeByteSlice
+
+	case "JSON":
+		def.SQLType = "json"
+		def.GoType = pg.GoTypeAny
+
 	case "Timestamp":
 		def.SQLType = "timestamp"
 		def.GoType = pg.GoTypeTime
