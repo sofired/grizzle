@@ -868,14 +868,36 @@ func TestIndex(t *testing.T) {
 	}
 	r1 := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 	r2 := uuid.MustParse("00000000-0000-0000-0000-000000000002")
-	realms := []Realm{{ID: r1, Name: "Alpha"}, {ID: r2, Name: "Beta"}}
-	idx := query.Index(realms, func(r Realm) uuid.UUID { return r.ID })
-	if idx[r1].Name != "Alpha" {
-		t.Errorf("expected Alpha, got %s", idx[r1].Name)
-	}
-	if idx[r2].Name != "Beta" {
-		t.Errorf("expected Beta, got %s", idx[r2].Name)
-	}
+
+	t.Run("unique keys", func(t *testing.T) {
+		realms := []Realm{{ID: r1, Name: "Alpha"}, {ID: r2, Name: "Beta"}}
+		idx := query.Index(realms, func(r Realm) uuid.UUID { return r.ID })
+		if idx[r1].Name != "Alpha" {
+			t.Errorf("expected Alpha, got %s", idx[r1].Name)
+		}
+		if idx[r2].Name != "Beta" {
+			t.Errorf("expected Beta, got %s", idx[r2].Name)
+		}
+	})
+
+	t.Run("duplicate keys use first-wins semantics", func(t *testing.T) {
+		// r1 appears twice; the first occurrence ("Alpha") must be retained.
+		realms := []Realm{
+			{ID: r1, Name: "Alpha"},
+			{ID: r2, Name: "Beta"},
+			{ID: r1, Name: "AlphaDuplicate"},
+		}
+		idx := query.Index(realms, func(r Realm) uuid.UUID { return r.ID })
+		if idx[r1].Name != "Alpha" {
+			t.Errorf("first-wins: expected Alpha, got %s", idx[r1].Name)
+		}
+		if idx[r2].Name != "Beta" {
+			t.Errorf("expected Beta, got %s", idx[r2].Name)
+		}
+		if len(idx) != 2 {
+			t.Errorf("expected map length 2, got %d", len(idx))
+		}
+	})
 }
 
 func TestFirst(t *testing.T) {
