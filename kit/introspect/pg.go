@@ -292,41 +292,33 @@ func parseIndexDef(name, def string) pg.Constraint {
 
 // queryForeignKeys returns all FK constraints for a table, including the local
 // columns, referenced table/columns, and ON DELETE / ON UPDATE actions.
-// It joins information_schema.referential_constraints with
-// information_schema.key_column_usage (for both sides) to reconstruct the
-// full FK definition.
+// It uses information_schema.referential_constraints and two joins against
+// information_schema.key_column_usage — one for the FK side (kcu_local) and
+// one for the referenced PK/UK side (kcu_ref) — to reconstruct the full FK
+// definition without a correlated subquery.
 func queryForeignKeys(ctx context.Context, pool *pgxpool.Pool, schema, table string) ([]pg.Constraint, error) {
-	// This query returns one row per column involved in a FK constraint.
+	// This query returns one row per column pair involved in a FK constraint.
 	// We group by constraint name on the Go side to build the Columns /
 	// FKColumns slices in the correct ordinal order.
 	q := `
 		SELECT
 			rc.constraint_name,
-			kcu_local.column_name              AS local_col,
-			kcu_local.ordinal_position         AS local_ord,
-			ccu.table_name                     AS fk_table,
-			ccu.column_name                    AS fk_col,
-			kcu_local.position_in_unique_constraint AS fk_ord,
+			kcu_local.column_name   AS local_col,
+			kcu_ref.table_name      AS fk_table,
+			kcu_ref.column_name     AS fk_col,
 			rc.delete_rule,
 			rc.update_rule
 		FROM information_schema.referential_constraints rc
-		JOIN information_schema.key_column_usage kcu_local
-		  ON kcu_local.constraint_name   = rc.constraint_name
-		 AND kcu_local.constraint_schema = rc.constraint_schema
-		JOIN information_schema.constraint_column_usage ccu
-		  ON ccu.constraint_name   = rc.unique_constraint_name
-		 AND ccu.constraint_schema = rc.unique_constraint_schema
-		 AND kcu_local.position_in_unique_constraint = (
-		     SELECT kcu2.ordinal_position
-		     FROM information_schema.key_column_usage kcu2
-		     WHERE kcu2.constraint_name   = ccu.constraint_name
-		       AND kcu2.constraint_schema = ccu.constraint_schema
-		       AND kcu2.column_name       = ccu.column_name
-		     LIMIT 1
-		 )
 		JOIN information_schema.table_constraints tc
 		  ON tc.constraint_name   = rc.constraint_name
 		 AND tc.constraint_schema = rc.constraint_schema
+		JOIN information_schema.key_column_usage kcu_local
+		  ON kcu_local.constraint_name   = rc.constraint_name
+		 AND kcu_local.constraint_schema = rc.constraint_schema
+		JOIN information_schema.key_column_usage kcu_ref
+		  ON kcu_ref.constraint_name   = rc.unique_constraint_name
+		 AND kcu_ref.constraint_schema = rc.unique_constraint_schema
+		 AND kcu_ref.ordinal_position  = kcu_local.position_in_unique_constraint
 		WHERE tc.table_schema = $1
 		  AND tc.table_name   = $2
 		ORDER BY rc.constraint_name, kcu_local.ordinal_position`
@@ -338,12 +330,10 @@ func queryForeignKeys(ctx context.Context, pool *pgxpool.Pool, schema, table str
 	defer rows.Close()
 
 	// Accumulate per-constraint data keyed by name.
+	// fkRow holds the local→referenced column pair for one column in the FK.
 	type fkRow struct {
 		localCol string
-		localOrd int
-		fkTable  string
 		fkCol    string
-		fkOrd    int
 	}
 
 	type fkData struct {
@@ -360,10 +350,9 @@ func queryForeignKeys(ctx context.Context, pool *pgxpool.Pool, schema, table str
 	for rows.Next() {
 		var (
 			name, localCol, fkTable, fkCol string
-			localOrd, fkOrd                int
 			delRule, updRule               string
 		)
-		if err := rows.Scan(&name, &localCol, &localOrd, &fkTable, &fkCol, &fkOrd, &delRule, &updRule); err != nil {
+		if err := rows.Scan(&name, &localCol, &fkTable, &fkCol, &delRule, &updRule); err != nil {
 			return nil, err
 		}
 
@@ -373,13 +362,7 @@ func queryForeignKeys(ctx context.Context, pool *pgxpool.Pool, schema, table str
 			byName[name] = fd
 			order = append(order, name)
 		}
-		fd.rows = append(fd.rows, fkRow{
-			localCol: localCol,
-			localOrd: localOrd,
-			fkTable:  fkTable,
-			fkCol:    fkCol,
-			fkOrd:    fkOrd,
-		})
+		fd.rows = append(fd.rows, fkRow{localCol: localCol, fkCol: fkCol})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
