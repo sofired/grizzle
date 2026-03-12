@@ -458,4 +458,3 @@ func TsRank(col SelectableColumn, tsq Expression) FuncExpr {
 func TsRankCd(col SelectableColumn, tsq Expression) FuncExpr {
 	return FuncExpr{fn: "TS_RANK_CD", args: []Expression{Col(col), tsq}}
 }
-
