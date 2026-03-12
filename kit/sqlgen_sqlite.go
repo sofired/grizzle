@@ -60,6 +60,9 @@ func GenerateChangeSQLSQLite(snap Snapshot, c Change) []string {
 		return []string{fmt.Sprintf("DROP TABLE IF EXISTS %s", qiSQLite(c.TableName))}
 
 	case ChangeRenameTable:
+		if c.OldTableName == "" || c.TableName == "" {
+			return nil
+		}
 		// SQLite: ALTER TABLE old RENAME TO new (supported since SQLite 2.0)
 		return []string{fmt.Sprintf(
 			"ALTER TABLE %s RENAME TO %s",

@@ -725,6 +725,27 @@ func TestRenameTable_SchemaQualified_Postgres(t *testing.T) {
 	}
 }
 
+func TestRenameTable_NilGuard(t *testing.T) {
+	// Missing OldTableName or TableName must not produce SQL and must not panic.
+	snap := kit.EmptySnapshot()
+	cases := []kit.Change{
+		{Kind: kit.ChangeRenameTable, TableName: "accounts"}, // missing OldTableName
+		{Kind: kit.ChangeRenameTable, OldTableName: "users"}, // missing TableName
+		{Kind: kit.ChangeRenameTable},                        // both missing
+	}
+	for _, c := range cases {
+		if stmts := kit.GenerateChangeSQL(snap, c); stmts != nil {
+			t.Errorf("Postgres: expected nil for incomplete rename change, got %v", stmts)
+		}
+		if stmts := kit.GenerateChangeSQLMySQL(snap, c); stmts != nil {
+			t.Errorf("MySQL: expected nil for incomplete rename change, got %v", stmts)
+		}
+		if stmts := kit.GenerateChangeSQLSQLite(snap, c); stmts != nil {
+			t.Errorf("SQLite: expected nil for incomplete rename change, got %v", stmts)
+		}
+	}
+}
+
 func TestRenameTable_SnapshotPreservesPreviousName(t *testing.T) {
 	// Verify that PreviousName survives a snapshot round-trip.
 	td := pg.Table("accounts",
