@@ -130,14 +130,20 @@ func TestUUID_References(t *testing.T) {
 // Table construction tests
 // ---------------------------------------------------------------------------
 
+// buildTable is a helper typed to accept *mysql.TableBuilder explicitly.
+// This is a compile-time regression guard: if TableBuilder ever becomes
+// unexported again, this function will not compile, and
+// TestTableBuilder_TypeIsNameable will fail at build time.
+func buildTable(b *mysql.TableBuilder) *mysql.TableDef {
+	return b.Build()
+}
+
 // TestTableBuilder_TypeIsNameable verifies that mysql.TableBuilder is an
-// exported, nameable type. This is a compile-time regression guard: if
-// TableBuilder ever becomes unexported again, this test will not compile.
+// exported, nameable type by passing a builder to a typed helper function.
 func TestTableBuilder_TypeIsNameable(t *testing.T) {
-	var b *mysql.TableBuilder = mysql.Table("probe",
+	tbl := buildTable(mysql.Table("probe",
 		mysql.C("id", mysql.UUID().PrimaryKey().DefaultRandom()),
-	)
-	tbl := b.Build()
+	))
 	if tbl.Name != "probe" {
 		t.Errorf("Name: got %q, want %q", tbl.Name, "probe")
 	}
