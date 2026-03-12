@@ -1560,6 +1560,132 @@ func TestSelect_ForShare_MySQL(t *testing.T) {
 }
 
 // -------------------------------------------------------------------
+// FOR UPDATE / FOR SHARE locking modifier tests
+// -------------------------------------------------------------------
+
+func TestSelect_ForUpdate_SkipLocked(t *testing.T) {
+	assertSQL(t, "FOR UPDATE SKIP LOCKED",
+		query.Select().From(ts.UsersT).Limit(1).ForUpdate().SkipLocked(),
+		`SELECT * FROM "users" LIMIT 1 FOR UPDATE SKIP LOCKED`,
+		[]any{},
+	)
+}
+
+func TestSelect_ForUpdate_NoWait(t *testing.T) {
+	assertSQL(t, "FOR UPDATE NOWAIT",
+		query.Select().From(ts.UsersT).Where(ts.UsersT.ID.EQ(uuid.Nil)).ForUpdate().NoWait(),
+		`SELECT * FROM "users" WHERE "users"."id" = $1 FOR UPDATE NOWAIT`,
+		[]any{uuid.Nil},
+	)
+}
+
+func TestSelect_ForUpdate_Of(t *testing.T) {
+	assertSQL(t, "FOR UPDATE OF table",
+		query.Select().From(ts.UsersT).LeftJoin(ts.RealmsT, ts.UsersT.RealmID.EQCol(ts.RealmsT.ID)).
+			ForUpdate().Of(ts.UsersT),
+		`SELECT * FROM "users" LEFT JOIN "realms" ON "users"."realm_id" = "realms"."id" FOR UPDATE OF "users"`,
+		[]any{},
+	)
+}
+
+func TestSelect_ForUpdate_Of_SkipLocked(t *testing.T) {
+	assertSQL(t, "FOR UPDATE OF table SKIP LOCKED",
+		query.Select().From(ts.UsersT).LeftJoin(ts.RealmsT, ts.UsersT.RealmID.EQCol(ts.RealmsT.ID)).
+			ForUpdate().Of(ts.UsersT).SkipLocked(),
+		`SELECT * FROM "users" LEFT JOIN "realms" ON "users"."realm_id" = "realms"."id" FOR UPDATE OF "users" SKIP LOCKED`,
+		[]any{},
+	)
+}
+
+func TestSelect_ForUpdate_Of_Multiple(t *testing.T) {
+	assertSQL(t, "FOR UPDATE OF multiple tables",
+		query.Select().From(ts.UsersT).LeftJoin(ts.RealmsT, ts.UsersT.RealmID.EQCol(ts.RealmsT.ID)).
+			ForUpdate().Of(ts.UsersT, ts.RealmsT),
+		`SELECT * FROM "users" LEFT JOIN "realms" ON "users"."realm_id" = "realms"."id" FOR UPDATE OF "users", "realms"`,
+		[]any{},
+	)
+}
+
+func TestSelect_ForShare_SkipLocked_Postgres(t *testing.T) {
+	q := query.Select().From(ts.UsersT).ForShare().SkipLocked()
+	got, _ := q.Build(dialect.Postgres)
+	want := `SELECT * FROM "users" FOR SHARE SKIP LOCKED`
+	if got != want {
+		t.Errorf("SQL mismatch\n got:  %s\nwant: %s", got, want)
+	}
+}
+
+func TestSelect_ForNoKeyUpdate_Postgres(t *testing.T) {
+	q := query.Select().From(ts.UsersT).Where(ts.UsersT.ID.EQ(uuid.Nil)).ForNoKeyUpdate()
+	got, _ := q.Build(dialect.Postgres)
+	want := `SELECT * FROM "users" WHERE "users"."id" = $1 FOR NO KEY UPDATE`
+	if got != want {
+		t.Errorf("SQL mismatch\n got:  %s\nwant: %s", got, want)
+	}
+}
+
+func TestSelect_ForKeyShare_Postgres(t *testing.T) {
+	q := query.Select().From(ts.UsersT).ForKeyShare()
+	got, _ := q.Build(dialect.Postgres)
+	want := `SELECT * FROM "users" FOR KEY SHARE`
+	if got != want {
+		t.Errorf("SQL mismatch\n got:  %s\nwant: %s", got, want)
+	}
+}
+
+func TestSelect_ForNoKeyUpdate_NoWait(t *testing.T) {
+	q := query.Select().From(ts.UsersT).Where(ts.UsersT.ID.EQ(uuid.Nil)).ForNoKeyUpdate().NoWait()
+	got, _ := q.Build(dialect.Postgres)
+	want := `SELECT * FROM "users" WHERE "users"."id" = $1 FOR NO KEY UPDATE NOWAIT`
+	if got != want {
+		t.Errorf("SQL mismatch\n got:  %s\nwant: %s", got, want)
+	}
+}
+
+func TestSelect_Locking_SQLite_Dropped(t *testing.T) {
+	// Row-level locking is silently dropped for SQLite.
+	q := query.Select().From(ts.UsersT).ForUpdate().SkipLocked()
+	got, _ := q.Build(dialect.SQLite)
+	want := `SELECT * FROM "users"`
+	if got != want {
+		t.Errorf("SQLite should drop locking clause\n got:  %s\nwant: %s", got, want)
+	}
+}
+
+func TestSelect_ForUpdate_MySQL_SkipLocked(t *testing.T) {
+	q := query.Select().From(ts.UsersT).Limit(1).ForUpdate().SkipLocked()
+	got, _ := q.Build(dialect.MySQL)
+	want := "SELECT * FROM `users` LIMIT 1 FOR UPDATE SKIP LOCKED"
+	if got != want {
+		t.Errorf("SQL mismatch\n got:  %s\nwant: %s", got, want)
+	}
+}
+
+func TestSelect_ForShare_MySQL_NoModifier(t *testing.T) {
+	// MySQL FOR SHARE renders as LOCK IN SHARE MODE; SKIP LOCKED / NOWAIT
+	// are not appended in that case.
+	q := query.Select().From(ts.UsersT).ForShare().NoWait()
+	got, _ := q.Build(dialect.MySQL)
+	want := "SELECT * FROM `users` LOCK IN SHARE MODE"
+	if got != want {
+		t.Errorf("SQL mismatch\n got:  %s\nwant: %s", got, want)
+	}
+}
+
+// SkipLocked and NoWait are mutually exclusive; last one wins.
+func TestSelect_SkipLocked_NoWait_MutuallyExclusive(t *testing.T) {
+	// NoWait set after SkipLocked — NoWait wins.
+	q := query.Select().From(ts.UsersT).ForUpdate().SkipLocked().NoWait()
+	got, _ := q.Build(dialect.Postgres)
+	if strings.Contains(got, "SKIP LOCKED") {
+		t.Errorf("SKIP LOCKED should not appear when NoWait is set: %s", got)
+	}
+	if !strings.Contains(got, "NOWAIT") {
+		t.Errorf("expected NOWAIT in: %s", got)
+	}
+}
+
+// -------------------------------------------------------------------
 // UPDATE / DELETE LIMIT tests
 // -------------------------------------------------------------------
 
