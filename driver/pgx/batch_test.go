@@ -15,10 +15,10 @@ import (
 // stubBatchResults is a minimal pgx.BatchResults mock for unit tests.
 type stubBatchResults struct{}
 
-func (s *stubBatchResults) Exec() (pgconn.CommandTag, error)  { return pgconn.CommandTag{}, nil }
-func (s *stubBatchResults) Query() (pgx.Rows, error)          { return nil, nil }
-func (s *stubBatchResults) QueryRow() pgx.Row                 { return nil }
-func (s *stubBatchResults) Close() error                      { return nil }
+func (s *stubBatchResults) Exec() (pgconn.CommandTag, error) { return pgconn.CommandTag{}, nil }
+func (s *stubBatchResults) Query() (pgx.Rows, error)         { return nil, nil }
+func (s *stubBatchResults) QueryRow() pgx.Row                { return nil }
+func (s *stubBatchResults) Close() error                     { return nil }
 
 // TestBatch_QueueBuildsSQL verifies that Queue / QueueQuery / QueueRaw all
 // accept valid input and that the batch length is tracked correctly.
