@@ -231,9 +231,9 @@ var OrdersT = OrdersTable{
 
 // ShipmentsTable represents the shipments table.
 type ShipmentsTable struct {
-	ID         expr.UUIDColumn
-	OrderID    expr.UUIDColumn
-	ShippedAt  expr.TimestampColumn
+	ID        expr.UUIDColumn
+	OrderID   expr.UUIDColumn
+	ShippedAt expr.TimestampColumn
 }
 
 func (ShipmentsTable) GrizTableName() string  { return "shipments" }
