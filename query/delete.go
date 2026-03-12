@@ -83,7 +83,19 @@ func (b *DeleteBuilder) Build(d dialect.Dialect) (string, []any) {
 			if i > 0 {
 				sb.WriteString(", ")
 			}
-			sb.WriteString(ctx.Quote(t.GrizTableName()))
+			if sq, ok := t.(*SubquerySource); ok {
+				sb.WriteString("(")
+				sb.WriteString(sq.sub.buildWith(ctx))
+				sb.WriteString(") AS ")
+				sb.WriteString(ctx.Quote(sq.alias))
+			} else {
+				name := t.GrizTableName()
+				sb.WriteString(ctx.Quote(name))
+				if alias := t.GrizTableAlias(); alias != "" && alias != name {
+					sb.WriteString(" AS ")
+					sb.WriteString(ctx.Quote(alias))
+				}
+			}
 		}
 	}
 

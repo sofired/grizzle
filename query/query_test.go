@@ -2200,3 +2200,70 @@ func TestDelete_Using_NotSetNoUsing(t *testing.T) {
 		t.Errorf("no USING expected when Using() not called: %s", got)
 	}
 }
+
+// -------------------------------------------------------------------
+// Alias and SubquerySource rendering tests for UPDATE…FROM and DELETE…USING
+// -------------------------------------------------------------------
+
+// aliasedTable is a minimal TableSource where GrizTableAlias() != GrizTableName(),
+// used to verify that AS <alias> is emitted in FROM/USING clauses.
+type aliasedTable struct{ name, alias string }
+
+func (a aliasedTable) GrizTableName() string  { return a.name }
+func (a aliasedTable) GrizTableAlias() string { return a.alias }
+
+func TestUpdate_From_AliasedTable(t *testing.T) {
+	// Verifies that a TableSource with a different alias emits "name AS alias".
+	src := aliasedTable{name: "shipments", alias: "s"}
+	assertSQL(t, "update from aliased table",
+		query.Update(ts.OrdersT).
+			Set("status", "shipped").
+			From(src).
+			Where(ts.OrdersT.ID.EQCol(ts.ShipmentsT.OrderID)),
+		`UPDATE "orders" SET "status" = $1 FROM "shipments" AS "s" WHERE "orders"."id" = "shipments"."order_id"`,
+		[]any{"shipped"},
+	)
+}
+
+func TestUpdate_From_SubquerySource(t *testing.T) {
+	// Verifies that a *SubquerySource is rendered as (SELECT …) AS alias.
+	inner := query.Select(ts.ShipmentsT.OrderID).
+		From(ts.ShipmentsT).
+		Where(ts.ShipmentsT.ShippedAt.IsNotNull())
+	sub := query.FromSubquery(inner, "shipped")
+	assertSQL(t, "update from subquery source",
+		query.Update(ts.OrdersT).
+			Set("status", "shipped").
+			From(sub).
+			Where(ts.OrdersT.ID.EQCol(ts.ShipmentsT.OrderID)),
+		`UPDATE "orders" SET "status" = $1 FROM (SELECT "shipments"."order_id" FROM "shipments" WHERE "shipments"."shipped_at" IS NOT NULL) AS "shipped" WHERE "orders"."id" = "shipments"."order_id"`,
+		[]any{"shipped"},
+	)
+}
+
+func TestDelete_Using_AliasedTable(t *testing.T) {
+	// Verifies that a TableSource with a different alias emits "name AS alias".
+	src := aliasedTable{name: "users", alias: "u"}
+	assertSQL(t, "delete using aliased table",
+		query.DeleteFrom(ts.SessionsT).
+			Using(src).
+			Where(ts.SessionsT.UserID.EQCol(ts.UsersT.ID)),
+		`DELETE FROM "sessions" USING "users" AS "u" WHERE "sessions"."user_id" = "users"."id"`,
+		nil,
+	)
+}
+
+func TestDelete_Using_SubquerySource(t *testing.T) {
+	// Verifies that a *SubquerySource in USING is rendered as (SELECT …) AS alias.
+	inner := query.Select(ts.UsersT.ID).
+		From(ts.UsersT).
+		Where(ts.UsersT.DeletedAt.IsNotNull())
+	sub := query.FromSubquery(inner, "deleted_users")
+	assertSQL(t, "delete using subquery source",
+		query.DeleteFrom(ts.SessionsT).
+			Using(sub).
+			Where(ts.SessionsT.UserID.EQCol(ts.UsersT.ID)),
+		`DELETE FROM "sessions" USING (SELECT "users"."id" FROM "users" WHERE "users"."deleted_at" IS NOT NULL) AS "deleted_users" WHERE "sessions"."user_id" = "users"."id"`,
+		nil,
+	)
+}
