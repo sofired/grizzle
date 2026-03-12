@@ -19,6 +19,36 @@ import (
 	pg "github.com/sofired/grizzle/schema/pg"
 )
 
+// ViewSnap is the snapshot of a single view.
+type ViewSnap struct {
+	Name   string `json:"name"`
+	Schema string `json:"schema,omitempty"`
+	SQL    string `json:"sql"`
+}
+
+// QualifiedName returns the schema-qualified name used as the map key.
+func (v *ViewSnap) QualifiedName() string {
+	if v.Schema != "" {
+		return v.Schema + "." + v.Name
+	}
+	return v.Name
+}
+
+// EnumSnap is the snapshot of a single PostgreSQL enum type.
+type EnumSnap struct {
+	Name   string   `json:"name"`
+	Schema string   `json:"schema,omitempty"`
+	Values []string `json:"values"`
+}
+
+// QualifiedName returns the schema-qualified name used as the map key.
+func (e *EnumSnap) QualifiedName() string {
+	if e.Schema != "" {
+		return e.Schema + "." + e.Name
+	}
+	return e.Name
+}
+
 const snapshotVersion = "1"
 
 // Snapshot is a serializable, point-in-time representation of a database schema.
@@ -27,6 +57,8 @@ type Snapshot struct {
 	Version   string                `json:"version"`
 	CreatedAt time.Time             `json:"created_at"`
 	Tables    map[string]*TableSnap `json:"tables"` // keyed by qualified table name
+	Views     map[string]*ViewSnap  `json:"views,omitempty"`  // keyed by qualified view name
+	Enums     map[string]*EnumSnap  `json:"enums,omitempty"`  // keyed by qualified type name
 }
 
 // TableSnap is the snapshot of a single table.
@@ -47,11 +79,14 @@ func (t *TableSnap) QualifiedName() string {
 
 // FromDefs builds a Snapshot from a set of *pg.TableDef values.
 // This is the normal way to capture your schema definition.
+// To include views and enums, use FromSchema instead.
 func FromDefs(tables ...*pg.TableDef) Snapshot {
 	snap := Snapshot{
 		Version:   snapshotVersion,
 		CreatedAt: time.Now().UTC(),
 		Tables:    make(map[string]*TableSnap, len(tables)),
+		Views:     make(map[string]*ViewSnap),
+		Enums:     make(map[string]*EnumSnap),
 	}
 	for _, t := range tables {
 		ts := &TableSnap{
@@ -61,6 +96,57 @@ func FromDefs(tables ...*pg.TableDef) Snapshot {
 			Constraints: t.Constraints,
 		}
 		snap.Tables[ts.QualifiedName()] = ts
+	}
+	return snap
+}
+
+// SchemaObjects holds all the schema object types that can be passed to FromSchema.
+type SchemaObjects struct {
+	Tables []*pg.TableDef
+	Views  []*pg.ViewDef
+	Enums  []*pg.EnumDef
+}
+
+// FromSchema builds a Snapshot from tables, views, and enum types.
+// This is the preferred way to build a snapshot that includes all object types.
+//
+//	snap := kit.FromSchema(kit.SchemaObjects{
+//	    Tables: []*pg.TableDef{schema.Users, schema.Realms},
+//	    Views:  []*pg.ViewDef{schema.ActiveUsers},
+//	    Enums:  []*pg.EnumDef{schema.StatusEnum},
+//	})
+func FromSchema(objs SchemaObjects) Snapshot {
+	snap := Snapshot{
+		Version:   snapshotVersion,
+		CreatedAt: time.Now().UTC(),
+		Tables:    make(map[string]*TableSnap, len(objs.Tables)),
+		Views:     make(map[string]*ViewSnap, len(objs.Views)),
+		Enums:     make(map[string]*EnumSnap, len(objs.Enums)),
+	}
+	for _, t := range objs.Tables {
+		ts := &TableSnap{
+			Name:        t.Name,
+			Schema:      t.Schema,
+			Columns:     t.Columns,
+			Constraints: t.Constraints,
+		}
+		snap.Tables[ts.QualifiedName()] = ts
+	}
+	for _, v := range objs.Views {
+		vs := &ViewSnap{
+			Name:   v.Name,
+			Schema: v.Schema,
+			SQL:    v.SQL,
+		}
+		snap.Views[vs.QualifiedName()] = vs
+	}
+	for _, e := range objs.Enums {
+		es := &EnumSnap{
+			Name:   e.Name,
+			Schema: e.Schema,
+			Values: e.Values,
+		}
+		snap.Enums[es.QualifiedName()] = es
 	}
 	return snap
 }
@@ -90,6 +176,12 @@ func LoadJSON(path string) (Snapshot, error) {
 	if snap.Tables == nil {
 		snap.Tables = make(map[string]*TableSnap)
 	}
+	if snap.Views == nil {
+		snap.Views = make(map[string]*ViewSnap)
+	}
+	if snap.Enums == nil {
+		snap.Enums = make(map[string]*EnumSnap)
+	}
 	return snap, nil
 }
 
@@ -99,5 +191,7 @@ func EmptySnapshot() Snapshot {
 		Version:   snapshotVersion,
 		CreatedAt: time.Now().UTC(),
 		Tables:    make(map[string]*TableSnap),
+		Views:     make(map[string]*ViewSnap),
+		Enums:     make(map[string]*EnumSnap),
 	}
 }

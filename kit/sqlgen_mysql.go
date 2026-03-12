@@ -139,6 +139,33 @@ func GenerateChangeSQLMySQL(snap Snapshot, c Change) []string {
 			return nil
 		}
 		return dropConstraintSQLMySQL(c.TableName, *c.Constraint)
+
+	case ChangeCreateView:
+		if c.View == nil {
+			return nil
+		}
+		return []string{fmt.Sprintf(
+			"CREATE OR REPLACE VIEW %s AS %s",
+			quoteTableMySQL(c.View.QualifiedName()),
+			c.View.SQL,
+		)}
+
+	case ChangeDropView:
+		if c.View == nil {
+			return nil
+		}
+		return []string{fmt.Sprintf(
+			"DROP VIEW IF EXISTS %s",
+			quoteTableMySQL(c.View.QualifiedName()),
+		)}
+
+	case ChangeCreateEnum, ChangeAlterEnum, ChangeDropEnum:
+		// MySQL does not have a native enum type object — ENUM is an inline column type.
+		// These changes are no-ops at the schema object level for MySQL.
+		return []string{fmt.Sprintf(
+			"-- MySQL: enum type %q is managed as inline column ENUM values; no schema-level DDL needed",
+			c.TableName,
+		)}
 	}
 	return nil
 }

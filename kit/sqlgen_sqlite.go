@@ -117,6 +117,34 @@ func GenerateChangeSQLSQLite(snap Snapshot, c Change) []string {
 			return nil
 		}
 		return dropConstraintSQLSQLite(c.TableName, *c.Constraint)
+
+	case ChangeCreateView:
+		if c.View == nil {
+			return nil
+		}
+		// SQLite uses the table name without schema (no schema namespaces in SQLite).
+		return []string{fmt.Sprintf(
+			"CREATE VIEW IF NOT EXISTS %s AS %s",
+			qiSQLite(c.View.Name),
+			c.View.SQL,
+		)}
+
+	case ChangeDropView:
+		if c.View == nil {
+			return nil
+		}
+		return []string{fmt.Sprintf(
+			"DROP VIEW IF EXISTS %s",
+			qiSQLite(c.View.Name),
+		)}
+
+	case ChangeCreateEnum, ChangeAlterEnum, ChangeDropEnum:
+		// SQLite does not have a native enum type — values are stored as TEXT with
+		// CHECK constraints. Enum type changes are no-ops at the schema-object level.
+		return []string{fmt.Sprintf(
+			"-- SQLite: enum type %q is not a schema object; enforce values via CHECK constraints",
+			c.TableName,
+		)}
 	}
 	return nil
 }

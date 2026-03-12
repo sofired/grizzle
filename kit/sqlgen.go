@@ -127,8 +127,70 @@ func GenerateChangeSQL(snap Snapshot, c Change) []string {
 			return nil
 		}
 		return dropConstraintSQL(c.TableName, *c.Constraint)
+
+	case ChangeCreateView:
+		if c.View == nil {
+			return nil
+		}
+		return []string{fmt.Sprintf(
+			"CREATE OR REPLACE VIEW %s AS %s",
+			quoteTable(c.View.QualifiedName()),
+			c.View.SQL,
+		)}
+
+	case ChangeDropView:
+		if c.View == nil {
+			return nil
+		}
+		return []string{fmt.Sprintf(
+			"DROP VIEW IF EXISTS %s",
+			quoteTable(c.View.QualifiedName()),
+		)}
+
+	case ChangeCreateEnum:
+		if c.NewEnum == nil {
+			return nil
+		}
+		return []string{createEnumSQL(c.NewEnum)}
+
+	case ChangeAlterEnum:
+		if c.OldEnum == nil || c.NewEnum == nil {
+			return nil
+		}
+		added := enumAddedValues(c.OldEnum, c.NewEnum)
+		stmts := make([]string, 0, len(added))
+		for _, val := range added {
+			stmts = append(stmts, fmt.Sprintf(
+				"ALTER TYPE %s ADD VALUE IF NOT EXISTS '%s'",
+				quoteTable(c.NewEnum.QualifiedName()),
+				strings.ReplaceAll(val, "'", "''"),
+			))
+		}
+		return stmts
+
+	case ChangeDropEnum:
+		if c.OldEnum == nil {
+			return nil
+		}
+		return []string{fmt.Sprintf(
+			"DROP TYPE IF EXISTS %s",
+			quoteTable(c.OldEnum.QualifiedName()),
+		)}
 	}
 	return nil
+}
+
+// createEnumSQL generates a CREATE TYPE ... AS ENUM statement.
+func createEnumSQL(e *EnumSnap) string {
+	quoted := make([]string, len(e.Values))
+	for i, v := range e.Values {
+		quoted[i] = "'" + strings.ReplaceAll(v, "'", "''") + "'"
+	}
+	return fmt.Sprintf(
+		"CREATE TYPE %s AS ENUM (%s)",
+		quoteTable(e.QualifiedName()),
+		strings.Join(quoted, ", "),
+	)
 }
 
 // AllChangeSQL returns all SQL statements for all changes in order.

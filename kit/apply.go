@@ -73,6 +73,8 @@ func DryRun(ctx context.Context, pool *pgxpool.Pool, tables ...*pg.TableDef) (Pu
 func liveToSnapshot(live introspect.LiveSnapshot) Snapshot {
 	snap := Snapshot{
 		Tables: make(map[string]*TableSnap, len(live.Tables)),
+		Views:  make(map[string]*ViewSnap, len(live.Views)),
+		Enums:  make(map[string]*EnumSnap, len(live.Enums)),
 	}
 	for key, t := range live.Tables {
 		if t.Name == MigrationsTable {
@@ -83,6 +85,20 @@ func liveToSnapshot(live introspect.LiveSnapshot) Snapshot {
 			Schema:      t.Schema,
 			Columns:     t.Columns,
 			Constraints: t.Constraints,
+		}
+	}
+	for key, v := range live.Views {
+		snap.Views[key] = &ViewSnap{
+			Name:   v.Name,
+			Schema: v.Schema,
+			SQL:    v.SQL,
+		}
+	}
+	for key, e := range live.Enums {
+		snap.Enums[key] = &EnumSnap{
+			Name:   e.Name,
+			Schema: e.Schema,
+			Values: e.Values,
 		}
 	}
 	return snap
