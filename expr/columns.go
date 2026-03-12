@@ -82,8 +82,9 @@ func (a AliasedCol) TableName() string { return a.base.TableAlias }
 // -------------------------------------------------------------------
 
 // As returns an AliasedCol that renders "table"."col" AS "alias" in a
-// SELECT list. It does not change the table alias; use EmployeesTable.As
-// (on the table type) to create a renamed copy for self-joins.
+// SELECT list. It does not change the table alias; to create a renamed copy
+// of a table for self-joins, call As on the table type itself (e.g.,
+// EmployeesTable.As or RealmsTable.As).
 func (c ColBase) As(alias string) AliasedCol {
 	return AliasedCol{base: c, alias: alias}
 }
