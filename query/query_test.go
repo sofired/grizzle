@@ -853,6 +853,26 @@ func TestMySQL_UpsertExplicitSet(t *testing.T) {
 	}
 }
 
+func TestMySQL_TypedUpsert(t *testing.T) {
+	realmID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	username := "alice"
+	row := ts.UserInsert{RealmID: realmID, Username: username}
+	sql, args := query.InsertInto(ts.UsersT).
+		Values(row).
+		OnConflict(ts.UsersT.RealmID, ts.UsersT.Username).
+		DoUpdateSetExcluded(ts.UsersT.Email, ts.UsersT.Enabled).
+		Build(dialect.MySQL)
+	if !strings.Contains(sql, "ON DUPLICATE KEY UPDATE") {
+		t.Errorf("MySQL typed upsert should use ON DUPLICATE KEY UPDATE, got: %s", sql)
+	}
+	if !strings.Contains(sql, "VALUES(`email`)") {
+		t.Errorf("MySQL typed upsert should use VALUES(col) syntax, got: %s", sql)
+	}
+	if len(args) != 2 {
+		t.Errorf("expected 2 args, got %d: %v", len(args), args)
+	}
+}
+
 // -------------------------------------------------------------------
 // Eager loading / preload tests
 // -------------------------------------------------------------------

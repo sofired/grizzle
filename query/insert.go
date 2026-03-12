@@ -30,8 +30,7 @@ type upsertClause struct {
 	excluded  []string    // DO UPDATE SET col = EXCLUDED.col
 }
 
-// colName extracts the column name from either an expr.SelectableColumn or a string.
-// This is used by the typed overloads of OnConflict, DoUpdateSetExcluded, and DoUpdateSet.
+// colName extracts the raw SQL column name from a typed column reference.
 func colName(c expr.SelectableColumn) string { return c.ColumnName() }
 
 // InsertInto starts an INSERT INTO <table> query.
