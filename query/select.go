@@ -12,32 +12,32 @@ import (
 type lockMode int
 
 const (
-	lockNone        lockMode = iota
-	lockForUpdate            // FOR UPDATE
-	lockForShare             // FOR SHARE / LOCK IN SHARE MODE (MySQL)
-	lockForNoKeyUpdate       // FOR NO KEY UPDATE (PostgreSQL only)
-	lockForKeyShare          // FOR KEY SHARE (PostgreSQL only)
+	lockNone           lockMode = iota
+	lockForUpdate               // FOR UPDATE
+	lockForShare                // FOR SHARE / LOCK IN SHARE MODE (MySQL)
+	lockForNoKeyUpdate          // FOR NO KEY UPDATE (PostgreSQL only)
+	lockForKeyShare             // FOR KEY SHARE (PostgreSQL only)
 )
 
 // SelectBuilder constructs a SELECT query.
 // Each method returns a modified copy, so builders can be shared and
 // extended without mutating the original.
 type SelectBuilder struct {
-	ctes      []cteClause             // optional WITH clauses (prepended as CTEs)
-	distinct  bool                    // SELECT DISTINCT
-	cols      []expr.SelectableColumn // nil = SELECT *
-	from      TableSource
-	joins     []joinClause
-	where     expr.Expression
-	orderBy   []expr.OrderExpr
-	groupBy   []expr.SelectableColumn
-	having    expr.Expression
-	limit     int  // 0 = no limit
-	offset    int  // 0 = no offset
-	lock      lockMode    // row-level locking mode
-	lockOf    []TableSource // OF table list (PostgreSQL/MySQL)
-	lockNoWait    bool // NOWAIT modifier
-	lockSkipLocked bool // SKIP LOCKED modifier
+	ctes           []cteClause             // optional WITH clauses (prepended as CTEs)
+	distinct       bool                    // SELECT DISTINCT
+	cols           []expr.SelectableColumn // nil = SELECT *
+	from           TableSource
+	joins          []joinClause
+	where          expr.Expression
+	orderBy        []expr.OrderExpr
+	groupBy        []expr.SelectableColumn
+	having         expr.Expression
+	limit          int           // 0 = no limit
+	offset         int           // 0 = no offset
+	lock           lockMode      // row-level locking mode
+	lockOf         []TableSource // OF table list (PostgreSQL/MySQL)
+	lockNoWait     bool          // NOWAIT modifier
+	lockSkipLocked bool          // SKIP LOCKED modifier
 }
 
 // cteClause holds a single WITH name AS (...) entry.
@@ -455,7 +455,7 @@ func (b *SelectBuilder) buildWith(ctx *expr.BuildContext) string {
 			sb.WriteString(" FOR KEY SHARE")
 		}
 		// OF table list (not applicable to MySQL LOCK IN SHARE MODE syntax)
-		if len(b.lockOf) > 0 && !(b.lock == lockForShare && d == "mysql") {
+		if len(b.lockOf) > 0 && (b.lock != lockForShare || d != "mysql") {
 			sb.WriteString(" OF ")
 			for i, t := range b.lockOf {
 				if i > 0 {
