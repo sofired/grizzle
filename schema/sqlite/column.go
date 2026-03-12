@@ -2,13 +2,18 @@
 //
 // Schemas defined with this package use the same ColumnDef and TableDef types
 // as schema/pg. The kit layer translates canonical SQL types to SQLite-native
-// syntax at DDL-generation time using SQLite's flexible type affinity system:
+// types at DDL-generation time, matching Drizzle ORM's SQLite behavior:
 //
-//   - uuid        → TEXT (SQLite has no native UUID type)
-//   - boolean     → INTEGER (0/1)
-//   - timestamptz → TEXT (ISO-8601 strings are the idiomatic approach)
-//   - timestamp   → TEXT
-//   - json/jsonb  → TEXT
+//   - boolean/bool           → INTEGER (0/1)
+//   - uuid                   → TEXT
+//   - timestamp/timestamptz  → TEXT (ISO-8601)
+//   - json/jsonb              → TEXT
+//   - bigint/smallint/int*   → INTEGER
+//   - varchar/char/text/*    → TEXT
+//   - bytea                  → BLOB
+//   - numeric/decimal        → NUMERIC
+//   - real/float/double      → REAL
+//   - serial/bigserial       → INTEGER PRIMARY KEY AUTOINCREMENT
 //
 // SQLite's native storage classes are NULL, INTEGER, REAL, TEXT, and BLOB.
 // The affinity types INTEGER, REAL, TEXT, NUMERIC, and BLOB are also supported
