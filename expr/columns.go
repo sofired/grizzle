@@ -590,9 +590,9 @@ func (c FloatColumn) MulCol(other FloatColumn) ArithExpr {
 // TsvectorColumn (PostgreSQL-specific)
 // -------------------------------------------------------------------
 
-// TsvectorColumn is a typed column handle for TSVECTOR values.
-// It exposes full-text search operators (@@ with various tsquery constructors).
-// These operators are PostgreSQL-specific and are not emitted for MySQL or SQLite.
+// TsvectorColumn is a typed column handle for PostgreSQL TSVECTOR values.
+// It exposes PostgreSQL full-text search operators (@@ with various tsquery constructors).
+// Callers must ensure these operators are only used with a PostgreSQL dialect.
 type TsvectorColumn struct{ ColBase }
 
 // Matches returns col @@ to_tsquery($1) — matches a tsquery string.
