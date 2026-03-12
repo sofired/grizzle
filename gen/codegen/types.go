@@ -92,7 +92,8 @@ func applyBaseType(info *ColumnInfo, chain *parser.ChainResult) error {
 		info.GoType = "bool"
 		info.GoTypePtr = "*bool"
 
-	case "Integer", "SmallInt", "Serial", "SmallSerial":
+	// MySQL-specific: TinyInt is a small signed integer, maps to IntColumn.
+	case "Integer", "SmallInt", "Serial", "SmallSerial", "TinyInt":
 		info.ColType = "expr.IntColumn"
 		info.GoType = "int"
 		info.GoTypePtr = "*int"
@@ -102,7 +103,9 @@ func applyBaseType(info *ColumnInfo, chain *parser.ChainResult) error {
 		info.GoType = "int64"
 		info.GoTypePtr = "*int64"
 
-	case "Numeric", "Real", "DoublePrecision":
+	// MySQL-specific: Double maps to FloatColumn.
+	// SQLite-specific: Real maps to FloatColumn (SQLite REAL storage class).
+	case "Numeric", "Real", "DoublePrecision", "Double":
 		info.ColType = "expr.FloatColumn"
 		info.GoType = "float64"
 		info.GoTypePtr = "*float64"
@@ -112,6 +115,12 @@ func applyBaseType(info *ColumnInfo, chain *parser.ChainResult) error {
 		info.GoType = "time.Time"
 		info.GoTypePtr = "*time.Time"
 		info.NeedsImport = "time"
+
+	// SQLite-specific: Blob maps to BytesColumn (raw binary data, []byte in Go).
+	case "Blob":
+		info.ColType = "expr.BytesColumn"
+		info.GoType = "[]byte"
+		info.GoTypePtr = "*[]byte"
 
 	case "JSONB", "JSON":
 		// Default JSONB generic type is map[string]any.
