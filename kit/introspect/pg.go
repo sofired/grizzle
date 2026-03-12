@@ -344,15 +344,13 @@ func queryForeignKeys(ctx context.Context, pool *pgxpool.Pool, schema, table str
 		fkTable  string
 		fkCol    string
 		fkOrd    int
-		delRule  string
-		updRule  string
 	}
 
 	type fkData struct {
-		rows     []fkRow
-		fkTable  string
-		delRule  string
-		updRule  string
+		rows    []fkRow
+		fkTable string
+		delRule string
+		updRule string
 	}
 
 	// Use a slice to preserve constraint discovery order.
