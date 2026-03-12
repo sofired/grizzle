@@ -105,12 +105,12 @@ The diff engine detects and generates SQL for:
 | Dropped table | `DROP TABLE IF EXISTS …` |
 | New column | `ALTER TABLE … ADD COLUMN …` |
 | Dropped column | `ALTER TABLE … DROP COLUMN …` |
+| Column type change | `ALTER TABLE … ALTER COLUMN … TYPE …` |
+| Column nullability change | `ALTER TABLE … ALTER COLUMN … SET / DROP NOT NULL` |
+| Column default change | `ALTER TABLE … ALTER COLUMN … SET / DROP DEFAULT` |
+| Renamed column | `ALTER TABLE … RENAME COLUMN … TO …` |
 | New index | `CREATE [UNIQUE] INDEX …` |
 | Dropped index | `DROP INDEX …` |
-
-::: warning Column type changes
-The differ does not currently generate `ALTER COLUMN … TYPE` statements. Rename columns or change their types with a manual migration when needed.
-:::
 
 ## `grizzle gen` — code generation
 
