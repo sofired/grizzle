@@ -1,6 +1,8 @@
 package kit
 
 import (
+	"sort"
+
 	pg "github.com/sofired/grizzle/schema/pg"
 )
 
@@ -46,15 +48,22 @@ func Diff(old, new Snapshot) []Change {
 	var changes []Change
 
 	// Phase 1: new tables not in old → CREATE TABLE.
+	// Sort alphabetically for deterministic output and so that tables with
+	// no FK dependencies (which tend to sort earlier) are created first.
+	var newNames []string
 	for name := range new.Tables {
 		if _, exists := old.Tables[name]; !exists {
-			changes = append(changes, Change{
-				Kind:      ChangeCreateTable,
-				TableName: name,
-			})
-			// Individual column and constraint adds are implied by CREATE TABLE;
-			// we don't emit separate ADD COLUMN / ADD INDEX changes for new tables.
+			newNames = append(newNames, name)
 		}
+	}
+	sort.Strings(newNames)
+	for _, name := range newNames {
+		changes = append(changes, Change{
+			Kind:      ChangeCreateTable,
+			TableName: name,
+		})
+		// Individual column and constraint adds are implied by CREATE TABLE;
+		// we don't emit separate ADD COLUMN / ADD INDEX changes for new tables.
 	}
 
 	// Phase 2: tables present in both → diff columns and constraints.
@@ -216,7 +225,10 @@ func constraintsEqual(a, b pg.Constraint) bool {
 		}
 	}
 	// Foreign key fields.
-	if a.FKTable != b.FKTable || a.FKOnDelete != b.FKOnDelete || a.FKOnUpdate != b.FKOnUpdate {
+	// Treat an empty FKOnDelete/FKOnUpdate as "NO ACTION" (the Postgres default)
+	// so that a schema constraint with no explicit action compares equal to an
+	// introspected constraint that returns "NO ACTION".
+	if a.FKTable != b.FKTable || normFKAction(a.FKOnDelete) != normFKAction(b.FKOnDelete) || normFKAction(a.FKOnUpdate) != normFKAction(b.FKOnUpdate) {
 		return false
 	}
 	if len(a.FKColumns) != len(b.FKColumns) {
@@ -228,4 +240,13 @@ func constraintsEqual(a, b pg.Constraint) bool {
 		}
 	}
 	return true
+}
+
+// normFKAction normalises an FK action for comparison: empty string and
+// "NO ACTION" are equivalent (both represent the Postgres default).
+func normFKAction(a pg.FKAction) pg.FKAction {
+	if a == "" {
+		return pg.FKActionNoAction
+	}
+	return a
 }

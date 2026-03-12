@@ -392,16 +392,20 @@ func queryForeignKeys(ctx context.Context, pool *pgxpool.Pool, schema, table str
 }
 
 func queryCheckConstraints(ctx context.Context, pool *pgxpool.Pool, schema, table string) ([]pg.Constraint, error) {
+	// Query pg_constraint directly rather than information_schema so that
+	// synthetic NOT NULL column constraints (which appear in
+	// information_schema.check_constraints in PostgreSQL 16+ but are not
+	// real named constraints) are naturally excluded — pg_constraint only
+	// holds constraints that were explicitly created by the user.
 	q := `
-		SELECT cc.constraint_name, cc.check_clause
-		FROM information_schema.check_constraints cc
-		JOIN information_schema.table_constraints tc
-		  ON tc.constraint_name = cc.constraint_name
-		 AND tc.constraint_schema = cc.constraint_schema
-		WHERE tc.table_schema = $1
-		  AND tc.table_name = $2
-		  AND tc.constraint_type = 'CHECK'
-		ORDER BY cc.constraint_name`
+		SELECT c.conname, pg_get_constraintdef(c.oid, true)
+		FROM pg_constraint c
+		JOIN pg_class r ON r.oid = c.conrelid
+		JOIN pg_namespace n ON n.oid = r.relnamespace
+		WHERE n.nspname = $1
+		  AND r.relname = $2
+		  AND c.contype = 'c'
+		ORDER BY c.conname`
 
 	rows, err := pool.Query(ctx, q, schema, table)
 	if err != nil {
@@ -411,11 +415,13 @@ func queryCheckConstraints(ctx context.Context, pool *pgxpool.Pool, schema, tabl
 
 	var constraints []pg.Constraint
 	for rows.Next() {
-		var name, expr string
-		if err := rows.Scan(&name, &expr); err != nil {
+		var name, def string
+		if err := rows.Scan(&name, &def); err != nil {
 			return nil, err
 		}
-		// Postgres wraps check clauses in parens; strip the outer ones.
+		// pg_get_constraintdef returns e.g. "CHECK (expr)"; extract the inner expression.
+		expr := def
+		expr = strings.TrimPrefix(expr, "CHECK ")
 		expr = strings.TrimPrefix(expr, "(")
 		expr = strings.TrimSuffix(expr, ")")
 		constraints = append(constraints, pg.Constraint{
