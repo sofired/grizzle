@@ -273,6 +273,165 @@ func TestGenerateChangeSQL_DropColumn(t *testing.T) {
 	}
 }
 
+// -------------------------------------------------------------------
+// FK introspection round-trip tests
+//
+// These tests simulate what happens after FK constraints are loaded from a
+// live PostgreSQL database via queryForeignKeys and stored in LiveTable.Constraints.
+// They exercise the diff engine to confirm:
+//   - FKs present in both live and target produce no changes (idempotent push)
+//   - FKs removed from the schema definition are detected and dropped
+//   - FKs added to the schema definition are detected and created
+// -------------------------------------------------------------------
+
+// snapshotWithFK builds a Snapshot directly — equivalent to what liveToSnapshot
+// produces when FK constraints are present in the introspected LiveSnapshot.
+func snapshotWithFK(tableName string, fks ...pg.Constraint) kit.Snapshot {
+	snap := kit.EmptySnapshot()
+	snap.Tables[tableName] = &kit.TableSnap{
+		Name: tableName,
+		Columns: []pg.ColumnDef{
+			{Name: "id", SQLType: "uuid", PrimaryKey: true},
+			{Name: "customer_id", SQLType: "uuid", NotNull: true},
+		},
+		Constraints: fks,
+	}
+	return snap
+}
+
+func TestFKIntrospect_RoundTrip_NoChange(t *testing.T) {
+	// Simulate: live DB already has the FK; target schema defines the same FK.
+	// Diff must be empty (idempotent push).
+	fk := pg.ForeignKey("orders_customer_fk").
+		From("customer_id").
+		References("customers", "id").
+		OnDelete(pg.FKActionCascade).
+		Build()
+
+	// "live" snapshot (as if read from DB via queryForeignKeys)
+	live := snapshotWithFK("orders", fk)
+
+	// "target" snapshot (from schema definition)
+	targetDef := pg.Table("orders",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("customer_id", pg.UUID().NotNull()),
+	).WithConstraints(func(t pg.TableRef) []pg.Constraint {
+		return []pg.Constraint{
+			pg.ForeignKey("orders_customer_fk").
+				From(t.Col("customer_id")).
+				References("customers", "id").
+				OnDelete(pg.FKActionCascade).
+				Build(),
+		}
+	})
+	target := kit.FromDefs(targetDef)
+
+	changes := kit.Diff(live, target)
+	// Filter out non-FK changes (e.g., column default diffs from gen_random_uuid).
+	var fkChanges []kit.Change
+	for _, c := range changes {
+		if c.Constraint != nil && c.Constraint.Kind == pg.KindForeignKey {
+			fkChanges = append(fkChanges, c)
+		}
+	}
+	if len(fkChanges) != 0 {
+		t.Errorf("expected no FK changes for identical FK constraint, got %d: %v", len(fkChanges), fkChanges)
+	}
+}
+
+func TestFKIntrospect_RemovedFK_DetectedAsDrop(t *testing.T) {
+	// Simulate: live DB has a FK; target schema no longer defines it.
+	// Diff must emit DropConstraint for the FK.
+	fk := pg.ForeignKey("orders_customer_fk").
+		From("customer_id").
+		References("customers", "id").
+		Build()
+
+	live := snapshotWithFK("orders", fk)
+
+	// Target has the same table but no FK constraint.
+	targetDef := pg.Table("orders",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("customer_id", pg.UUID().NotNull()),
+	).Build()
+	target := kit.FromDefs(targetDef)
+
+	changes := kit.Diff(live, target)
+	drops := 0
+	for _, c := range changes {
+		if c.Kind == kit.ChangeDropConstraint && c.Constraint != nil && c.Constraint.Kind == pg.KindForeignKey {
+			drops++
+		}
+	}
+	if drops != 1 {
+		t.Errorf("expected 1 DropConstraint for removed FK, got %d drops: %v", drops, changes)
+	}
+}
+
+func TestFKIntrospect_AddedFK_DetectedAsAdd(t *testing.T) {
+	// Simulate: live DB does NOT have the FK (empty constraints); target defines one.
+	// Diff must emit AddConstraint for the FK.
+	live := snapshotWithFK("orders") // no FK constraints
+
+	targetDef := pg.Table("orders",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("customer_id", pg.UUID().NotNull()),
+	).WithConstraints(func(t pg.TableRef) []pg.Constraint {
+		return []pg.Constraint{
+			pg.ForeignKey("orders_customer_fk").
+				From(t.Col("customer_id")).
+				References("customers", "id").
+				OnDelete(pg.FKActionRestrict).
+				Build(),
+		}
+	})
+	target := kit.FromDefs(targetDef)
+
+	changes := kit.Diff(live, target)
+	adds := 0
+	for _, c := range changes {
+		if c.Kind == kit.ChangeAddConstraint && c.Constraint != nil && c.Constraint.Kind == pg.KindForeignKey {
+			adds++
+		}
+	}
+	if adds != 1 {
+		t.Errorf("expected 1 AddConstraint for new FK, got %d adds: %v", adds, changes)
+	}
+}
+
+func TestFKIntrospect_ChangedOnDelete_DetectsDropAndAdd(t *testing.T) {
+	// Simulate: live DB has FK with RESTRICT; target changes to CASCADE.
+	// Diff must emit DropConstraint + AddConstraint (drop-and-recreate pattern).
+	fk := pg.ForeignKey("orders_customer_fk").
+		From("customer_id").
+		References("customers", "id").
+		OnDelete(pg.FKActionRestrict).
+		Build()
+
+	live := snapshotWithFK("orders", fk)
+
+	targetDef := pg.Table("orders",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("customer_id", pg.UUID().NotNull()),
+	).WithConstraints(func(t pg.TableRef) []pg.Constraint {
+		return []pg.Constraint{
+			pg.ForeignKey("orders_customer_fk").
+				From(t.Col("customer_id")).
+				References("customers", "id").
+				OnDelete(pg.FKActionCascade). // changed
+				Build(),
+		}
+	})
+	target := kit.FromDefs(targetDef)
+
+	changes := kit.Diff(live, target)
+	drops := countKind(changes, kit.ChangeDropConstraint)
+	adds := countKind(changes, kit.ChangeAddConstraint)
+	if drops != 1 || adds != 1 {
+		t.Errorf("expected 1 drop + 1 add for changed FK ON DELETE, got %d drops %d adds: %v", drops, adds, changes)
+	}
+}
+
 // --- Helpers ---
 
 func countKind(changes []kit.Change, kind kit.ChangeKind) int {

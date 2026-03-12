@@ -78,6 +78,15 @@ func IntrospectPostgres(ctx context.Context, pool *pgxpool.Pool, schemas ...stri
 		t.Constraints = append(t.Constraints, checks...)
 	}
 
+	// --- 5. Foreign key constraints ---
+	for _, t := range live.Tables {
+		fks, err := queryForeignKeys(ctx, pool, t.Schema, t.Name)
+		if err != nil {
+			return live, fmt.Errorf("introspect foreign keys for %s: %w", t.Name, err)
+		}
+		t.Constraints = append(t.Constraints, fks...)
+	}
+
 	return live, nil
 }
 
@@ -279,6 +288,126 @@ func parseIndexDef(name, def string) pg.Constraint {
 	}
 
 	return c
+}
+
+// queryForeignKeys returns all FK constraints for a table, including the local
+// columns, referenced table/columns, and ON DELETE / ON UPDATE actions.
+// It joins information_schema.referential_constraints with
+// information_schema.key_column_usage (for both sides) to reconstruct the
+// full FK definition.
+func queryForeignKeys(ctx context.Context, pool *pgxpool.Pool, schema, table string) ([]pg.Constraint, error) {
+	// This query returns one row per column involved in a FK constraint.
+	// We group by constraint name on the Go side to build the Columns /
+	// FKColumns slices in the correct ordinal order.
+	q := `
+		SELECT
+			rc.constraint_name,
+			kcu_local.column_name              AS local_col,
+			kcu_local.ordinal_position         AS local_ord,
+			ccu.table_name                     AS fk_table,
+			ccu.column_name                    AS fk_col,
+			kcu_local.position_in_unique_constraint AS fk_ord,
+			rc.delete_rule,
+			rc.update_rule
+		FROM information_schema.referential_constraints rc
+		JOIN information_schema.key_column_usage kcu_local
+		  ON kcu_local.constraint_name   = rc.constraint_name
+		 AND kcu_local.constraint_schema = rc.constraint_schema
+		JOIN information_schema.constraint_column_usage ccu
+		  ON ccu.constraint_name   = rc.unique_constraint_name
+		 AND ccu.constraint_schema = rc.unique_constraint_schema
+		 AND kcu_local.position_in_unique_constraint = (
+		     SELECT kcu2.ordinal_position
+		     FROM information_schema.key_column_usage kcu2
+		     WHERE kcu2.constraint_name   = ccu.constraint_name
+		       AND kcu2.constraint_schema = ccu.constraint_schema
+		       AND kcu2.column_name       = ccu.column_name
+		     LIMIT 1
+		 )
+		JOIN information_schema.table_constraints tc
+		  ON tc.constraint_name   = rc.constraint_name
+		 AND tc.constraint_schema = rc.constraint_schema
+		WHERE tc.table_schema = $1
+		  AND tc.table_name   = $2
+		ORDER BY rc.constraint_name, kcu_local.ordinal_position`
+
+	rows, err := pool.Query(ctx, q, schema, table)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	// Accumulate per-constraint data keyed by name.
+	type fkRow struct {
+		localCol string
+		localOrd int
+		fkTable  string
+		fkCol    string
+		fkOrd    int
+		delRule  string
+		updRule  string
+	}
+
+	type fkData struct {
+		rows     []fkRow
+		fkTable  string
+		delRule  string
+		updRule  string
+	}
+
+	// Use a slice to preserve constraint discovery order.
+	var order []string
+	byName := make(map[string]*fkData)
+
+	for rows.Next() {
+		var (
+			name, localCol, fkTable, fkCol string
+			localOrd, fkOrd                int
+			delRule, updRule               string
+		)
+		if err := rows.Scan(&name, &localCol, &localOrd, &fkTable, &fkCol, &fkOrd, &delRule, &updRule); err != nil {
+			return nil, err
+		}
+
+		fd, exists := byName[name]
+		if !exists {
+			fd = &fkData{fkTable: fkTable, delRule: delRule, updRule: updRule}
+			byName[name] = fd
+			order = append(order, name)
+		}
+		fd.rows = append(fd.rows, fkRow{
+			localCol: localCol,
+			localOrd: localOrd,
+			fkTable:  fkTable,
+			fkCol:    fkCol,
+			fkOrd:    fkOrd,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	var constraints []pg.Constraint
+	for _, name := range order {
+		fd := byName[name]
+		// Rows are already ordered by ordinal_position from the query.
+		localCols := make([]string, len(fd.rows))
+		fkCols := make([]string, len(fd.rows))
+		for i, r := range fd.rows {
+			localCols[i] = r.localCol
+			fkCols[i] = r.fkCol
+		}
+		constraints = append(constraints, pg.Constraint{
+			Kind:       pg.KindForeignKey,
+			Name:       name,
+			Columns:    localCols,
+			FKTable:    fd.fkTable,
+			FKColumns:  fkCols,
+			FKOnDelete: pg.FKAction(normalizeFKAction(fd.delRule)),
+			FKOnUpdate: pg.FKAction(normalizeFKAction(fd.updRule)),
+		})
+	}
+	return constraints, nil
 }
 
 func queryCheckConstraints(ctx context.Context, pool *pgxpool.Pool, schema, table string) ([]pg.Constraint, error) {
