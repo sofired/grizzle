@@ -1,6 +1,7 @@
 package expr_test
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/sofired/grizzle/dialect"
@@ -280,7 +281,7 @@ func TestWindowExpr_Lead_NoOffset(t *testing.T) {
 }
 
 // -------------------------------------------------------------------
-// Example-style tests (run with go test -v to see output)
+// Example functions (verified by go test)
 // -------------------------------------------------------------------
 
 func ExampleWindowExpr_Rows() {
@@ -291,8 +292,8 @@ func ExampleWindowExpr_Rows() {
 		As("running_total")
 
 	ctx := expr.NewBuildContext(dialect.Postgres)
-	_ = w.ToSQL(ctx)
-	// Output would be:
+	fmt.Println(w.ToSQL(ctx))
+	// Output:
 	// SUM("users"."created_at") OVER (PARTITION BY "users"."realm_id" ORDER BY "users"."created_at" ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS "running_total"
 }
 
@@ -304,7 +305,7 @@ func ExampleNthValue() {
 		As("third_user")
 
 	ctx := expr.NewBuildContext(dialect.Postgres)
-	_ = w.ToSQL(ctx)
-	// Output would be:
+	fmt.Println(w.ToSQL(ctx))
+	// Output:
 	// NTH_VALUE("users"."username", 3) OVER (PARTITION BY "users"."realm_id" ORDER BY "users"."created_at" ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS "third_user"
 }
