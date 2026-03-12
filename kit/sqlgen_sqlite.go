@@ -63,7 +63,7 @@ func GenerateChangeSQLSQLite(snap Snapshot, c Change) []string {
 		if c.OldTableName == "" || c.TableName == "" {
 			return nil
 		}
-		// SQLite: ALTER TABLE old RENAME TO new (supported since SQLite 2.0)
+		// SQLite: ALTER TABLE old RENAME TO new
 		return []string{fmt.Sprintf(
 			"ALTER TABLE %s RENAME TO %s",
 			qiSQLite(c.OldTableName),
