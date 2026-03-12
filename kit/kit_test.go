@@ -169,6 +169,49 @@ func TestDiff_DropTable(t *testing.T) {
 	}
 }
 
+func TestDiff_DeterministicOrdering(t *testing.T) {
+	// Use a schema with several tables to maximise the chance of exposing
+	// map-iteration non-determinism if it were still present.
+	postsDef := pg.Table("posts",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("title", pg.Varchar(255).NotNull()),
+	).Build()
+	commentsDef := pg.Table("comments",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("body", pg.Text().NotNull()),
+	).Build()
+	tagsDef := pg.Table("tags",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("name", pg.Varchar(100).NotNull()),
+	).Build()
+
+	old := kit.EmptySnapshot()
+	new := kit.FromDefs(realmsDef, usersDef, postsDef, commentsDef, tagsDef)
+
+	// Call Diff many times and assert each result is identical.
+	const iterations = 50
+	first := kit.Diff(old, new)
+	for i := 1; i < iterations; i++ {
+		got := kit.Diff(old, new)
+		if len(got) != len(first) {
+			t.Fatalf("iteration %d: length mismatch: got %d, want %d", i, len(got), len(first))
+		}
+		for j := range first {
+			if got[j] != first[j] {
+				t.Fatalf("iteration %d: change[%d] differs:\n  got  %+v\n  want %+v", i, j, got[j], first[j])
+			}
+		}
+	}
+
+	// Additionally assert the order is the sorted alphabetical order we expect.
+	wantNames := []string{"comments", "posts", "realms", "tags", "users"}
+	for idx, want := range wantNames {
+		if first[idx].TableName != want {
+			t.Errorf("change[%d]: got table %q, want %q", idx, first[idx].TableName, want)
+		}
+	}
+}
+
 func TestDiff_AlterColumnType(t *testing.T) {
 	oldDef := pg.Table("t", pg.C("code", pg.Varchar(50).NotNull())).Build()
 	newDef := pg.Table("t", pg.C("code", pg.Varchar(100).NotNull())).Build()

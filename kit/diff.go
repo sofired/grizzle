@@ -1,6 +1,8 @@
 package kit
 
 import (
+	"sort"
+
 	pg "github.com/sofired/grizzle/schema/pg"
 )
 
@@ -46,7 +48,8 @@ func Diff(old, new Snapshot) []Change {
 	var changes []Change
 
 	// Phase 1: new tables not in old → CREATE TABLE.
-	for name := range new.Tables {
+	newNames := sortedKeys(new.Tables)
+	for _, name := range newNames {
 		if _, exists := old.Tables[name]; !exists {
 			changes = append(changes, Change{
 				Kind:      ChangeCreateTable,
@@ -58,7 +61,8 @@ func Diff(old, new Snapshot) []Change {
 	}
 
 	// Phase 2: tables present in both → diff columns and constraints.
-	for name, newT := range new.Tables {
+	for _, name := range newNames {
+		newT := new.Tables[name]
 		oldT, exists := old.Tables[name]
 		if !exists {
 			continue // handled above
@@ -67,7 +71,7 @@ func Diff(old, new Snapshot) []Change {
 	}
 
 	// Phase 3: tables in old but not new → DROP TABLE.
-	for name := range old.Tables {
+	for _, name := range sortedKeys(old.Tables) {
 		if _, exists := new.Tables[name]; !exists {
 			changes = append(changes, Change{
 				Kind:      ChangeDropTable,
@@ -201,6 +205,16 @@ func constraintMap(cons []pg.Constraint) map[string]pg.Constraint {
 		m[c.Name] = c
 	}
 	return m
+}
+
+// sortedKeys returns the keys of a map[string]*TableSnap in ascending order.
+func sortedKeys(m map[string]*TableSnap) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func constraintsEqual(a, b pg.Constraint) bool {
