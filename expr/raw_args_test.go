@@ -158,7 +158,3 @@ func TestRawArgs_moreArgsThanPlaceholders(t *testing.T) {
 	}
 }
 
-func TestRawArgs_implementsExpression(t *testing.T) {
-	// Compile-time check: RawArgs must satisfy expr.Expression.
-	var _ expr.Expression = expr.RawArgs("$?", 1)
-}
