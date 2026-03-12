@@ -1,19 +1,14 @@
 // Package sqlite provides the SQLite schema definition DSL for Grizzle.
 //
 // Schemas defined with this package use the same ColumnDef and TableDef types
-// as schema/pg. The kit layer preserves canonical SQL type names in generated
-// DDL and relies on SQLite's flexible type affinity system for storage. In
-// practice, common canonical types will be stored with the following effective
-// affinities in SQLite:
+// as schema/pg. The kit layer translates canonical SQL types to SQLite-native
+// syntax at DDL-generation time using SQLite's flexible type affinity system:
 //
-//   - uuid        → TEXT affinity (SQLite has no native UUID type)
-//   - boolean     → INTEGER affinity (0/1)
-//   - timestamptz → TEXT affinity (ISO-8601 strings are the idiomatic approach)
-//   - timestamp   → TEXT affinity
-//   - json/jsonb  → TEXT affinity
-//
-// Default expressions for canonical types may be translated to SQLite-compatible
-// literals (for example, boolean defaults become 0/1).
+//   - uuid        → TEXT (SQLite has no native UUID type)
+//   - boolean     → INTEGER (0/1)
+//   - timestamptz → TEXT (ISO-8601 strings are the idiomatic approach)
+//   - timestamp   → TEXT
+//   - json/jsonb  → TEXT
 //
 // SQLite's native storage classes are NULL, INTEGER, REAL, TEXT, and BLOB.
 // The affinity types INTEGER, REAL, TEXT, NUMERIC, and BLOB are also supported
@@ -80,8 +75,35 @@ var OnUpdate = pg.OnUpdate
 // Standard column builders — re-exported from schema/pg where applicable
 // ---------------------------------------------------------------------------
 
-// UUID starts a UUID column (stored as TEXT in SQLite).
-var UUID = pg.UUID
+// UUIDBuilder builds a UUID column definition for SQLite (stored as TEXT).
+type UUIDBuilder struct {
+	def pg.ColumnDef
+}
+
+// UUID starts a UUID column. In SQLite, UUIDs are stored as TEXT.
+func UUID() *UUIDBuilder {
+	b := &UUIDBuilder{}
+	b.def.SQLType = "text"
+	b.def.GoType = pg.GoTypeUUID
+	return b
+}
+
+func (b *UUIDBuilder) NotNull() *UUIDBuilder    { b.def.NotNull = true; return b }
+func (b *UUIDBuilder) PrimaryKey() *UUIDBuilder { b.def.PrimaryKey = true; b.def.NotNull = true; return b }
+
+// DefaultRandom sets the column default to a SQLite-compatible UUID v4 expression.
+func (b *UUIDBuilder) DefaultRandom() *UUIDBuilder {
+	b.def.HasDefault = true
+	b.def.DefaultExpr = "lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-' || '4' || substr(lower(hex(randomblob(2))),2) || '-' || substr('89ab',abs(random()) % 4 + 1, 1) || substr(lower(hex(randomblob(2))),2) || '-' || lower(hex(randomblob(6)))"
+	return b
+}
+
+func (b *UUIDBuilder) Build(name string) pg.ColumnDef {
+	if b.def.Name == "" {
+		b.def.Name = name
+	}
+	return b.def
+}
 
 // Varchar starts a VARCHAR(n) column (TEXT affinity in SQLite).
 var Varchar = pg.Varchar
@@ -89,8 +111,43 @@ var Varchar = pg.Varchar
 // Text starts an unbounded TEXT column.
 var Text = pg.Text
 
-// Boolean starts a boolean column (stored as INTEGER 0/1 in SQLite).
-var Boolean = pg.Boolean
+// BooleanBuilder builds a boolean column definition for SQLite (stored as INTEGER 0/1).
+type BooleanBuilder struct {
+	def pg.ColumnDef
+}
+
+// Boolean starts a boolean column. In SQLite, booleans are stored as INTEGER (0=false, 1=true).
+func Boolean() *BooleanBuilder {
+	b := &BooleanBuilder{}
+	b.def.SQLType = "integer"
+	b.def.GoType = pg.GoTypeBool
+	return b
+}
+
+func (b *BooleanBuilder) NotNull() *BooleanBuilder { b.def.NotNull = true; return b }
+func (b *BooleanBuilder) PrimaryKey() *BooleanBuilder {
+	b.def.PrimaryKey = true
+	b.def.NotNull = true
+	return b
+}
+
+// Default sets the column default to 1 (true) or 0 (false).
+func (b *BooleanBuilder) Default(val bool) *BooleanBuilder {
+	b.def.HasDefault = true
+	if val {
+		b.def.DefaultExpr = "1"
+	} else {
+		b.def.DefaultExpr = "0"
+	}
+	return b
+}
+
+func (b *BooleanBuilder) Build(name string) pg.ColumnDef {
+	if b.def.Name == "" {
+		b.def.Name = name
+	}
+	return b.def
+}
 
 // Integer starts a 4-byte integer column (INTEGER affinity in SQLite).
 var Integer = pg.Integer
@@ -105,17 +162,91 @@ var Serial = pg.Serial
 // BigSerial starts an auto-incrementing 8-byte integer column.
 var BigSerial = pg.BigSerial
 
-// Timestamp starts a timestamp column (stored as TEXT in SQLite).
-var Timestamp = pg.Timestamp
+// SQLiteTimestampBuilder builds a timestamp column definition for SQLite (stored as TEXT).
+type SQLiteTimestampBuilder struct {
+	def pg.ColumnDef
+}
+
+// Timestamp starts a timestamp column. In SQLite, timestamps are stored as TEXT (ISO-8601).
+// Both timestamp and timestamptz map to TEXT; timezone offsets are preserved in the string.
+func Timestamp() *SQLiteTimestampBuilder {
+	b := &SQLiteTimestampBuilder{}
+	b.def.SQLType = "text"
+	b.def.GoType = pg.GoTypeTime
+	return b
+}
+
+func (b *SQLiteTimestampBuilder) NotNull() *SQLiteTimestampBuilder {
+	b.def.NotNull = true
+	return b
+}
+func (b *SQLiteTimestampBuilder) PrimaryKey() *SQLiteTimestampBuilder {
+	b.def.PrimaryKey = true
+	b.def.NotNull = true
+	return b
+}
+
+// WithTimezone is a no-op for SQLite — both timestamp and timestamptz are stored as TEXT.
+func (b *SQLiteTimestampBuilder) WithTimezone() *SQLiteTimestampBuilder { return b }
+
+// DefaultNow sets the column default to CURRENT_TIMESTAMP (SQLite built-in).
+func (b *SQLiteTimestampBuilder) DefaultNow() *SQLiteTimestampBuilder {
+	b.def.HasDefault = true
+	b.def.DefaultExpr = "CURRENT_TIMESTAMP"
+	return b
+}
+
+func (b *SQLiteTimestampBuilder) Build(name string) pg.ColumnDef {
+	if b.def.Name == "" {
+		b.def.Name = name
+	}
+	return b.def
+}
 
 // Numeric starts a NUMERIC(precision, scale) column (NUMERIC affinity in SQLite).
 var Numeric = pg.Numeric
 
-// JSON starts a JSON column (stored as TEXT in SQLite).
-var JSON = pg.JSON
+// SQLiteJSONBuilder builds a JSON/JSONB column definition for SQLite (stored as TEXT).
+type SQLiteJSONBuilder struct {
+	def pg.ColumnDef
+}
 
-// JSONB starts a JSONB column (stored as TEXT in SQLite).
-var JSONB = pg.JSONB
+// JSON starts a JSON column. In SQLite, JSON is stored as TEXT.
+func JSON() *SQLiteJSONBuilder {
+	b := &SQLiteJSONBuilder{}
+	b.def.SQLType = "text"
+	b.def.GoType = pg.GoTypeAny
+	return b
+}
+
+// JSONB starts a JSONB column. In SQLite, JSONB is stored as TEXT.
+func JSONB() *SQLiteJSONBuilder {
+	b := &SQLiteJSONBuilder{}
+	b.def.SQLType = "text"
+	b.def.GoType = pg.GoTypeAny
+	return b
+}
+
+func (b *SQLiteJSONBuilder) NotNull() *SQLiteJSONBuilder { b.def.NotNull = true; return b }
+func (b *SQLiteJSONBuilder) PrimaryKey() *SQLiteJSONBuilder {
+	b.def.PrimaryKey = true
+	b.def.NotNull = true
+	return b
+}
+
+// Default sets the column default to the given JSON expression literal.
+func (b *SQLiteJSONBuilder) Default(jsonExpr string) *SQLiteJSONBuilder {
+	b.def.HasDefault = true
+	b.def.DefaultExpr = fmt.Sprintf("'%s'", jsonExpr)
+	return b
+}
+
+func (b *SQLiteJSONBuilder) Build(name string) pg.ColumnDef {
+	if b.def.Name == "" {
+		b.def.Name = name
+	}
+	return b.def
+}
 
 // ---------------------------------------------------------------------------
 // SQLite-specific column builders

@@ -81,8 +81,8 @@ func TestBlob_Nullable(t *testing.T) {
 
 func TestUUID_ColumnDef(t *testing.T) {
 	col := sqlite.UUID().PrimaryKey().DefaultRandom().Build("id")
-	if col.SQLType != "uuid" {
-		t.Errorf("SQLType: got %q, want %q", col.SQLType, "uuid")
+	if col.SQLType != "text" {
+		t.Errorf("SQLType: got %q, want %q", col.SQLType, "text")
 	}
 	if !col.PrimaryKey {
 		t.Error("expected PrimaryKey=true")
@@ -91,11 +91,11 @@ func TestUUID_ColumnDef(t *testing.T) {
 
 func TestBoolean_ColumnDef(t *testing.T) {
 	col := sqlite.Boolean().NotNull().Default(false).Build("active")
-	if col.SQLType != "boolean" {
-		t.Errorf("SQLType: got %q, want %q", col.SQLType, "boolean")
+	if col.SQLType != "integer" {
+		t.Errorf("SQLType: got %q, want %q", col.SQLType, "integer")
 	}
-	if col.DefaultExpr != "false" {
-		t.Errorf("DefaultExpr: got %q, want %q", col.DefaultExpr, "false")
+	if col.DefaultExpr != "0" {
+		t.Errorf("DefaultExpr: got %q, want %q", col.DefaultExpr, "0")
 	}
 }
 
@@ -118,18 +118,18 @@ func TestVarchar_ColumnDef(t *testing.T) {
 
 func TestTimestamp_ColumnDef(t *testing.T) {
 	col := sqlite.Timestamp().NotNull().DefaultNow().Build("created_at")
-	if col.SQLType != "timestamp" {
-		t.Errorf("SQLType: got %q, want %q", col.SQLType, "timestamp")
+	if col.SQLType != "text" {
+		t.Errorf("SQLType: got %q, want %q", col.SQLType, "text")
 	}
-	if col.DefaultExpr != "now()" {
-		t.Errorf("DefaultExpr: got %q, want %q", col.DefaultExpr, "now()")
+	if col.DefaultExpr != "CURRENT_TIMESTAMP" {
+		t.Errorf("DefaultExpr: got %q, want %q", col.DefaultExpr, "CURRENT_TIMESTAMP")
 	}
 }
 
 func TestJSON_ColumnDef(t *testing.T) {
 	col := sqlite.JSON().Build("meta")
-	if col.SQLType != "json" {
-		t.Errorf("SQLType: got %q, want %q", col.SQLType, "json")
+	if col.SQLType != "text" {
+		t.Errorf("SQLType: got %q, want %q", col.SQLType, "text")
 	}
 }
 
