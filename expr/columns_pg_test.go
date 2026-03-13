@@ -42,10 +42,6 @@ func tsvectorCol(table, col string) expr.TsvectorColumn {
 	return expr.TsvectorColumn{ColBase: expr.ColBase{TableAlias: table, ColName: col}}
 }
 
-func rangeCol(table, col string) expr.RangeColumn {
-	return expr.RangeColumn{ColBase: expr.ColBase{TableAlias: table, ColName: col}}
-}
-
 // ---------------------------------------------------------------------------
 // DateColumn
 // ---------------------------------------------------------------------------
@@ -276,15 +272,6 @@ func TestInetColumn_NEQ(t *testing.T) {
 // TsvectorColumn
 // ---------------------------------------------------------------------------
 
-func TestTsvectorColumn_Matches(t *testing.T) {
-	c := tsvectorCol("articles", "search_vec")
-	ctx := newCtx()
-	sql := c.Matches("go & postgres").ToSQL(ctx)
-	if sql != `"articles"."search_vec" @@ $1` {
-		t.Errorf("unexpected: %q", sql)
-	}
-}
-
 func TestTsvectorColumn_EQCol(t *testing.T) {
 	c1 := tsvectorCol("a", "vec")
 	c2 := tsvectorCol("b", "vec")
@@ -296,42 +283,3 @@ func TestTsvectorColumn_EQCol(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// RangeColumn
-// ---------------------------------------------------------------------------
-
-func TestRangeColumn_EQ(t *testing.T) {
-	c := rangeCol("events", "booking_window")
-	ctx := newCtx()
-	sql := c.EQ("[2025-01-01,2025-01-31)").ToSQL(ctx)
-	if sql != `"events"."booking_window" = $1` {
-		t.Errorf("unexpected: %q", sql)
-	}
-}
-
-func TestRangeColumn_Contains(t *testing.T) {
-	c := rangeCol("events", "booking_window")
-	ctx := newCtx()
-	sql := c.Contains("2025-01-15").ToSQL(ctx)
-	if sql != `"events"."booking_window" @> $1` {
-		t.Errorf("unexpected: %q", sql)
-	}
-}
-
-func TestRangeColumn_Overlaps(t *testing.T) {
-	c := rangeCol("events", "booking_window")
-	ctx := newCtx()
-	sql := c.Overlaps("[2025-01-01,2025-06-30)").ToSQL(ctx)
-	if sql != `"events"."booking_window" && $1` {
-		t.Errorf("unexpected: %q", sql)
-	}
-}
-
-func TestRangeColumn_IsNull(t *testing.T) {
-	c := rangeCol("events", "booking_window")
-	ctx := newCtx()
-	sql := c.IsNull().ToSQL(ctx)
-	if sql != `"events"."booking_window" IS NULL` {
-		t.Errorf("unexpected: %q", sql)
-	}
-}

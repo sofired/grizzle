@@ -636,45 +636,6 @@ func (b *TsqueryBuilder) NotNull() *TsqueryBuilder    { b.setNotNull(); return b
 func (b *TsqueryBuilder) Build(name string) ColumnDef { return b.build(name) }
 
 // -------------------------------------------------------------------
-// Range types
-// -------------------------------------------------------------------
-
-// RangeBuilder builds a PostgreSQL range column definition.
-type RangeBuilder struct{ colBuilder }
-
-func newRange(sqlType string) *RangeBuilder {
-	b := &RangeBuilder{}
-	b.def.SQLType = sqlType
-	b.def.GoType = GoTypeString // range values scan as strings; e.g. "[1,5)"
-	return b
-}
-
-// Int4Range starts an int4range column (range of integer).
-func Int4Range() *RangeBuilder { return newRange("int4range") }
-
-// Int8Range starts an int8range column (range of bigint).
-func Int8Range() *RangeBuilder { return newRange("int8range") }
-
-// NumRange starts a numrange column (range of numeric).
-func NumRange() *RangeBuilder { return newRange("numrange") }
-
-// TsRange starts a tsrange column (range of timestamp without timezone).
-func TsRange() *RangeBuilder { return newRange("tsrange") }
-
-// TstzRange starts a tstzrange column (range of timestamp with timezone).
-func TstzRange() *RangeBuilder { return newRange("tstzrange") }
-
-// DateRange starts a daterange column (range of date).
-func DateRange() *RangeBuilder { return newRange("daterange") }
-
-func (b *RangeBuilder) NotNull() *RangeBuilder { b.setNotNull(); return b }
-func (b *RangeBuilder) Default(expr string) *RangeBuilder {
-	b.setDefault(expr)
-	return b
-}
-func (b *RangeBuilder) Build(name string) ColumnDef { return b.build(name) }
-
-// -------------------------------------------------------------------
 // ColumnBuilder interface — satisfied by all typed builders
 // -------------------------------------------------------------------
 

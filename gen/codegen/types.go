@@ -155,11 +155,6 @@ func applyBaseType(info *ColumnInfo, chain *parser.ChainResult) error {
 		info.GoType = "string"
 		info.GoTypePtr = "*string"
 
-	case "Int4Range", "Int8Range", "NumRange", "TsRange", "TstzRange", "DateRange":
-		info.ColType = "expr.RangeColumn"
-		info.GoType = "string"
-		info.GoTypePtr = "*string"
-
 	case "JSONB", "JSON":
 		// Default JSONB generic type is map[string]any.
 		// If the user called .Type("MyStruct") in the chain, honour that type.

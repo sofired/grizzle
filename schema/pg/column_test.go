@@ -199,55 +199,6 @@ func TestTsquery_ColumnDef(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Range types
-// ---------------------------------------------------------------------------
-
-func TestInt4Range_ColumnDef(t *testing.T) {
-	col := pg.Int4Range().NotNull().Build("age_range")
-	if col.SQLType != "int4range" {
-		t.Errorf("SQLType: got %q, want %q", col.SQLType, "int4range")
-	}
-	if col.GoType != pg.GoTypeString {
-		t.Errorf("GoType: got %v, want %v", col.GoType, pg.GoTypeString)
-	}
-}
-
-func TestInt8Range_ColumnDef(t *testing.T) {
-	col := pg.Int8Range().Build("big_range")
-	if col.SQLType != "int8range" {
-		t.Errorf("SQLType: got %q, want %q", col.SQLType, "int8range")
-	}
-}
-
-func TestNumRange_ColumnDef(t *testing.T) {
-	col := pg.NumRange().Build("price_range")
-	if col.SQLType != "numrange" {
-		t.Errorf("SQLType: got %q, want %q", col.SQLType, "numrange")
-	}
-}
-
-func TestTsRange_ColumnDef(t *testing.T) {
-	col := pg.TsRange().Build("event_window")
-	if col.SQLType != "tsrange" {
-		t.Errorf("SQLType: got %q, want %q", col.SQLType, "tsrange")
-	}
-}
-
-func TestTstzRange_ColumnDef(t *testing.T) {
-	col := pg.TstzRange().NotNull().Build("booking_window")
-	if col.SQLType != "tstzrange" {
-		t.Errorf("SQLType: got %q, want %q", col.SQLType, "tstzrange")
-	}
-}
-
-func TestDateRange_ColumnDef(t *testing.T) {
-	col := pg.DateRange().Build("valid_period")
-	if col.SQLType != "daterange" {
-		t.Errorf("SQLType: got %q, want %q", col.SQLType, "daterange")
-	}
-}
-
-// ---------------------------------------------------------------------------
 // Table integration: new types used in a full table declaration
 // ---------------------------------------------------------------------------
 
@@ -260,15 +211,14 @@ func TestNewTypes_InTable(t *testing.T) {
 		pg.C("tags", pg.Array(pg.Text())),
 		pg.C("ip_origin", pg.Inet()),
 		pg.C("search_vec", pg.Tsvector()),
-		pg.C("booking", pg.TstzRange()),
 		pg.C("read_time", pg.Interval()),
 	).Build()
 
 	if articles.Name != "articles" {
 		t.Errorf("Name: got %q, want %q", articles.Name, "articles")
 	}
-	if len(articles.Columns) != 9 {
-		t.Errorf("expected 9 columns, got %d", len(articles.Columns))
+	if len(articles.Columns) != 8 {
+		t.Errorf("expected 8 columns, got %d", len(articles.Columns))
 	}
 
 	colTypes := make(map[string]string, len(articles.Columns))
@@ -283,7 +233,6 @@ func TestNewTypes_InTable(t *testing.T) {
 		"tags":         "text[]",
 		"ip_origin":    "inet",
 		"search_vec":   "tsvector",
-		"booking":      "tstzrange",
 		"read_time":    "interval",
 	}
 	for col, wantType := range checks {
