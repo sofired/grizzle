@@ -11,7 +11,6 @@ import (
 // DeleteBuilder constructs a DELETE query.
 type DeleteBuilder struct {
 	table     TableSource
-	using     []TableSource
 	where     expr.Expression
 	returning []expr.SelectableColumn
 	limit     int // 0 = no limit; MySQL/SQLite only
@@ -20,25 +19,6 @@ type DeleteBuilder struct {
 // DeleteFrom starts a DELETE FROM <table> query.
 func DeleteFrom(t TableSource) *DeleteBuilder {
 	return &DeleteBuilder{table: t}
-}
-
-// Using adds one or more tables to the USING clause of the DELETE statement
-// (PostgreSQL DELETE … USING syntax). This allows WHERE conditions to reference
-// columns from the additional tables.
-//
-// On dialects that do not support DELETE … USING (MySQL, SQLite), the USING
-// tables are silently ignored.
-//
-//	query.DeleteFrom(SessionsT).
-//	    Using(UsersT).
-//	    Where(expr.And(
-//	        SessionsT.UserID.EQCol(UsersT.ID),
-//	        UsersT.DeletedAt.IsNotNull(),
-//	    ))
-func (b *DeleteBuilder) Using(tables ...TableSource) *DeleteBuilder {
-	cp := *b
-	cp.using = append(append([]TableSource(nil), cp.using...), tables...)
-	return &cp
 }
 
 // Where sets the WHERE predicate.
@@ -76,28 +56,6 @@ func (b *DeleteBuilder) Build(d dialect.Dialect) (string, []any) {
 
 	sb.WriteString("DELETE FROM ")
 	sb.WriteString(ctx.Quote(b.table.GrizTableName()))
-
-	if len(b.using) > 0 && d.Name() == "postgres" {
-		sb.WriteString(" USING ")
-		for i, t := range b.using {
-			if i > 0 {
-				sb.WriteString(", ")
-			}
-			if sq, ok := t.(*SubquerySource); ok {
-				sb.WriteString("(")
-				sb.WriteString(sq.sub.buildWith(ctx))
-				sb.WriteString(") AS ")
-				sb.WriteString(ctx.Quote(sq.alias))
-			} else {
-				name := t.GrizTableName()
-				sb.WriteString(ctx.Quote(name))
-				if alias := t.GrizTableAlias(); alias != "" && alias != name {
-					sb.WriteString(" AS ")
-					sb.WriteString(ctx.Quote(alias))
-				}
-			}
-		}
-	}
 
 	sb.WriteString(buildWhere(ctx, b.where))
 

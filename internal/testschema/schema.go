@@ -188,30 +188,6 @@ type UserUpdate struct {
 }
 
 // -------------------------------------------------------------------
-// Sessions table — used in DELETE…USING tests
-// -------------------------------------------------------------------
-
-// SessionsTable represents the sessions table.
-type SessionsTable struct {
-	ID        expr.UUIDColumn
-	UserID    expr.UUIDColumn
-	Token     expr.StringColumn
-	CreatedAt expr.TimestampColumn
-	ExpiresAt expr.TimestampColumn
-}
-
-func (SessionsTable) GrizTableName() string  { return "sessions" }
-func (SessionsTable) GrizTableAlias() string { return "sessions" }
-
-var SessionsT = SessionsTable{
-	ID:        expr.UUIDColumn{ColBase: expr.ColBase{TableAlias: "sessions", ColName: "id"}},
-	UserID:    expr.UUIDColumn{ColBase: expr.ColBase{TableAlias: "sessions", ColName: "user_id"}},
-	Token:     expr.StringColumn{ColBase: expr.ColBase{TableAlias: "sessions", ColName: "token"}},
-	CreatedAt: expr.TimestampColumn{ColBase: expr.ColBase{TableAlias: "sessions", ColName: "created_at"}},
-	ExpiresAt: expr.TimestampColumn{ColBase: expr.ColBase{TableAlias: "sessions", ColName: "expires_at"}},
-}
-
-// -------------------------------------------------------------------
 // Orders and Shipments tables — used in UPDATE…FROM tests
 // -------------------------------------------------------------------
 

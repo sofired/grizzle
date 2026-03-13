@@ -2135,74 +2135,7 @@ func TestUpdate_From_NotSetNoFrom(t *testing.T) {
 }
 
 // -------------------------------------------------------------------
-// DELETE…USING tests (PostgreSQL)
-// -------------------------------------------------------------------
-
-func TestDelete_Using_Basic(t *testing.T) {
-	assertSQL(t, "delete using basic",
-		query.DeleteFrom(ts.SessionsT).
-			Using(ts.UsersT).
-			Where(expr.And(
-				ts.SessionsT.UserID.EQCol(ts.UsersT.ID),
-				ts.UsersT.DeletedAt.IsNotNull(),
-			)),
-		`DELETE FROM "sessions" USING "users" WHERE ("sessions"."user_id" = "users"."id" AND "users"."deleted_at" IS NOT NULL)`,
-		nil,
-	)
-}
-
-func TestDelete_Using_MultipleTables(t *testing.T) {
-	assertSQL(t, "delete using multiple tables",
-		query.DeleteFrom(ts.SessionsT).
-			Using(ts.UsersT, ts.RealmsT).
-			Where(ts.SessionsT.UserID.EQCol(ts.UsersT.ID)),
-		`DELETE FROM "sessions" USING "users", "realms" WHERE "sessions"."user_id" = "users"."id"`,
-		nil,
-	)
-}
-
-func TestDelete_Using_WithReturning(t *testing.T) {
-	assertSQL(t, "delete using with returning",
-		query.DeleteFrom(ts.SessionsT).
-			Using(ts.UsersT).
-			Where(ts.SessionsT.UserID.EQCol(ts.UsersT.ID)).
-			Returning(ts.SessionsT.ID),
-		`DELETE FROM "sessions" USING "users" WHERE "sessions"."user_id" = "users"."id" RETURNING "sessions"."id"`,
-		nil,
-	)
-}
-
-func TestDelete_Using_IgnoredOnMySQL(t *testing.T) {
-	q := query.DeleteFrom(ts.SessionsT).
-		Using(ts.UsersT).
-		Where(ts.SessionsT.UserID.EQCol(ts.UsersT.ID))
-	got, _ := q.Build(dialect.MySQL)
-	if strings.Contains(got, "USING") {
-		t.Errorf("USING clause should be ignored on MySQL: %s", got)
-	}
-}
-
-func TestDelete_Using_IgnoredOnSQLite(t *testing.T) {
-	q := query.DeleteFrom(ts.SessionsT).
-		Using(ts.UsersT).
-		Where(ts.SessionsT.UserID.EQCol(ts.UsersT.ID))
-	got, _ := q.Build(dialect.SQLite)
-	if strings.Contains(got, "USING") {
-		t.Errorf("USING clause should be ignored on SQLite: %s", got)
-	}
-}
-
-func TestDelete_Using_NotSetNoUsing(t *testing.T) {
-	// Without Using(), output must not contain USING.
-	q := query.DeleteFrom(ts.SessionsT).Where(ts.SessionsT.UserID.IsNotNull())
-	got, _ := q.Build(dialect.Postgres)
-	if strings.Contains(got, "USING") {
-		t.Errorf("no USING expected when Using() not called: %s", got)
-	}
-}
-
-// -------------------------------------------------------------------
-// Alias and SubquerySource rendering tests for UPDATE…FROM and DELETE…USING
+// Alias and SubquerySource rendering tests for UPDATE…FROM
 // -------------------------------------------------------------------
 
 // aliasedTable is a minimal TableSource where GrizTableAlias() != GrizTableName(),
@@ -2241,29 +2174,3 @@ func TestUpdate_From_SubquerySource(t *testing.T) {
 	)
 }
 
-func TestDelete_Using_AliasedTable(t *testing.T) {
-	// Verifies that a TableSource with a different alias emits "name AS alias".
-	src := aliasedTable{name: "users", alias: "u"}
-	assertSQL(t, "delete using aliased table",
-		query.DeleteFrom(ts.SessionsT).
-			Using(src).
-			Where(ts.SessionsT.UserID.EQCol(ts.UsersT.ID)),
-		`DELETE FROM "sessions" USING "users" AS "u" WHERE "sessions"."user_id" = "users"."id"`,
-		nil,
-	)
-}
-
-func TestDelete_Using_SubquerySource(t *testing.T) {
-	// Verifies that a *SubquerySource in USING is rendered as (SELECT …) AS alias.
-	inner := query.Select(ts.UsersT.ID).
-		From(ts.UsersT).
-		Where(ts.UsersT.DeletedAt.IsNotNull())
-	sub := query.FromSubquery(inner, "deleted_users")
-	assertSQL(t, "delete using subquery source",
-		query.DeleteFrom(ts.SessionsT).
-			Using(sub).
-			Where(ts.SessionsT.UserID.EQCol(ts.UsersT.ID)),
-		`DELETE FROM "sessions" USING (SELECT "users"."id" FROM "users" WHERE "users"."deleted_at" IS NOT NULL) AS "deleted_users" WHERE "sessions"."user_id" = "users"."id"`,
-		nil,
-	)
-}
