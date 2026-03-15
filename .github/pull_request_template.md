@@ -1,3 +1,5 @@
+> **External contributions are temporarily paused.** If you are not a repository collaborator, please close this PR and open an issue instead. PRs from external contributors will be closed without review until contributions reopen.
+
 ## Summary
 
 <!-- What does this PR do? Link the related issue if one exists (Closes #NNN). -->

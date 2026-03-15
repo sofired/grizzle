@@ -1,5 +1,7 @@
 # Contributing to Grizzle
 
+> **Contributions are temporarily paused** while the project stabilises. We are not accepting pull requests from external contributors at this time. Feel free to open issues to report bugs or propose features — we will review them once contributions reopen.
+
 Thank you for your interest in contributing! This document covers how to report bugs, propose features, and submit pull requests.
 
 ## Reporting bugs
