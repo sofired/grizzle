@@ -1592,6 +1592,26 @@ func TestSelect_ForShare_MySQL(t *testing.T) {
 	}
 }
 
+// TestSelect_ForUpdate_SQLite verifies that FOR UPDATE is silently dropped for
+// SQLite, which uses file-level locking and does not support row-level locking.
+func TestSelect_ForUpdate_SQLite(t *testing.T) {
+	q := query.Select().From(ts.UsersT).ForUpdate()
+	got, _ := q.Build(dialect.SQLite)
+	if strings.Contains(got, "FOR UPDATE") {
+		t.Errorf("FOR UPDATE should not be emitted for SQLite, got: %s", got)
+	}
+}
+
+// TestSelect_ForShare_SQLite verifies that FOR SHARE is silently dropped for
+// SQLite, which uses file-level locking and does not support row-level locking.
+func TestSelect_ForShare_SQLite(t *testing.T) {
+	q := query.Select().From(ts.UsersT).ForShare()
+	got, _ := q.Build(dialect.SQLite)
+	if strings.Contains(got, "FOR SHARE") || strings.Contains(got, "LOCK IN") {
+		t.Errorf("locking clause should not be emitted for SQLite, got: %s", got)
+	}
+}
+
 // -------------------------------------------------------------------
 // UPDATE / DELETE LIMIT tests
 // -------------------------------------------------------------------

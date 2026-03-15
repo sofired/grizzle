@@ -363,14 +363,16 @@ func (b *SelectBuilder) buildWith(ctx *expr.BuildContext) string {
 		fmt.Fprintf(&sb, " OFFSET %d", b.offset)
 	}
 
-	// Locking clauses — dialect-aware
-	if b.forUpdate {
-		sb.WriteString(" FOR UPDATE")
-	} else if b.forShare {
-		if ctx.Dialect().Name() == "mysql" {
-			sb.WriteString(" LOCK IN SHARE MODE")
-		} else {
-			sb.WriteString(" FOR SHARE")
+	// Locking clauses — only emitted for dialects that support row-level locking.
+	if ctx.Dialect().SupportsForUpdate() {
+		if b.forUpdate {
+			sb.WriteString(" FOR UPDATE")
+		} else if b.forShare {
+			if ctx.Dialect().Name() == "mysql" {
+				sb.WriteString(" LOCK IN SHARE MODE")
+			} else {
+				sb.WriteString(" FOR SHARE")
+			}
 		}
 	}
 

@@ -46,6 +46,31 @@ type Dialect interface {
 	// "INSERT OR IGNORE" (SQLite). Returns "" for dialects that have no native
 	// equivalent (PostgreSQL — use OnConflict…DoNothing instead).
 	InsertIgnoreClause() string
+
+	// SupportsCTE reports whether the dialect supports Common Table Expressions
+	// (WITH clauses). True for PostgreSQL, MySQL 8.0+, and SQLite 3.35+.
+	SupportsCTE() bool
+
+	// SupportsWindowFunctions reports whether the dialect supports window
+	// functions (OVER clause). True for PostgreSQL, MySQL 8.0+, and SQLite 3.25+.
+	SupportsWindowFunctions() bool
+
+	// SupportsDistinctOn reports whether the dialect supports SELECT DISTINCT ON
+	// (expr, ...). This is a PostgreSQL extension; MySQL and SQLite do not support it.
+	SupportsDistinctOn() bool
+
+	// SupportsForUpdate reports whether the dialect supports row-level locking
+	// via FOR UPDATE and FOR SHARE. True for PostgreSQL and MySQL; false for SQLite,
+	// which uses file-level locking only.
+	SupportsForUpdate() bool
+
+	// SupportsForNoKeyUpdate reports whether the dialect supports the PostgreSQL-specific
+	// FOR NO KEY UPDATE and FOR KEY SHARE locking modes. False for MySQL and SQLite.
+	SupportsForNoKeyUpdate() bool
+
+	// SupportsFullJoin reports whether the dialect supports FULL [OUTER] JOIN.
+	// True for PostgreSQL; false for MySQL and SQLite.
+	SupportsFullJoin() bool
 }
 
 // -------------------------------------------------------------------
@@ -57,10 +82,16 @@ var Postgres Dialect = postgresDialect{}
 
 type postgresDialect struct{}
 
-func (postgresDialect) Name() string               { return "postgres" }
-func (postgresDialect) SupportsReturning() bool    { return true }
-func (postgresDialect) UpsertStyle() UpsertStyle   { return UpsertOnConflict }
-func (postgresDialect) InsertIgnoreClause() string { return "" } // use ON CONFLICT … DO NOTHING
+func (postgresDialect) Name() string                  { return "postgres" }
+func (postgresDialect) SupportsReturning() bool       { return true }
+func (postgresDialect) UpsertStyle() UpsertStyle      { return UpsertOnConflict }
+func (postgresDialect) InsertIgnoreClause() string    { return "" } // use ON CONFLICT … DO NOTHING
+func (postgresDialect) SupportsCTE() bool             { return true }
+func (postgresDialect) SupportsWindowFunctions() bool { return true }
+func (postgresDialect) SupportsDistinctOn() bool      { return true }
+func (postgresDialect) SupportsForUpdate() bool       { return true }
+func (postgresDialect) SupportsForNoKeyUpdate() bool  { return true }
+func (postgresDialect) SupportsFullJoin() bool        { return true }
 
 func (postgresDialect) Placeholder(n int) string {
 	return fmt.Sprintf("$%d", n)
@@ -80,10 +111,16 @@ var MySQL Dialect = mysqlDialect{}
 
 type mysqlDialect struct{}
 
-func (mysqlDialect) Name() string               { return "mysql" }
-func (mysqlDialect) SupportsReturning() bool    { return false }
-func (mysqlDialect) UpsertStyle() UpsertStyle   { return UpsertDuplicateKey }
-func (mysqlDialect) InsertIgnoreClause() string { return "INSERT IGNORE" }
+func (mysqlDialect) Name() string                  { return "mysql" }
+func (mysqlDialect) SupportsReturning() bool       { return false }
+func (mysqlDialect) UpsertStyle() UpsertStyle      { return UpsertDuplicateKey }
+func (mysqlDialect) InsertIgnoreClause() string    { return "INSERT IGNORE" }
+func (mysqlDialect) SupportsCTE() bool             { return true }  // MySQL 8.0+
+func (mysqlDialect) SupportsWindowFunctions() bool { return true }  // MySQL 8.0+
+func (mysqlDialect) SupportsDistinctOn() bool      { return false }
+func (mysqlDialect) SupportsForUpdate() bool       { return true }
+func (mysqlDialect) SupportsForNoKeyUpdate() bool  { return false }
+func (mysqlDialect) SupportsFullJoin() bool        { return false }
 
 func (mysqlDialect) Placeholder(_ int) string { return "?" }
 
@@ -100,10 +137,16 @@ var SQLite Dialect = sqliteDialect{}
 
 type sqliteDialect struct{}
 
-func (sqliteDialect) Name() string               { return "sqlite" }
-func (sqliteDialect) SupportsReturning() bool    { return true } // SQLite 3.35+
-func (sqliteDialect) UpsertStyle() UpsertStyle   { return UpsertOnConflict }
-func (sqliteDialect) InsertIgnoreClause() string { return "INSERT OR IGNORE" }
+func (sqliteDialect) Name() string                  { return "sqlite" }
+func (sqliteDialect) SupportsReturning() bool       { return true } // SQLite 3.35+
+func (sqliteDialect) UpsertStyle() UpsertStyle      { return UpsertOnConflict }
+func (sqliteDialect) InsertIgnoreClause() string    { return "INSERT OR IGNORE" }
+func (sqliteDialect) SupportsCTE() bool             { return true }  // SQLite 3.35+
+func (sqliteDialect) SupportsWindowFunctions() bool { return true }  // SQLite 3.25+
+func (sqliteDialect) SupportsDistinctOn() bool      { return false }
+func (sqliteDialect) SupportsForUpdate() bool       { return false }
+func (sqliteDialect) SupportsForNoKeyUpdate() bool  { return false }
+func (sqliteDialect) SupportsFullJoin() bool        { return false }
 
 func (sqliteDialect) Placeholder(_ int) string { return "?" }
 
