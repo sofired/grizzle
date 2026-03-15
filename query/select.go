@@ -121,6 +121,12 @@ func (b *SelectBuilder) For(strength LockStrength, opts ...LockOption) *SelectBu
 //   - PostgreSQL: rendered as DISTINCT ON (cols).
 //   - MySQL / SQLite: SupportsDistinctOn() is false; the DISTINCT ON columns
 //     are silently dropped and the query degrades to SELECT DISTINCT.
+//
+// Warning: the degraded form is semantically different. SELECT DISTINCT ON
+// deduplicates within each DISTINCT ON group (returning one row per group);
+// SELECT DISTINCT deduplicates across all selected columns. The result set
+// will differ in most real queries, so portable code should avoid DistinctOn
+// or handle the dialect difference explicitly.
 func (b *SelectBuilder) DistinctOn(cols ...expr.SelectableColumn) *SelectBuilder {
 	cp := *b
 	cp.distinct = true
@@ -233,6 +239,11 @@ func (b *SelectBuilder) With(name string, sub *SelectBuilder) *SelectBuilder {
 // standard SQL form for a recursive CTE that iterates until no new rows
 // are produced.
 //
+// CTE support requires SupportsCTE() on the dialect. All built-in dialects
+// (PostgreSQL, MySQL 8.0+, SQLite 3.8.3+) return true. When building against a
+// dialect where SupportsCTE() is false, the WITH RECURSIVE clause is silently
+// dropped and only the outer SELECT is emitted — the recursive logic does not run.
+//
 // Example — traverse an org-chart by manager_id:
 //
 //	anchor := query.Select(EmployeesT.ID, EmployeesT.ManagerID).
@@ -241,7 +252,7 @@ func (b *SelectBuilder) With(name string, sub *SelectBuilder) *SelectBuilder {
 //
 //	rec := query.Select(EmployeesT.ID, EmployeesT.ManagerID).
 //	    From(EmployeesT).
-//	    InnerJoin(query.CTERef("org"), EmployeesT.ManagerID.EQCol(ManagerIDCol))
+//	    InnerJoin(query.CTERef("org"), EmployeesT.ManagerID.EQCol(EmployeesT.ManagerID))
 //
 //	query.Select().
 //	    WithRecursive("org", anchor, rec).
@@ -311,6 +322,11 @@ func (b *SelectBuilder) RightJoin(t TableSource, on expr.Expression) *SelectBuil
 // FULL JOIN requires SupportsFullJoin() on the dialect. When building against a
 // dialect where SupportsFullJoin() is false (MySQL, SQLite), the join is
 // silently dropped from the output SQL.
+//
+// Warning: dropping a FULL JOIN is a semantic change, not just a syntax
+// difference. Rows that would have been included via the outer side of the join
+// are omitted entirely. Do not rely on the silent-drop behaviour for portable
+// code; use a dialect check or restructure the query for non-PostgreSQL targets.
 func (b *SelectBuilder) FullJoin(t TableSource, on expr.Expression) *SelectBuilder {
 	cp := *b
 	cp.joins = append(append([]joinClause(nil), cp.joins...), joinClause{kind: joinFull, table: t, on: on})

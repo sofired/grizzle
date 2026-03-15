@@ -158,9 +158,15 @@ query.Select().From(db.UsersT).
     InnerJoin(db.RealmsT, db.RealmsT.ID.EQCol(db.UsersT.RealmID))
 
 // RIGHT JOIN / FULL JOIN also available
+query.Select().From(db.UsersT).
+    FullJoin(db.RealmsT, db.RealmsT.ID.EQCol(db.UsersT.RealmID))
 ```
 
 When you've pre-defined relations, use `JoinRel` / `InnerJoinRel` instead — see [Relations](/guide/relations).
+
+::: warning Dialect compatibility for FULL JOIN
+`FULL JOIN` is only supported by PostgreSQL. When building against MySQL or SQLite (`SupportsFullJoin()` returns false), the FULL JOIN clause is **silently dropped** from the SQL. This is a semantic change — rows that would have been included via the outer side of the join are omitted from the result set. Avoid FULL JOIN in queries that must run across multiple dialects, or check `dialect.SupportsFullJoin()` before building.
+:::
 
 ## Executing queries
 

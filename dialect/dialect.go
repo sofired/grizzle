@@ -57,15 +57,19 @@ type Dialect interface {
 	// SupportsWindowFunctions reports whether the dialect supports window
 	// functions (OVER clause). True for PostgreSQL, MySQL 8.0+, and SQLite 3.25+.
 	//
-	// When false, the query builder silently drops window function columns from the
-	// SELECT list at build time. If all selected columns are window functions, the
-	// query falls back to SELECT *.
+	// When false, the query builder silently drops only the window function columns
+	// from the SELECT list at build time; non-window columns are preserved as-is.
+	// If every column in the SELECT list is a window function (i.e. no non-window
+	// columns remain after dropping), the query falls back to SELECT *.
 	SupportsWindowFunctions() bool
 
 	// SupportsDistinctOn reports whether the dialect supports SELECT DISTINCT ON
 	// (expr, ...). This is a PostgreSQL extension; MySQL and SQLite do not support it.
 	//
 	// When false, DistinctOn() degrades to regular SELECT DISTINCT at build time.
+	// This is a semantic change: DISTINCT ON returns one row per distinct-on group
+	// (using ORDER BY to pick which row), whereas DISTINCT deduplicates across all
+	// selected columns. Query results will differ in most cases.
 	SupportsDistinctOn() bool
 
 	// SupportsForUpdate reports whether the dialect supports row-level locking.
@@ -89,6 +93,8 @@ type Dialect interface {
 	// True for PostgreSQL; false for MySQL and SQLite.
 	//
 	// When false, the query builder silently drops FULL JOIN clauses at build time.
+	// This is a semantic change: rows that would have been included via the outer
+	// side of the join are omitted entirely from the result set.
 	SupportsFullJoin() bool
 
 	// ForShareClause returns the SQL keyword phrase for a shared row lock.

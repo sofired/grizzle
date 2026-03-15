@@ -117,7 +117,7 @@ anchor := query.Select(db.EmployeesT.ID, db.EmployeesT.ManagerID).
 
 rec := query.Select(db.EmployeesT.ID, db.EmployeesT.ManagerID).
     From(db.EmployeesT).
-    InnerJoin(query.CTERef("org"), db.EmployeesT.ManagerID.EQCol(managerIDCol))
+    InnerJoin(query.CTERef("org"), db.EmployeesT.ManagerID.EQCol(db.EmployeesT.ID))
 
 sql, args := query.Select().
     WithRecursive("org", anchor, rec).
