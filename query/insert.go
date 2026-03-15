@@ -273,7 +273,11 @@ func buildOnConflict(sb *strings.Builder, ctx *expr.BuildContext, u *upsertClaus
 		sb.WriteString(ctx.Quote(u.conflictConstraint))
 	}
 
-	if u.doNothing {
+	// If no assignments were collected (e.g. DoUpdateSetStruct received nil or a
+	// non-struct), fall back to DO NOTHING rather than emitting an empty
+	// "DO UPDATE SET" clause which is invalid SQL.
+	noAssignments := len(u.sets) == 0 && len(u.excluded) == 0
+	if u.doNothing || noAssignments {
 		sb.WriteString(" DO NOTHING")
 	} else {
 		sb.WriteString(" DO UPDATE SET ")

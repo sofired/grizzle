@@ -449,6 +449,69 @@ func TestUpsert_DoUpdateSetStruct(t *testing.T) {
 }
 
 // -------------------------------------------------------------------
+// DoUpdateSetStruct guard tests (exercises structSetsForUpdate via upsert path)
+// -------------------------------------------------------------------
+
+func TestUpsert_DoUpdateSetStruct_Nil(t *testing.T) {
+	// DoUpdateSetStruct(nil) must not panic and must fall back to DO NOTHING,
+	// not emit an invalid empty "DO UPDATE SET" clause.
+	realmID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	username := "alice"
+	row := ts.UserInsert{RealmID: realmID, Username: username}
+	got, args := query.InsertInto(ts.UsersT).
+		Values(row).
+		OnConflict("realm_id", "username").
+		DoUpdateSetStruct(nil).
+		Build(dialect.Postgres)
+	want := `INSERT INTO "users" ("realm_id", "username") VALUES ($1, $2) ON CONFLICT ("realm_id", "username") DO NOTHING`
+	if got != want {
+		t.Errorf("expected DO NOTHING fallback for nil input\ngot:  %s\nwant: %s", got, want)
+	}
+	if len(args) != 2 {
+		t.Errorf("expected 2 args (insert values only), got: %#v", args)
+	}
+}
+
+func TestUpsert_DoUpdateSetStruct_NilPointer(t *testing.T) {
+	// DoUpdateSetStruct with a nil pointer must not panic and must fall back to DO NOTHING.
+	realmID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	username := "alice"
+	row := ts.UserInsert{RealmID: realmID, Username: username}
+	var p *ts.UserUpdate
+	got, args := query.InsertInto(ts.UsersT).
+		Values(row).
+		OnConflict("realm_id", "username").
+		DoUpdateSetStruct(p).
+		Build(dialect.Postgres)
+	want := `INSERT INTO "users" ("realm_id", "username") VALUES ($1, $2) ON CONFLICT ("realm_id", "username") DO NOTHING`
+	if got != want {
+		t.Errorf("expected DO NOTHING fallback for nil-pointer input\ngot:  %s\nwant: %s", got, want)
+	}
+	if len(args) != 2 {
+		t.Errorf("expected 2 args (insert values only), got: %#v", args)
+	}
+}
+
+func TestUpsert_DoUpdateSetStruct_NonStruct(t *testing.T) {
+	// DoUpdateSetStruct with a non-struct value must not panic and must fall back to DO NOTHING.
+	realmID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	username := "alice"
+	row := ts.UserInsert{RealmID: realmID, Username: username}
+	got, args := query.InsertInto(ts.UsersT).
+		Values(row).
+		OnConflict("realm_id", "username").
+		DoUpdateSetStruct(42).
+		Build(dialect.Postgres)
+	want := `INSERT INTO "users" ("realm_id", "username") VALUES ($1, $2) ON CONFLICT ("realm_id", "username") DO NOTHING`
+	if got != want {
+		t.Errorf("expected DO NOTHING fallback for non-struct input\ngot:  %s\nwant: %s", got, want)
+	}
+	if len(args) != 2 {
+		t.Errorf("expected 2 args (insert values only), got: %#v", args)
+	}
+}
+
+// -------------------------------------------------------------------
 // UPDATE tests
 // -------------------------------------------------------------------
 
