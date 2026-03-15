@@ -37,6 +37,7 @@ const (
 type SelectBuilder struct {
 	ctes         []cteClause             // optional WITH clauses (prepended as CTEs)
 	distinct     bool                    // SELECT DISTINCT
+	distinctOn   []expr.SelectableColumn // DISTINCT ON cols (PostgreSQL only)
 	cols         []expr.SelectableColumn // nil = SELECT *
 	from         TableSource
 	joins        []joinClause
@@ -102,6 +103,28 @@ func (b *SelectBuilder) For(strength LockStrength, opts ...LockOption) *SelectBu
 	cp := *b
 	cp.lockStrength = strength
 	cp.lockOpts = append([]LockOption(nil), opts...)
+	return &cp
+}
+
+// DistinctOn adds a PostgreSQL-specific SELECT DISTINCT ON (cols) clause,
+// returning only the first row of each group defined by the given columns.
+// The SELECT list must include at least the DISTINCT ON columns, and ORDER BY
+// must start with those columns to make the "first row" deterministic.
+//
+//	query.Select(UsersT.RealmID, UsersT.Username).
+//	    From(UsersT).
+//	    DistinctOn(UsersT.RealmID).
+//	    OrderBy(UsersT.RealmID.Asc(), UsersT.CreatedAt.Desc())
+//	// SELECT DISTINCT ON ("users"."realm_id") "users"."realm_id", ...
+//
+// Dialect behaviour:
+//   - PostgreSQL: rendered as DISTINCT ON (cols).
+//   - MySQL / SQLite: SupportsDistinctOn() is false; the DISTINCT ON columns
+//     are silently dropped and the query degrades to SELECT DISTINCT.
+func (b *SelectBuilder) DistinctOn(cols ...expr.SelectableColumn) *SelectBuilder {
+	cp := *b
+	cp.distinct = true
+	cp.distinctOn = append(append([]expr.SelectableColumn(nil), cp.distinctOn...), cols...)
 	return &cp
 }
 
@@ -185,6 +208,10 @@ func (b *SelectBuilder) Of(tables ...TableSource) *SelectBuilder {
 // With adds a Common Table Expression (CTE) to the query.
 // The CTE is rendered as WITH name AS (sub) before the SELECT.
 // Multiple CTEs are accumulated in order and rendered as WITH a AS (...), b AS (...).
+//
+// CTE support requires SupportsCTE() on the dialect. All built-in dialects
+// (PostgreSQL, MySQL 8.0+, SQLite 3.8.3+) return true. When building against a
+// dialect where SupportsCTE() is false, the WITH clause is silently dropped.
 //
 // Example:
 //
@@ -281,6 +308,9 @@ func (b *SelectBuilder) RightJoin(t TableSource, on expr.Expression) *SelectBuil
 }
 
 // FullJoin adds a FULL JOIN clause.
+// FULL JOIN requires SupportsFullJoin() on the dialect. When building against a
+// dialect where SupportsFullJoin() is false (MySQL, SQLite), the join is
+// silently dropped from the output SQL.
 func (b *SelectBuilder) FullJoin(t TableSource, on expr.Expression) *SelectBuilder {
 	cp := *b
 	cp.joins = append(append([]joinClause(nil), cp.joins...), joinClause{kind: joinFull, table: t, on: on})
@@ -352,8 +382,8 @@ func (b *SelectBuilder) Build(d dialect.Dialect) (string, []any) {
 func (b *SelectBuilder) buildWith(ctx *expr.BuildContext) string {
 	var sb strings.Builder
 
-	// WITH [RECURSIVE] (CTEs)
-	if len(b.ctes) > 0 {
+	// WITH [RECURSIVE] (CTEs) — only emitted for dialects that support CTEs.
+	if len(b.ctes) > 0 && ctx.Dialect().SupportsCTE() {
 		hasRecursive := false
 		for _, cte := range b.ctes {
 			if cte.anchor != nil {
@@ -385,19 +415,41 @@ func (b *SelectBuilder) buildWith(ctx *expr.BuildContext) string {
 		sb.WriteString(" ")
 	}
 
-	// SELECT [DISTINCT]
+	// SELECT [DISTINCT [ON (cols)]]
 	sb.WriteString("SELECT ")
 	if b.distinct {
-		sb.WriteString("DISTINCT ")
+		if len(b.distinctOn) > 0 && ctx.Dialect().SupportsDistinctOn() {
+			// PostgreSQL DISTINCT ON: SELECT DISTINCT ON (col1, col2) ...
+			sb.WriteString("DISTINCT ON (")
+			for i, c := range b.distinctOn {
+				if i > 0 {
+					sb.WriteString(", ")
+				}
+				sb.WriteString(selectColSQL(ctx, c))
+			}
+			sb.WriteString(") ")
+		} else {
+			sb.WriteString("DISTINCT ")
+		}
 	}
 	if len(b.cols) == 0 {
 		sb.WriteString("*")
 	} else {
-		for i, c := range b.cols {
-			if i > 0 {
+		// Window functions are silently dropped for dialects that do not support them.
+		written := 0
+		for _, c := range b.cols {
+			if _, isWin := c.(expr.WindowExpr); isWin && !ctx.Dialect().SupportsWindowFunctions() {
+				continue
+			}
+			if written > 0 {
 				sb.WriteString(", ")
 			}
 			sb.WriteString(selectColSQL(ctx, c))
+			written++
+		}
+		if written == 0 {
+			// All selected columns were window functions dropped by the dialect — fall back to *.
+			sb.WriteString("*")
 		}
 	}
 
@@ -419,8 +471,11 @@ func (b *SelectBuilder) buildWith(ctx *expr.BuildContext) string {
 		}
 	}
 
-	// JOINs
+	// JOINs — FULL JOIN is silently dropped for dialects that do not support it.
 	for _, j := range b.joins {
+		if j.kind == joinFull && !ctx.Dialect().SupportsFullJoin() {
+			continue
+		}
 		sb.WriteString(" ")
 		sb.WriteString(string(j.kind))
 		sb.WriteString(" ")

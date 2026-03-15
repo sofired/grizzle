@@ -2389,3 +2389,183 @@ func TestWithRecursive_AndRegularCTE(t *testing.T) {
 		t.Errorf("expected WITH RECURSIVE (any recursive CTE triggers it), got: %s", sql)
 	}
 }
+
+// -------------------------------------------------------------------
+// Dialect-gating tests (issue #178)
+// -------------------------------------------------------------------
+
+// noCTEDialect is a test-only dialect that reports SupportsCTE() = false.
+type noCTEDialect struct{}
+
+func (noCTEDialect) Name() string                  { return "no_cte" }
+func (noCTEDialect) Placeholder(_ int) string      { return "?" }
+func (noCTEDialect) QuoteIdent(n string) string    { return `"` + n + `"` }
+func (noCTEDialect) SupportsReturning() bool       { return false }
+func (noCTEDialect) UpsertStyle() dialect.UpsertStyle {
+	return dialect.UpsertOnConflict
+}
+func (noCTEDialect) InsertIgnoreClause() string    { return "" }
+func (noCTEDialect) SupportsCTE() bool             { return false }
+func (noCTEDialect) SupportsWindowFunctions() bool { return true }
+func (noCTEDialect) SupportsDistinctOn() bool      { return false }
+func (noCTEDialect) SupportsForUpdate() bool       { return false }
+func (noCTEDialect) SupportsForNoKeyUpdate() bool  { return false }
+func (noCTEDialect) SupportsForShareOf() bool      { return false }
+func (noCTEDialect) SupportsFullJoin() bool        { return false }
+func (noCTEDialect) ForShareClause() string        { return "" }
+
+// noWindowDialect is a test-only dialect that reports SupportsWindowFunctions() = false.
+type noWindowDialect struct{ noCTEDialect }
+
+func (noWindowDialect) SupportsCTE() bool             { return true }
+func (noWindowDialect) SupportsWindowFunctions() bool { return false }
+
+func TestCTE_DroppedWhenNotSupported(t *testing.T) {
+	sub := query.Select(ts.UsersT.ID).From(ts.UsersT)
+	sql, _ := query.Select(ts.UsersT.ID).
+		With("recent", sub).
+		From(query.CTERef("recent")).
+		Build(noCTEDialect{})
+
+	if strings.Contains(sql, "WITH") {
+		t.Errorf("expected WITH clause to be dropped, got: %s", sql)
+	}
+}
+
+func TestCTE_EmittedWhenSupported(t *testing.T) {
+	sub := query.Select(ts.UsersT.ID).From(ts.UsersT)
+	sql, _ := query.Select(ts.UsersT.ID).
+		With("recent", sub).
+		From(query.CTERef("recent")).
+		Build(dialect.Postgres)
+
+	if !strings.HasPrefix(sql, `WITH "recent" AS (`) {
+		t.Errorf("expected WITH clause, got: %s", sql)
+	}
+}
+
+func TestDistinctOn_PostgresRendered(t *testing.T) {
+	sql, _ := query.Select(ts.UsersT.RealmID, ts.UsersT.Username).
+		From(ts.UsersT).
+		DistinctOn(ts.UsersT.RealmID).
+		OrderBy(ts.UsersT.RealmID.Asc(), ts.UsersT.CreatedAt.Desc()).
+		Build(dialect.Postgres)
+
+	want := `SELECT DISTINCT ON ("users"."realm_id") "users"."realm_id", "users"."username" FROM "users" ORDER BY "users"."realm_id" ASC, "users"."created_at" DESC`
+	if sql != want {
+		t.Errorf("SQL mismatch\n got:  %s\nwant: %s", sql, want)
+	}
+}
+
+func TestDistinctOn_DegradesToDistinctOnUnsupportedDialect(t *testing.T) {
+	// MySQL does not support DISTINCT ON — should degrade to SELECT DISTINCT.
+	sql, _ := query.Select(ts.UsersT.RealmID, ts.UsersT.Username).
+		From(ts.UsersT).
+		DistinctOn(ts.UsersT.RealmID).
+		Build(dialect.MySQL)
+
+	if strings.Contains(sql, "DISTINCT ON") {
+		t.Errorf("DISTINCT ON should be dropped for MySQL, got: %s", sql)
+	}
+	if !strings.Contains(sql, "SELECT DISTINCT") {
+		t.Errorf("expected SELECT DISTINCT fallback, got: %s", sql)
+	}
+}
+
+func TestDistinctOn_MultipleCols(t *testing.T) {
+	sql, _ := query.Select(ts.UsersT.RealmID, ts.UsersT.Username, ts.UsersT.ID).
+		From(ts.UsersT).
+		DistinctOn(ts.UsersT.RealmID, ts.UsersT.Username).
+		Build(dialect.Postgres)
+
+	if !strings.Contains(sql, `DISTINCT ON ("users"."realm_id", "users"."username")`) {
+		t.Errorf("expected DISTINCT ON with two cols, got: %s", sql)
+	}
+}
+
+func TestWindowFunctions_DroppedWhenNotSupported(t *testing.T) {
+	// Window functions should be silently removed from the SELECT list.
+	sql, _ := query.Select(
+		ts.UsersT.ID,
+		expr.RowNumber().PartitionBy(ts.UsersT.RealmID).As("rn"),
+	).From(ts.UsersT).Build(noWindowDialect{})
+
+	if strings.Contains(sql, "ROW_NUMBER") {
+		t.Errorf("expected ROW_NUMBER to be dropped, got: %s", sql)
+	}
+	if !strings.Contains(sql, `"users"."id"`) {
+		t.Errorf("expected non-window column to remain, got: %s", sql)
+	}
+}
+
+func TestWindowFunctions_AllDroppedFallsBackToStar(t *testing.T) {
+	// When all selected columns are window functions and dialect drops them, fall back to *.
+	sql, _ := query.Select(
+		expr.RowNumber().As("rn"),
+		expr.Rank().As("rnk"),
+	).From(ts.UsersT).Build(noWindowDialect{})
+
+	if !strings.Contains(sql, "SELECT *") {
+		t.Errorf("expected SELECT * fallback when all window cols dropped, got: %s", sql)
+	}
+}
+
+func TestWindowFunctions_EmittedWhenSupported(t *testing.T) {
+	sql, _ := query.Select(
+		ts.UsersT.ID,
+		expr.RowNumber().PartitionBy(ts.UsersT.RealmID).As("rn"),
+	).From(ts.UsersT).Build(dialect.Postgres)
+
+	if !strings.Contains(sql, "ROW_NUMBER()") {
+		t.Errorf("expected ROW_NUMBER in output, got: %s", sql)
+	}
+}
+
+func TestFullJoin_DroppedOnMySQL(t *testing.T) {
+	sql, _ := query.Select(ts.UsersT.ID, ts.RealmsT.ID).
+		From(ts.UsersT).
+		FullJoin(ts.RealmsT, ts.UsersT.RealmID.EQCol(ts.RealmsT.ID)).
+		Build(dialect.MySQL)
+
+	if strings.Contains(sql, "FULL JOIN") {
+		t.Errorf("FULL JOIN should be dropped for MySQL, got: %s", sql)
+	}
+}
+
+func TestFullJoin_DroppedOnSQLite(t *testing.T) {
+	sql, _ := query.Select(ts.UsersT.ID).
+		From(ts.UsersT).
+		FullJoin(ts.RealmsT, ts.UsersT.RealmID.EQCol(ts.RealmsT.ID)).
+		Build(dialect.SQLite)
+
+	if strings.Contains(sql, "FULL JOIN") {
+		t.Errorf("FULL JOIN should be dropped for SQLite, got: %s", sql)
+	}
+}
+
+func TestFullJoin_EmittedOnPostgres(t *testing.T) {
+	sql, _ := query.Select(ts.UsersT.ID, ts.RealmsT.ID).
+		From(ts.UsersT).
+		FullJoin(ts.RealmsT, ts.UsersT.RealmID.EQCol(ts.RealmsT.ID)).
+		Build(dialect.Postgres)
+
+	if !strings.Contains(sql, "FULL JOIN") {
+		t.Errorf("expected FULL JOIN in PostgreSQL output, got: %s", sql)
+	}
+}
+
+func TestFullJoin_MixedJoins_OnlyFullDropped(t *testing.T) {
+	// Inner join should remain; full join should be dropped on MySQL.
+	sql, _ := query.Select(ts.UsersT.ID).
+		From(ts.UsersT).
+		InnerJoin(ts.RealmsT, ts.UsersT.RealmID.EQCol(ts.RealmsT.ID)).
+		FullJoin(ts.RealmsT, ts.UsersT.RealmID.EQCol(ts.RealmsT.ID)).
+		Build(dialect.MySQL)
+
+	if strings.Contains(sql, "FULL JOIN") {
+		t.Errorf("FULL JOIN should be dropped for MySQL, got: %s", sql)
+	}
+	if !strings.Contains(sql, "INNER JOIN") {
+		t.Errorf("INNER JOIN should remain, got: %s", sql)
+	}
+}

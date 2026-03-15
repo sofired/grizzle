@@ -50,22 +50,22 @@ type Dialect interface {
 	// SupportsCTE reports whether the dialect supports Common Table Expressions
 	// (WITH clauses). True for PostgreSQL, MySQL 8.0+, and SQLite 3.8.3+.
 	//
-	// Advisory: the query builder does not currently enforce this at build time.
-	// Callers targeting older engine versions must guard usage themselves.
+	// When false, the query builder silently drops all WITH clauses at build time.
+	// Custom dialects targeting engines older than these versions should return false.
 	SupportsCTE() bool
 
 	// SupportsWindowFunctions reports whether the dialect supports window
 	// functions (OVER clause). True for PostgreSQL, MySQL 8.0+, and SQLite 3.25+.
 	//
-	// Advisory: the query builder does not currently enforce this at build time.
-	// Callers targeting older engine versions must guard usage themselves.
+	// When false, the query builder silently drops window function columns from the
+	// SELECT list at build time. If all selected columns are window functions, the
+	// query falls back to SELECT *.
 	SupportsWindowFunctions() bool
 
 	// SupportsDistinctOn reports whether the dialect supports SELECT DISTINCT ON
 	// (expr, ...). This is a PostgreSQL extension; MySQL and SQLite do not support it.
 	//
-	// Advisory: the query builder does not currently enforce this at build time.
-	// Callers targeting non-PostgreSQL dialects must avoid DISTINCT ON themselves.
+	// When false, DistinctOn() degrades to regular SELECT DISTINCT at build time.
 	SupportsDistinctOn() bool
 
 	// SupportsForUpdate reports whether the dialect supports row-level locking.
@@ -88,7 +88,7 @@ type Dialect interface {
 	// SupportsFullJoin reports whether the dialect supports FULL [OUTER] JOIN.
 	// True for PostgreSQL; false for MySQL and SQLite.
 	//
-	// Advisory: the query builder does not currently enforce this at build time.
+	// When false, the query builder silently drops FULL JOIN clauses at build time.
 	SupportsFullJoin() bool
 
 	// ForShareClause returns the SQL keyword phrase for a shared row lock.
