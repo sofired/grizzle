@@ -11,6 +11,11 @@ import (
 // by evaluating each column's builder chain. This lets the CLI use the same
 // schema source files that the code generator reads, without importing them.
 //
+// The return type is *pg.TableDef for all three dialects (pg, mysql, sqlite)
+// because mysql.TableDef and sqlite.TableDef are Go type aliases for pg.TableDef,
+// not separate types. This is intentional: pg.TableDef is the shared intermediate
+// representation used by the kit and codegen layers regardless of dialect.
+//
 // Note: Constraint expressions that reference column values at runtime (like
 // partial index WHERE clauses defined via string literals) are preserved as-is.
 // The WithConstraints callback is not re-executed here; constraints parsed from
@@ -257,9 +262,12 @@ func applyMethod(def *pg.ColumnDef, m MethodCall) error { //nolint:unparam
 	return nil
 }
 
-// isKnownDialectPkg reports whether pkg is one of the three built-in schema packages.
-// FK option functions (OnDelete, OnUpdate) may be called as pg.OnDelete(…),
-// mysql.OnDelete(…), or sqlite.OnDelete(…) — all are equivalent.
+// isKnownDialectPkg reports whether pkg is one of the three recognised schema
+// package identifiers ("pg", "mysql", "sqlite"). It is used as a guard before
+// interpreting FK option calls (OnDelete, OnUpdate), so that unrecognised
+// package aliases are rejected rather than silently applied. The three packages
+// are equivalent for FK options because mysql.OnDelete and sqlite.OnDelete are
+// function aliases for pg.OnDelete.
 func isKnownDialectPkg(pkg string) bool {
 	return pkg == "pg" || pkg == "mysql" || pkg == "sqlite"
 }

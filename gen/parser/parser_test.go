@@ -716,3 +716,23 @@ func TestParsedTable_Dialect(t *testing.T) {
 		}
 	}
 }
+
+// TestEvalTable_MySQL_OnUpdate verifies that mysql.OnUpdate(mysql.FKActionCascade)
+// is correctly parsed for MySQL schemas (#156, #114).
+func TestEvalTable_MySQL_OnUpdate(t *testing.T) {
+	src := `package s
+import mysql "github.com/sofired/grizzle/schema/mysql"
+var T = mysql.Table("t", mysql.C("ref_id", mysql.UUID().References("other", "id", mysql.OnUpdate(mysql.FKActionSetNull))))`
+	tbl := oneTable(t, parseSource(t, src))
+	def, err := parser.EvalTable(tbl)
+	if err != nil {
+		t.Fatalf("EvalTable: %v", err)
+	}
+	c := def.Columns[0]
+	if c.References == nil {
+		t.Fatal("References: want non-nil FKRef")
+	}
+	if c.References.OnUpdate != pg.FKActionSetNull {
+		t.Errorf("OnUpdate: got %v, want FKActionSetNull", c.References.OnUpdate)
+	}
+}
