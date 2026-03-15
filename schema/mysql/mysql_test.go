@@ -158,6 +158,36 @@ func TestSet_ColumnDef(t *testing.T) {
 	}
 }
 
+// TestBuild_Idempotent verifies that calling Build() twice on the same builder
+// returns independent ColumnDefs with the correct name each time (no mutation).
+func TestBuild_Idempotent(t *testing.T) {
+	builders := []struct {
+		name    string
+		builder mysql.ColumnBuilder
+	}{
+		{"TinyInt", mysql.TinyInt().NotNull()},
+		{"SmallInt", mysql.SmallInt().NotNull()},
+		{"Double", mysql.Double().NotNull()},
+		{"MediumInt", mysql.MediumInt().NotNull()},
+		{"Year", mysql.Year().NotNull()},
+		{"Enum", mysql.Enum("a", "b").NotNull()},
+		{"Set", mysql.Set("x", "y").NotNull()},
+	}
+	for _, tc := range builders {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			c1 := tc.builder.Build("col_a")
+			c2 := tc.builder.Build("col_b")
+			if c1.Name != "col_a" {
+				t.Errorf("first Build: got Name=%q, want %q", c1.Name, "col_a")
+			}
+			if c2.Name != "col_b" {
+				t.Errorf("second Build: got Name=%q, want %q", c2.Name, "col_b")
+			}
+		})
+	}
+}
+
 func TestUUID_References(t *testing.T) {
 	col := mysql.UUID().NotNull().References("realms", "id", mysql.OnDelete(mysql.FKActionRestrict)).Build("realm_id")
 	if col.References == nil {

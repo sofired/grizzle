@@ -144,10 +144,9 @@ func (b *TinyIntBuilder) Default(val int) *TinyIntBuilder {
 	return b
 }
 func (b *TinyIntBuilder) Build(name string) pg.ColumnDef {
-	if b.def.Name == "" {
-		b.def.Name = name
-	}
-	return b.def
+	d := b.def
+	d.Name = name
+	return d
 }
 
 // SmallIntBuilder builds a SMALLINT column definition.
@@ -170,10 +169,9 @@ func (b *SmallIntBuilder) Default(val int) *SmallIntBuilder {
 	return b
 }
 func (b *SmallIntBuilder) Build(name string) pg.ColumnDef {
-	if b.def.Name == "" {
-		b.def.Name = name
-	}
-	return b.def
+	d := b.def
+	d.Name = name
+	return d
 }
 
 // DoubleBuilder builds a DOUBLE column definition.
@@ -196,10 +194,9 @@ func (b *DoubleBuilder) Default(val float64) *DoubleBuilder {
 	return b
 }
 func (b *DoubleBuilder) Build(name string) pg.ColumnDef {
-	if b.def.Name == "" {
-		b.def.Name = name
-	}
-	return b.def
+	d := b.def
+	d.Name = name
+	return d
 }
 
 // MediumIntBuilder builds a MEDIUMINT column definition.
@@ -227,10 +224,9 @@ func (b *MediumIntBuilder) Default(val int) *MediumIntBuilder {
 	return b
 }
 func (b *MediumIntBuilder) Build(name string) pg.ColumnDef {
-	if b.def.Name == "" {
-		b.def.Name = name
-	}
-	return b.def
+	d := b.def
+	d.Name = name
+	return d
 }
 
 // YearBuilder builds a YEAR column definition.
@@ -253,10 +249,9 @@ func (b *YearBuilder) Default(val int) *YearBuilder {
 	return b
 }
 func (b *YearBuilder) Build(name string) pg.ColumnDef {
-	if b.def.Name == "" {
-		b.def.Name = name
-	}
-	return b.def
+	d := b.def
+	d.Name = name
+	return d
 }
 
 // EnumBuilder builds a MySQL ENUM column definition.
@@ -287,10 +282,9 @@ func (b *EnumBuilder) Default(val string) *EnumBuilder {
 	return b
 }
 func (b *EnumBuilder) Build(name string) pg.ColumnDef {
-	if b.def.Name == "" {
-		b.def.Name = name
-	}
-	return b.def
+	d := b.def
+	d.Name = name
+	return d
 }
 
 // SetBuilder builds a MySQL SET column definition.
@@ -321,8 +315,7 @@ func (b *SetBuilder) Default(val string) *SetBuilder {
 	return b
 }
 func (b *SetBuilder) Build(name string) pg.ColumnDef {
-	if b.def.Name == "" {
-		b.def.Name = name
-	}
-	return b.def
+	d := b.def
+	d.Name = name
+	return d
 }
