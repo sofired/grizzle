@@ -3,11 +3,11 @@
 // Usage:
 //
 //	grizzle gen      [--schema <dir>] [--out <dir>] [--package <name>]
-//	grizzle sql      [--schema <dir>] [--dialect postgres|mysql]
-//	grizzle diff     [--schema <dir>] [--snapshot <file>] [--dialect postgres|mysql]
+//	grizzle sql      [--schema <dir>] [--dialect postgres|mysql|sqlite]
+//	grizzle diff     [--schema <dir>] [--snapshot <file>] [--dialect postgres|mysql|sqlite]
 //	grizzle snapshot [--schema <dir>] [--out <file>]
-//	grizzle migrate  [--schema <dir>] --db <dsn> [--dialect postgres|mysql]
-//	grizzle status   [--schema <dir>] --db <dsn> [--dialect postgres|mysql]
+//	grizzle migrate  [--schema <dir>] --db <dsn> [--dialect postgres|mysql|sqlite]
+//	grizzle status   [--schema <dir>] --db <dsn> [--dialect postgres|mysql|sqlite]
 package main
 
 import (
@@ -520,7 +520,7 @@ gen flags:
 
 sql / diff flags:
   --schema <dir>        Directory containing schema Go files (default: .)
-  --dialect <dialect>   Target SQL dialect: postgres (default) or mysql
+  --dialect <dialect>   Target SQL dialect: postgres (default), mysql, or sqlite
   --snapshot <file>     (diff only) Baseline snapshot path (default: schema.snapshot.json)
 
 snapshot flags:
@@ -530,7 +530,7 @@ snapshot flags:
 migrate / status flags:
   --schema <dir>      Directory containing schema Go files (default: .)
   --db <dsn>          Database connection string (required)
-  --dialect <dialect> Target SQL dialect: postgres (default) or mysql
+  --dialect <dialect> Target SQL dialect: postgres (default), mysql, or sqlite
   --dry-run           (migrate only) Print SQL without applying it
 
 Examples:
