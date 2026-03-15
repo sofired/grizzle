@@ -150,7 +150,7 @@ var Users = pg.Table("users", ...).WithConstraints(func(t pg.TableRef) []pg.Cons
 | `check(name, expr)` | `pg.Check(name, exprStr)` | PARITY for string expressions; typed expression form is DEVIATION:GAP (not designed) |
 | `foreignKey({cols, refs})` composite | `pg.ForeignKey(name).From(cols).References(tbl, cols).Build()` | PARITY |
 
-**Note on FK actions for non-PostgreSQL dialects:** FK `ON DELETE`/`ON UPDATE` actions are silently dropped for SQLite and MySQL schemas — bug **#114**. The parser only evaluates these when `BasePkg == "pg"`.
+**Note on FK actions for non-PostgreSQL dialects:** FK `ON DELETE`/`ON UPDATE` actions are now evaluated for all dialects (pg, mysql, sqlite). Issue **#114** (previously dropped for MySQL/SQLite) was fixed in this PR by updating `gen/parser/eval.go` to accept FK options from any of the three dialect packages.
 
 ## Schema namespaces
 

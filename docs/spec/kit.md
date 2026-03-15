@@ -233,5 +233,5 @@ MySQL and SQLite equivalents exist in `kit/migrate_mysql.go` and `kit/migrate_sq
 
 ## Known bugs
 
-- **#114** — FK `ON DELETE`/`ON UPDATE` actions silently dropped for SQLite and MySQL schemas. The parser (`gen/parser/eval.go`) only evaluates FK actions when `BasePkg == "pg"`.
+- ~~**#114** — FK `ON DELETE`/`ON UPDATE` actions silently dropped for SQLite and MySQL schemas.~~ **Fixed** in PR #180: `gen/parser/eval.go` now evaluates FK actions for all three dialect packages (pg, mysql, sqlite).
 - **#110** — PostgreSQL-only locking clauses (`FOR NO KEY UPDATE`, `FOR KEY SHARE`) emitted for MySQL, producing invalid SQL. Dialect interface needs feature-detection methods to prevent this.

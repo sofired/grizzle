@@ -277,9 +277,9 @@ func applyMethod(def *pg.ColumnDef, m MethodCall) error { //nolint:unparam
 // isKnownDialectPkg reports whether pkg is one of the three recognised schema
 // package identifiers ("pg", "mysql", "sqlite"). It is used as a guard before
 // interpreting FK option calls (OnDelete, OnUpdate), so that unrecognised
-// package aliases are rejected rather than silently applied. The three packages
-// are equivalent for FK options because mysql.OnDelete and sqlite.OnDelete are
-// function aliases for pg.OnDelete.
+// package aliases are silently skipped rather than misinterpreted. The three
+// packages are equivalent for FK options because mysql.OnDelete and
+// sqlite.OnDelete are function aliases for pg.OnDelete.
 func isKnownDialectPkg(pkg string) bool {
 	return pkg == "pg" || pkg == "mysql" || pkg == "sqlite"
 }

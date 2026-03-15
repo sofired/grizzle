@@ -134,5 +134,22 @@ now accept `...pg.TableDefiner` instead of `...*pg.TableDef`. The CLI `parseSche
 returns `[]pg.TableDefiner`, and `gen/parser.EvalTable` returns `pg.TableDefiner` (dispatching
 to `*mysql.TableDef` or `*sqlite.TableDef` based on the `ParsedTable.Dialect` field).
 
-Backward compatibility is preserved: any code that already passes `*pg.TableDef` values
-continues to work without change because `*pg.TableDef` implements `pg.TableDefiner`.
+Backward compatibility is preserved for the common case: any code that already passes
+individual `*pg.TableDef` values continues to work without change because `*pg.TableDef`
+implements `pg.TableDefiner`.
+
+**Breaking edge case:** Callers that collected `*pg.TableDef` values into a typed slice and
+expanded it with `...` will need a one-time update:
+
+```go
+// Before (no longer compiles):
+defs := []*pg.TableDef{schema.Users, schema.Realms}
+kit.Push(ctx, pool, defs...)
+
+// After — either change the slice element type:
+defs := []pg.TableDefiner{schema.Users, schema.Realms}
+kit.Push(ctx, pool, defs...)
+
+// Or expand inline (no change needed if values are passed directly):
+kit.Push(ctx, pool, schema.Users, schema.Realms)
+```
