@@ -126,26 +126,26 @@ func tryExtractTable(varName string, expr ast.Expr) (*ParsedTable, error) {
 	switch sel.Sel.Name {
 	case "Table":
 		if len(call.Args) < 1 {
-			return nil, fmt.Errorf("pg.Table: expected at least 1 arg")
+			return nil, fmt.Errorf("%s.Table: expected at least 1 arg", pkg.Name)
 		}
 		name, err := evalStringArg(call.Args[0])
 		if err != nil {
-			return nil, fmt.Errorf("pg.Table name: %w", err)
+			return nil, fmt.Errorf("%s.Table name: %w", pkg.Name, err)
 		}
 		tableName = name
 		colArgs = call.Args[1:]
 
 	case "SchemaTable":
 		if len(call.Args) < 2 {
-			return nil, fmt.Errorf("pg.SchemaTable: expected at least 2 args")
+			return nil, fmt.Errorf("%s.SchemaTable: expected at least 2 args", pkg.Name)
 		}
 		schema, err := evalStringArg(call.Args[0])
 		if err != nil {
-			return nil, fmt.Errorf("pg.SchemaTable schema: %w", err)
+			return nil, fmt.Errorf("%s.SchemaTable schema: %w", pkg.Name, err)
 		}
 		name, err := evalStringArg(call.Args[1])
 		if err != nil {
-			return nil, fmt.Errorf("pg.SchemaTable name: %w", err)
+			return nil, fmt.Errorf("%s.SchemaTable name: %w", pkg.Name, err)
 		}
 		schemaName = schema
 		tableName = name
@@ -227,7 +227,7 @@ func extractColumn(arg ast.Expr) (*ParsedColumn, error) {
 	}
 	colName, err := evalStringArg(call.Args[0])
 	if err != nil {
-		return nil, fmt.Errorf("pg.C name: %w", err)
+		return nil, fmt.Errorf("%s.C name: %w", pkg.Name, err)
 	}
 	chain, err := UnwrapChain(call.Args[1])
 	if err != nil {
