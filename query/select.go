@@ -217,7 +217,10 @@ func (b *SelectBuilder) Of(tables ...TableSource) *SelectBuilder {
 //
 // CTE support requires SupportsCTE() on the dialect. All built-in dialects
 // (PostgreSQL, MySQL 8.0+, SQLite 3.8.3+) return true. When building against a
-// dialect where SupportsCTE() is false, the WITH clause is silently dropped.
+// dialect where SupportsCTE() is false, the WITH clause is omitted from the
+// output SQL. Any CTERef used in From() or Join() remains as a plain table
+// name, which will cause a runtime database error (unknown table). This is
+// intentional: failing loudly is safer than silently returning wrong results.
 //
 // Example:
 //
@@ -241,8 +244,10 @@ func (b *SelectBuilder) With(name string, sub *SelectBuilder) *SelectBuilder {
 //
 // CTE support requires SupportsCTE() on the dialect. All built-in dialects
 // (PostgreSQL, MySQL 8.0+, SQLite 3.8.3+) return true. When building against a
-// dialect where SupportsCTE() is false, the WITH RECURSIVE clause is silently
-// dropped and only the outer SELECT is emitted — the recursive logic does not run.
+// dialect where SupportsCTE() is false, the WITH RECURSIVE clause is omitted
+// from the output SQL. Any CTERef used in From() or Join() remains as a plain
+// table name, producing a runtime database error (unknown table). This is
+// intentional: failing loudly is safer than silently returning wrong results.
 //
 // Example — traverse an org-chart by manager_id:
 //
@@ -252,7 +257,7 @@ func (b *SelectBuilder) With(name string, sub *SelectBuilder) *SelectBuilder {
 //
 //	rec := query.Select(EmployeesT.ID, EmployeesT.ManagerID).
 //	    From(EmployeesT).
-//	    InnerJoin(query.CTERef("org"), EmployeesT.ManagerID.EQCol(EmployeesT.ManagerID))
+//	    InnerJoin(query.CTERef("org"), EmployeesT.ManagerID.EQCol(EmployeesT.ID))
 //
 //	query.Select().
 //	    WithRecursive("org", anchor, rec).

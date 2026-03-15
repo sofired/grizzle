@@ -2430,6 +2430,13 @@ func TestCTE_DroppedWhenNotSupported(t *testing.T) {
 	if strings.Contains(sql, "WITH") {
 		t.Errorf("expected WITH clause to be dropped, got: %s", sql)
 	}
+	// The CTERef FROM reference is preserved as a plain table name; at runtime
+	// the database will raise an unknown-table error — the intended fail-loud
+	// behaviour rather than silently returning wrong rows.
+	want := `SELECT "users"."id" FROM "recent"`
+	if sql != want {
+		t.Errorf("CTE dropped: want %q, got %q", want, sql)
+	}
 }
 
 func TestCTE_RecursiveDroppedWhenNotSupported(t *testing.T) {

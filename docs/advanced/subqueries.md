@@ -126,7 +126,7 @@ sql, args := query.Select().
 // WITH RECURSIVE "org" AS (SELECT ... UNION ALL SELECT ...) SELECT * FROM "org"
 ```
 
-CTE support requires a dialect where `SupportsCTE()` is true. All built-in dialects return `true` (PostgreSQL, MySQL 8.0+, SQLite 3.8.3+). When a custom dialect returns `false`, the `WITH` clause is silently dropped.
+CTE support requires a dialect where `SupportsCTE()` is true. All built-in dialects return `true` (PostgreSQL, MySQL 8.0+, SQLite 3.8.3+). When a custom dialect returns `false`, the `WITH` clause is omitted from the output SQL. Any `CTERef` used in `From()` or `Join()` remains as a plain table name, producing a runtime database error (unknown table) rather than silently returning wrong results.
 
 ::: tip
 For most CTE use cases, the batch preloading utilities (`query.PreloadUUIDs`, `query.Index`, `query.GroupBy`) are a simpler alternative that avoids raw SQL entirely. See [Preloading](/guide/preloading).

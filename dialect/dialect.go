@@ -50,8 +50,12 @@ type Dialect interface {
 	// SupportsCTE reports whether the dialect supports Common Table Expressions
 	// (WITH clauses). True for PostgreSQL, MySQL 8.0+, and SQLite 3.8.3+.
 	//
-	// When false, the query builder silently drops all WITH clauses at build time.
-	// Custom dialects targeting engines older than these versions should return false.
+	// When false, the query builder omits the WITH clause at build time. Any
+	// FROM or JOIN reference to a CTE name (via CTERef) remains in the SQL as a
+	// plain table name, which will produce a runtime database error (unknown table).
+	// This is intentional: failing loudly is safer than silently returning wrong
+	// results. Custom dialects targeting engines older than these versions should
+	// return false.
 	SupportsCTE() bool
 
 	// SupportsWindowFunctions reports whether the dialect supports window
