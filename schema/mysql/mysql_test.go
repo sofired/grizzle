@@ -113,6 +113,51 @@ func TestDouble_ColumnDef(t *testing.T) {
 	}
 }
 
+func TestMediumInt_ColumnDef(t *testing.T) {
+	col := mysql.MediumInt().NotNull().Default(0).Build("rank")
+	if col.SQLType != "mediumint" {
+		t.Errorf("SQLType: got %q, want %q", col.SQLType, "mediumint")
+	}
+	if col.DefaultExpr != "0" {
+		t.Errorf("DefaultExpr: got %q, want %q", col.DefaultExpr, "0")
+	}
+	if col.GoType != pg.GoTypeInt {
+		t.Errorf("GoType: got %v, want %v", col.GoType, pg.GoTypeInt)
+	}
+}
+
+func TestYear_ColumnDef(t *testing.T) {
+	col := mysql.Year().NotNull().Build("birth_year")
+	if col.SQLType != "year" {
+		t.Errorf("SQLType: got %q, want %q", col.SQLType, "year")
+	}
+	if col.GoType != pg.GoTypeInt {
+		t.Errorf("GoType: got %v, want %v", col.GoType, pg.GoTypeInt)
+	}
+}
+
+func TestEnum_ColumnDef(t *testing.T) {
+	col := mysql.Enum("active", "inactive", "pending").NotNull().Build("status")
+	want := "enum('active','inactive','pending')"
+	if col.SQLType != want {
+		t.Errorf("SQLType: got %q, want %q", col.SQLType, want)
+	}
+	if col.GoType != pg.GoTypeString {
+		t.Errorf("GoType: got %v, want %v", col.GoType, pg.GoTypeString)
+	}
+}
+
+func TestSet_ColumnDef(t *testing.T) {
+	col := mysql.Set("read", "write", "admin").NotNull().Build("permissions")
+	want := "set('read','write','admin')"
+	if col.SQLType != want {
+		t.Errorf("SQLType: got %q, want %q", col.SQLType, want)
+	}
+	if col.GoType != pg.GoTypeString {
+		t.Errorf("GoType: got %v, want %v", col.GoType, pg.GoTypeString)
+	}
+}
+
 func TestUUID_References(t *testing.T) {
 	col := mysql.UUID().NotNull().References("realms", "id", mysql.OnDelete(mysql.FKActionRestrict)).Build("realm_id")
 	if col.References == nil {
@@ -215,6 +260,10 @@ func TestDDL_TypeTranslations(t *testing.T) {
 		mysql.C("flags", mysql.TinyInt().NotNull().Default(0)),
 		mysql.C("priority", mysql.SmallInt()),
 		mysql.C("lat", mysql.Double()),
+		mysql.C("rank", mysql.MediumInt()),
+		mysql.C("birth_year", mysql.Year()),
+		mysql.C("status", mysql.Enum("active", "inactive", "pending").NotNull()),
+		mysql.C("perms", mysql.Set("read", "write", "admin")),
 	).Build()
 
 	ddl := kit.GenerateCreateSQLMySQL(tbl)
@@ -236,6 +285,10 @@ func TestDDL_TypeTranslations(t *testing.T) {
 		{"tinyint passes through", "TINYINT"},
 		{"smallint passes through", "SMALLINT"},
 		{"double precision → DOUBLE", "DOUBLE"},
+		{"mediumint passes through", "MEDIUMINT"},
+		{"year passes through", "YEAR"},
+		{"enum keyword uppercased, values preserved", "ENUM('active','inactive','pending')"},
+		{"set keyword uppercased, values preserved", "SET('read','write','admin')"},
 		{"uuid default → (UUID())", "(UUID())"},
 		{"now() → CURRENT_TIMESTAMP(6)", "CURRENT_TIMESTAMP(6)"},
 		{"boolean default true → 1", "DEFAULT 1"},
