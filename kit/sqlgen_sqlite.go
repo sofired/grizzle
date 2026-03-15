@@ -293,17 +293,64 @@ func dropConstraintSQLSQLite(tableName string, c pg.Constraint) []string {
 	}
 }
 
-// sqliteType maps canonical SQL type strings to SQLite type names.
-// SQLite's type affinity means arbitrary names work, but we translate the
-// common serial types which need "INTEGER" for rowid-alias behaviour.
+// sqliteType maps canonical SQL type strings to SQLite-native type names.
+// SQLite has only five storage classes (NULL, INTEGER, REAL, TEXT, BLOB) and
+// five affinity types. We translate all canonical/PostgreSQL type names to the
+// correct SQLite-native type so that DDL is explicit and unambiguous.
 // isPK is reserved for future PK-specific type handling (e.g. AUTOINCREMENT).
 func sqliteType(sqlType string, isPK bool) string { //nolint:unparam
 	lower := strings.ToLower(sqlType)
-	// serial/bigserial → INTEGER PRIMARY KEY (handled inline in columnDefSQLSQLite)
-	if lower == "serial" || lower == "bigserial" {
-		return "INTEGER PRIMARY KEY AUTOINCREMENT"
+
+	// Strip precision/scale suffixes for prefix matching (e.g. "varchar(255)" → "varchar").
+	base := lower
+	if i := strings.IndexByte(base, '('); i >= 0 {
+		base = strings.TrimSpace(base[:i])
 	}
-	// Pass all other canonical types through — SQLite accepts them via affinity.
+
+	switch base {
+	// Serial types → INTEGER PRIMARY KEY (AUTOINCREMENT handled inline)
+	case "serial", "bigserial", "smallserial":
+		return "INTEGER PRIMARY KEY AUTOINCREMENT"
+
+	// Integer types → INTEGER
+	case "integer", "int", "int2", "int4", "int8",
+		"bigint", "smallint", "tinyint", "mediumint":
+		return "INTEGER"
+
+	// Floating-point types → REAL
+	case "real", "float", "float4", "float8", "double", "double precision":
+		return "REAL"
+
+	// Fixed-precision types → NUMERIC
+	case "numeric", "decimal":
+		return "NUMERIC"
+
+	// Boolean → INTEGER (0/1), matching Drizzle ORM SQLite behavior
+	case "boolean", "bool":
+		return "INTEGER"
+
+	// Text-like types → TEXT
+	case "text", "varchar", "character varying", "char", "character",
+		"citext", "name", "bpchar",
+		// UUID has no native SQLite type; store as TEXT
+		"uuid",
+		// Timestamps stored as ISO-8601 TEXT (matches Drizzle ORM SQLite behavior)
+		"timestamp", "timestamptz", "timestamp without time zone",
+		"timestamp with time zone", "date", "time", "timetz",
+		"interval",
+		// JSON/JSONB stored as TEXT; SQLite's json() functions work on TEXT
+		"json", "jsonb",
+		// Network and other PG-specific types fall back to TEXT
+		"inet", "cidr", "macaddr",
+		"tsvector", "tsquery":
+		return "TEXT"
+
+	// Binary types → BLOB
+	case "bytea", "blob", "binary", "varbinary":
+		return "BLOB"
+	}
+
+	// Unknown canonical type: return as-is and let SQLite's affinity rules apply.
 	return sqlType
 }
 

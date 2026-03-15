@@ -580,3 +580,70 @@ var T = mysql.Table("items",
 		t.Errorf("expected 4 columns, got %d", len(def.Columns))
 	}
 }
+
+func TestParseFile_SqliteTable(t *testing.T) {
+	src := `package s
+import sqlite "github.com/sofired/grizzle/schema/sqlite"
+var Notes = sqlite.Table("notes",
+	sqlite.C("id",    sqlite.Integer().PrimaryKey()),
+	sqlite.C("title", sqlite.Text().NotNull()),
+	sqlite.C("body",  sqlite.Text()),
+)`
+	tables := parseSource(t, src)
+	if len(tables) != 1 {
+		t.Fatalf("expected 1 table, got %d", len(tables))
+	}
+	tbl := tables[0]
+	if tbl.TableName != "notes" {
+		t.Errorf("TableName: got %q, want notes", tbl.TableName)
+	}
+	if len(tbl.Columns) != 3 {
+		t.Errorf("Columns: got %d, want 3", len(tbl.Columns))
+	}
+}
+
+func TestParseFile_SqliteSpecificTypes(t *testing.T) {
+	src := `package s
+import sqlite "github.com/sofired/grizzle/schema/sqlite"
+var T = sqlite.Table("assets",
+	sqlite.C("id",    sqlite.Integer().PrimaryKey()),
+	sqlite.C("score", sqlite.Real()),
+	sqlite.C("data",  sqlite.Blob()),
+)`
+	tables := parseSource(t, src)
+	if len(tables) != 1 {
+		t.Fatalf("expected 1 table, got %d", len(tables))
+	}
+	def, err := parser.EvalTable(tables[0])
+	if err != nil {
+		t.Fatalf("EvalTable: %v", err)
+	}
+	if len(def.Columns) != 3 {
+		t.Errorf("expected 3 columns, got %d", len(def.Columns))
+	}
+	// id: INTEGER
+	if def.Columns[0].SQLType != "integer" {
+		t.Errorf("id SQLType: got %q, want integer", def.Columns[0].SQLType)
+	}
+	// score: REAL
+	if def.Columns[1].SQLType != "real" {
+		t.Errorf("score SQLType: got %q, want real", def.Columns[1].SQLType)
+	}
+	// data: BLOB
+	if def.Columns[2].SQLType != "blob" {
+		t.Errorf("data SQLType: got %q, want blob", def.Columns[2].SQLType)
+	}
+}
+
+func TestParseFile_SqliteSchemaTable(t *testing.T) {
+	tbl := oneTable(t, parseSource(t, `package s
+import sqlite "github.com/sofired/grizzle/schema/sqlite"
+var T = sqlite.SchemaTable("main", "events", sqlite.C("id", sqlite.Integer().PrimaryKey()))`))
+
+	if tbl.SchemaName != "main" {
+		t.Errorf("SchemaName: got %q, want main", tbl.SchemaName)
+	}
+	if tbl.TableName != "events" {
+		t.Errorf("TableName: got %q, want events", tbl.TableName)
+	}
+}

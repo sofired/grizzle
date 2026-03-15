@@ -554,3 +554,19 @@ func (c FloatColumn) SubCol(other FloatColumn) ArithExpr {
 func (c FloatColumn) MulCol(other FloatColumn) ArithExpr {
 	return ArithExpr{left: c.ColBase, op: "*", right: other.ColBase}
 }
+
+// -------------------------------------------------------------------
+// BytesColumn
+// -------------------------------------------------------------------
+
+// BytesColumn is a typed column handle for BLOB / binary values.
+// BLOB columns are used in SQLite (and other databases) to store raw byte data.
+// The corresponding Go type is []byte.
+type BytesColumn struct{ ColBase }
+
+func (c BytesColumn) EQ(val []byte) Expression {
+	return binaryExpr{ref: c.ColBase, op: "=", val: val}
+}
+func (c BytesColumn) NEQ(val []byte) Expression {
+	return binaryExpr{ref: c.ColBase, op: "<>", val: val}
+}

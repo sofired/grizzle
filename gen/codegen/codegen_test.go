@@ -300,6 +300,170 @@ var Events = pg.Table("events",
 	}
 }
 
+func TestSQLite_ColumnMapping(t *testing.T) {
+	src := `package testschema
+import sqlite "github.com/sofired/grizzle/schema/sqlite"
+var Assets = sqlite.Table("assets",
+	sqlite.C("id",         sqlite.Integer().PrimaryKey()),
+	sqlite.C("title",      sqlite.Text().NotNull()),
+	sqlite.C("score",      sqlite.Real()),
+	sqlite.C("data",       sqlite.Blob()),
+	sqlite.C("created_at", sqlite.Timestamp().NotNull()),
+)
+`
+	dir := t.TempDir()
+	f := dir + "/schema.go"
+	if err := writeFile(f, src); err != nil {
+		t.Fatal(err)
+	}
+	tables, err := parser.ParseFile(f)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(tables) != 1 {
+		t.Fatalf("expected 1 table, got %d", len(tables))
+	}
+	gf, err := codegen.GenerateTable(tables[0], codegen.Options{PackageName: "testschema", OutputDir: dir})
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+
+	src2 := string(gf.Source)
+
+	// Integer PK → IntColumn + int
+	if !strings.Contains(src2, "expr.IntColumn") {
+		t.Errorf("expected expr.IntColumn for sqlite.Integer in output:\n%s", src2)
+	}
+	// Text → StringColumn
+	if !strings.Contains(src2, "expr.StringColumn") {
+		t.Errorf("expected expr.StringColumn for sqlite.Text in output:\n%s", src2)
+	}
+	// Real → FloatColumn + float64
+	if !strings.Contains(src2, "expr.FloatColumn") {
+		t.Errorf("expected expr.FloatColumn for sqlite.Real in output:\n%s", src2)
+	}
+	if !strings.Contains(src2, "float64") {
+		t.Errorf("expected float64 for sqlite.Real in output:\n%s", src2)
+	}
+	// Blob → BytesColumn + []byte
+	if !strings.Contains(src2, "expr.BytesColumn") {
+		t.Errorf("expected expr.BytesColumn for sqlite.Blob in output:\n%s", src2)
+	}
+	if !strings.Contains(src2, "[]byte") {
+		t.Errorf("expected []byte for sqlite.Blob in output:\n%s", src2)
+	}
+	// Timestamp → TimestampColumn
+	if !strings.Contains(src2, "expr.TimestampColumn") {
+		t.Errorf("expected expr.TimestampColumn for sqlite.Timestamp in output:\n%s", src2)
+	}
+}
+
+func TestSQLite_EndToEnd(t *testing.T) {
+	// Full end-to-end test: parse a sqlite schema, generate code, verify structure.
+	src := `package testschema
+import sqlite "github.com/sofired/grizzle/schema/sqlite"
+
+var Notes = sqlite.Table("notes",
+	sqlite.C("id",         sqlite.Integer().PrimaryKey()),
+	sqlite.C("user_id",    sqlite.BigInt().NotNull()),
+	sqlite.C("title",      sqlite.Text().NotNull()),
+	sqlite.C("body",       sqlite.Text()),
+	sqlite.C("score",      sqlite.Real()),
+	sqlite.C("attachment", sqlite.Blob()),
+	sqlite.C("created_at", sqlite.Timestamp().NotNull().DefaultNow()),
+)
+`
+	dir := t.TempDir()
+	f := dir + "/schema.go"
+	if err := writeFile(f, src); err != nil {
+		t.Fatal(err)
+	}
+	tables, err := parser.ParseFile(f)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(tables) != 1 {
+		t.Fatalf("expected 1 table, got %d", len(tables))
+	}
+	gf, err := codegen.GenerateTable(tables[0], codegen.Options{PackageName: "testschema", OutputDir: dir})
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+
+	src2 := string(gf.Source)
+
+	checks := []string{
+		"type NotesTable struct",
+		"func (NotesTable) GrizTableName() string",
+		"var NotesT = NotesTable{",
+		"type NoteSelect struct",
+		"type NoteInsert struct",
+		"type NoteUpdate struct",
+		// Column handle types
+		"expr.IntColumn",
+		"expr.BigIntColumn",
+		"expr.StringColumn",
+		"expr.FloatColumn",
+		"expr.BytesColumn",
+		"expr.TimestampColumn",
+		// Go value types
+		"int64",
+		"float64",
+		"[]byte",
+	}
+
+	for _, want := range checks {
+		if !strings.Contains(src2, want) {
+			t.Errorf("generated source missing %q\n---\n%s\n---", want, src2)
+		}
+	}
+}
+
+func TestMySQL_SpecificTypes_Codegen(t *testing.T) {
+	// Regression test for issue #5: MySQL-specific column types (TinyInt, SmallInt, Double)
+	// must not cause "unknown column builder" errors during codegen.
+	src := `package testschema
+import mysql "github.com/sofired/grizzle/schema/mysql"
+var Items = mysql.Table("items",
+	mysql.C("id",       mysql.BigSerial()),
+	mysql.C("flag",     mysql.TinyInt()),
+	mysql.C("priority", mysql.SmallInt()),
+	mysql.C("weight",   mysql.Double()),
+)
+`
+	dir := t.TempDir()
+	f := dir + "/schema.go"
+	if err := writeFile(f, src); err != nil {
+		t.Fatal(err)
+	}
+	tables, err := parser.ParseFile(f)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(tables) != 1 {
+		t.Fatalf("expected 1 table, got %d", len(tables))
+	}
+	gf, err := codegen.GenerateTable(tables[0], codegen.Options{PackageName: "testschema", OutputDir: dir})
+	if err != nil {
+		t.Fatalf("generate (should not fail for MySQL-specific types): %v", err)
+	}
+
+	src2 := string(gf.Source)
+
+	// BigSerial → BigIntColumn
+	if !strings.Contains(src2, "expr.BigIntColumn") {
+		t.Errorf("expected expr.BigIntColumn for mysql.BigSerial in output:\n%s", src2)
+	}
+	// TinyInt / SmallInt → IntColumn
+	if !strings.Contains(src2, "expr.IntColumn") {
+		t.Errorf("expected expr.IntColumn for mysql.TinyInt/SmallInt in output:\n%s", src2)
+	}
+	// Double → FloatColumn
+	if !strings.Contains(src2, "expr.FloatColumn") {
+		t.Errorf("expected expr.FloatColumn for mysql.Double in output:\n%s", src2)
+	}
+}
+
 // writeFile is a simple helper for writing test files.
 func writeFile(path, content string) error {
 	return os.WriteFile(path, []byte(content), 0644)
