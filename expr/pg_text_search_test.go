@@ -294,6 +294,52 @@ func TestWebsearchToTsqueryWithConfig(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------
+// TsQueryExpr — SELECT-list / alias support
+// -----------------------------------------------------------------------
+
+func TestToTsquery_AsAlias(t *testing.T) {
+	// TsQueryExpr satisfies SelectableColumn so it can appear in SELECT lists.
+	e := expr.ToTsquery("grizzle & orm").As("q")
+	got := e.ToSQL(pgCtx())
+	want := `to_tsquery($1) AS "q"`
+	if got != want {
+		t.Errorf("ToTsquery.As: got %q, want %q", got, want)
+	}
+	if e.ColumnName() != "q" {
+		t.Errorf("ColumnName: got %q, want %q", e.ColumnName(), "q")
+	}
+	if e.TableName() != "" {
+		t.Errorf("TableName: got %q, want %q", e.TableName(), "")
+	}
+}
+
+func TestToTsqueryWithConfig_AsAlias(t *testing.T) {
+	e := expr.ToTsqueryWithConfig("english", "grizzle & orm").As("q")
+	got := e.ToSQL(pgCtx())
+	want := `to_tsquery($1, $2) AS "q"`
+	if got != want {
+		t.Errorf("ToTsqueryWithConfig.As: got %q, want %q", got, want)
+	}
+}
+
+func TestPlainToTsquery_AsAlias(t *testing.T) {
+	e := expr.PlainToTsquery("grizzle orm").As("q")
+	got := e.ToSQL(pgCtx())
+	want := `plainto_tsquery($1) AS "q"`
+	if got != want {
+		t.Errorf("PlainToTsquery.As: got %q, want %q", got, want)
+	}
+}
+
+func TestTsQueryExpr_ColumnName_NoAlias(t *testing.T) {
+	// Without alias, ColumnName returns the function name.
+	e := expr.ToTsquery("grizzle & orm")
+	if e.ColumnName() != "to_tsquery" {
+		t.Errorf("ColumnName (no alias): got %q, want %q", e.ColumnName(), "to_tsquery")
+	}
+}
+
+// -----------------------------------------------------------------------
 // TsRank / TsRankCd
 // -----------------------------------------------------------------------
 

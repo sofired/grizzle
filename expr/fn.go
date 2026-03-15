@@ -371,76 +371,111 @@ func ToTsvector(col SelectableColumn, config ...string) toTsvectorExpr {
 	return toTsvectorExpr{config: cfg, ref: colSelAsRef{col}}
 }
 
-// ToTsquery returns to_tsquery($1) as a raw Expression.
-// Useful when you need to pass a tsquery expression as a value in SELECT lists.
+// ToTsquery returns to_tsquery($1) — a standalone tsquery constructor usable in
+// WHERE predicates, FTS match expressions, and SELECT lists.
 //
-//	expr.ToTsquery("grizzle & orm") // to_tsquery($1)
-func ToTsquery(query string) Expression {
-	return tsQueryFnExpr{fn: "to_tsquery", query: query}
+//	expr.ToTsquery("grizzle & orm")             // to_tsquery($1)
+//	expr.ToTsquery("grizzle & orm").As("q")     // to_tsquery($1) AS "q"
+func ToTsquery(query string) TsQueryExpr {
+	return TsQueryExpr{fn: "to_tsquery", query: query}
 }
 
 // ToTsqueryWithConfig returns to_tsquery($1, $2) using an explicit text search configuration.
 //
 //	expr.ToTsqueryWithConfig("english", "grizzle & orm") // to_tsquery($1, $2)
-func ToTsqueryWithConfig(config, query string) Expression {
-	return tsQueryFnExpr{fn: "to_tsquery", query: query, config: config}
+func ToTsqueryWithConfig(config, query string) TsQueryExpr {
+	return TsQueryExpr{fn: "to_tsquery", query: query, config: config}
 }
 
 // PlainToTsquery returns plainto_tsquery($1).
 //
 //	expr.PlainToTsquery("grizzle orm") // plainto_tsquery($1)
-func PlainToTsquery(query string) Expression {
-	return tsQueryFnExpr{fn: "plainto_tsquery", query: query}
+func PlainToTsquery(query string) TsQueryExpr {
+	return TsQueryExpr{fn: "plainto_tsquery", query: query}
 }
 
 // PlainToTsqueryWithConfig returns plainto_tsquery($1, $2) using an explicit text search configuration.
 //
 //	expr.PlainToTsqueryWithConfig("english", "grizzle orm") // plainto_tsquery($1, $2)
-func PlainToTsqueryWithConfig(config, query string) Expression {
-	return tsQueryFnExpr{fn: "plainto_tsquery", query: query, config: config}
+func PlainToTsqueryWithConfig(config, query string) TsQueryExpr {
+	return TsQueryExpr{fn: "plainto_tsquery", query: query, config: config}
 }
 
 // PhraseToTsquery returns phraseto_tsquery($1).
 //
 //	expr.PhraseToTsquery("fast full text search") // phraseto_tsquery($1)
-func PhraseToTsquery(query string) Expression {
-	return tsQueryFnExpr{fn: "phraseto_tsquery", query: query}
+func PhraseToTsquery(query string) TsQueryExpr {
+	return TsQueryExpr{fn: "phraseto_tsquery", query: query}
 }
 
 // PhraseToTsqueryWithConfig returns phraseto_tsquery($1, $2) using an explicit text search configuration.
 //
 //	expr.PhraseToTsqueryWithConfig("english", "fast full text search") // phraseto_tsquery($1, $2)
-func PhraseToTsqueryWithConfig(config, query string) Expression {
-	return tsQueryFnExpr{fn: "phraseto_tsquery", query: query, config: config}
+func PhraseToTsqueryWithConfig(config, query string) TsQueryExpr {
+	return TsQueryExpr{fn: "phraseto_tsquery", query: query, config: config}
 }
 
 // WebsearchToTsquery returns websearch_to_tsquery($1).
 //
 //	expr.WebsearchToTsquery("grizzle -orm") // websearch_to_tsquery($1)
-func WebsearchToTsquery(query string) Expression {
-	return tsQueryFnExpr{fn: "websearch_to_tsquery", query: query}
+func WebsearchToTsquery(query string) TsQueryExpr {
+	return TsQueryExpr{fn: "websearch_to_tsquery", query: query}
 }
 
 // WebsearchToTsqueryWithConfig returns websearch_to_tsquery($1, $2) using an explicit text search configuration.
 //
 //	expr.WebsearchToTsqueryWithConfig("english", "grizzle -orm") // websearch_to_tsquery($1, $2)
-func WebsearchToTsqueryWithConfig(config, query string) Expression {
-	return tsQueryFnExpr{fn: "websearch_to_tsquery", query: query, config: config}
+func WebsearchToTsqueryWithConfig(config, query string) TsQueryExpr {
+	return TsQueryExpr{fn: "websearch_to_tsquery", query: query, config: config}
 }
 
-// tsQueryFnExpr represents a standalone tsquery constructor: fn($config, $query) or fn($query).
-type tsQueryFnExpr struct {
+// TsQueryExpr represents a standalone PostgreSQL tsquery constructor expression such as
+// to_tsquery($1), plainto_tsquery($1, $2), etc.
+//
+// It implements Expression, SelectableColumn, and colRefer, so it can be used in
+// WHERE/HAVING predicates, as arguments to TsRank/TsRankCd, and directly in SELECT lists:
+//
+//	query.Select(expr.ToTsquery("grizzle & orm").As("q")).From(ArticlesT)
+//	// → SELECT to_tsquery($1) AS "q" FROM "articles"
+type TsQueryExpr struct {
 	fn     string
 	config string
 	query  string
+	alias  string
 }
 
-func (e tsQueryFnExpr) ToSQL(ctx *BuildContext) string {
+func (e TsQueryExpr) renderCore(ctx *BuildContext) string {
 	if e.config != "" {
 		return e.fn + "(" + ctx.Add(e.config) + ", " + ctx.Add(e.query) + ")"
 	}
 	return e.fn + "(" + ctx.Add(e.query) + ")"
 }
+
+// ToSQL implements Expression. Includes AS alias when set (for SELECT lists).
+func (e TsQueryExpr) ToSQL(ctx *BuildContext) string {
+	s := e.renderCore(ctx)
+	if e.alias != "" {
+		s += " AS " + ctx.Quote(e.alias)
+	}
+	return s
+}
+
+// colRef implements colRefer (no alias — for use inside other expressions).
+func (e TsQueryExpr) colRef(ctx *BuildContext) string { return e.renderCore(ctx) }
+
+// ColumnName implements SelectableColumn.
+func (e TsQueryExpr) ColumnName() string {
+	if e.alias != "" {
+		return e.alias
+	}
+	return e.fn
+}
+
+// TableName implements SelectableColumn. Tsquery expressions have no table prefix.
+func (e TsQueryExpr) TableName() string { return "" }
+
+// As returns a copy with the given SELECT alias.
+func (e TsQueryExpr) As(alias string) TsQueryExpr { e.alias = alias; return e }
 
 // TsRank returns TS_RANK(col, tsquery_expr) — a ranking function for FTS results.
 // col is the tsvector column; tsq is the tsquery expression (use ToTsquery, PlainToTsquery, etc.).
