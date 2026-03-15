@@ -68,12 +68,14 @@ type Dialect interface {
 	// Callers targeting non-PostgreSQL dialects must avoid DISTINCT ON themselves.
 	SupportsDistinctOn() bool
 
-	// SupportsForUpdate reports whether the dialect supports row-level locking
-	// via FOR UPDATE and FOR SHARE. True for PostgreSQL and MySQL; false for SQLite,
-	// which uses file-level locking only.
+	// SupportsForUpdate reports whether the dialect supports row-level locking.
+	// True for PostgreSQL and MySQL; false for SQLite, which uses file-level
+	// locking only.
 	//
-	// The query builder gates FOR UPDATE / FOR SHARE generation on this flag.
-	// When false, locking clauses are silently dropped from the output SQL.
+	// Note: the shared-lock syntax differs by dialect — PostgreSQL uses FOR SHARE
+	// while MySQL uses LOCK IN SHARE MODE (see ForShareClause). The query builder
+	// gates all row-level locking clauses on this flag; when false, locking clauses
+	// are silently dropped from the output SQL.
 	SupportsForUpdate() bool
 
 	// SupportsForNoKeyUpdate reports whether the dialect supports the
@@ -90,8 +92,9 @@ type Dialect interface {
 	SupportsFullJoin() bool
 
 	// ForShareClause returns the SQL keyword phrase for a shared row lock.
-	// PostgreSQL/SQLite: "FOR SHARE". MySQL: "LOCK IN SHARE MODE".
-	// Returns "" for dialects that do not support row-level locking.
+	// PostgreSQL: "FOR SHARE". MySQL: "LOCK IN SHARE MODE".
+	// Returns "" for dialects that do not support row-level locking (e.g. SQLite).
+	// A non-empty value is only returned when SupportsForUpdate() is true.
 	ForShareClause() string
 }
 
