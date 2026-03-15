@@ -1644,6 +1644,80 @@ func TestSelect_ForKeyShare_MySQL(t *testing.T) {
 	}
 }
 
+// aliasedTable is a minimal TableSource whose alias differs from its name,
+// used to verify that the OF clause renders the alias and not the base name.
+type aliasedTable struct{ name, alias string }
+
+func (a aliasedTable) GrizTableName() string  { return a.name }
+func (a aliasedTable) GrizTableAlias() string { return a.alias }
+
+func TestSelect_ForUpdate_Of_Alias(t *testing.T) {
+	tbl := aliasedTable{name: "orders", alias: "o"}
+	q := query.Select().From(tbl).ForUpdate().Of(tbl)
+	got, _ := q.Build(dialect.Postgres)
+	want := `SELECT * FROM "orders" AS "o" FOR UPDATE OF "o"`
+	if got != want {
+		t.Errorf("OF alias\ngot:  %s\nwant: %s", got, want)
+	}
+}
+
+func TestSelect_ForUpdate_Of_NoAlias(t *testing.T) {
+	q := query.Select().From(ts.UsersT).ForUpdate().Of(ts.UsersT)
+	assertSQL(t, "FOR UPDATE OF no-alias",
+		q,
+		`SELECT * FROM "users" FOR UPDATE OF "users"`,
+		nil,
+	)
+}
+
+func TestSelect_ForShare_Of_Postgres(t *testing.T) {
+	tbl := aliasedTable{name: "orders", alias: "o"}
+	q := query.Select().From(tbl).ForShare().Of(tbl)
+	got, _ := q.Build(dialect.Postgres)
+	want := `SELECT * FROM "orders" AS "o" FOR SHARE OF "o"`
+	if got != want {
+		t.Errorf("FOR SHARE OF\ngot:  %s\nwant: %s", got, want)
+	}
+}
+
+func TestSelect_ForShare_Of_MySQL_Dropped(t *testing.T) {
+	// MySQL LOCK IN SHARE MODE does not support OF; it must be dropped.
+	tbl := aliasedTable{name: "orders", alias: "o"}
+	q := query.Select().From(tbl).ForShare().Of(tbl)
+	got, _ := q.Build(dialect.MySQL)
+	if strings.Contains(got, " OF ") {
+		t.Errorf("MySQL LOCK IN SHARE MODE must not emit OF clause, got: %s", got)
+	}
+	if !strings.Contains(got, "LOCK IN SHARE MODE") {
+		t.Errorf("expected LOCK IN SHARE MODE in: %s", got)
+	}
+}
+
+func TestSelect_ForUpdate_Of_MySQL_SingleTable(t *testing.T) {
+	// MySQL FOR UPDATE supports OF but only with a single table.
+	t1 := aliasedTable{name: "orders", alias: "o"}
+	t2 := aliasedTable{name: "items", alias: "i"}
+	q := query.Select().From(t1).ForUpdate().Of(t1, t2)
+	got, _ := q.Build(dialect.MySQL)
+	// Only the first table should appear.
+	if strings.Count(got, " OF ") != 1 {
+		t.Fatalf("expected exactly one OF clause in: %s", got)
+	}
+	if strings.Contains(got, `"i"`) {
+		t.Errorf("MySQL OF must drop extra tables, got: %s", got)
+	}
+}
+
+func TestSelect_ForUpdate_Of_SQLite_Dropped(t *testing.T) {
+	// SQLite has no row-level locking; the entire clause must be dropped.
+	tbl := aliasedTable{name: "orders", alias: "o"}
+	q := query.Select().From(tbl).ForUpdate().Of(tbl)
+	got, _ := q.Build(dialect.SQLite)
+	if strings.Contains(got, "FOR UPDATE") || strings.Contains(got, " OF ") {
+		t.Errorf("SQLite must drop all locking clauses, got: %s", got)
+	}
+}
+
 // -------------------------------------------------------------------
 // UPDATE / DELETE LIMIT tests
 // -------------------------------------------------------------------

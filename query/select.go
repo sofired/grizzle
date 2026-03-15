@@ -21,12 +21,13 @@ type SelectBuilder struct {
 	orderBy        []expr.OrderExpr
 	groupBy        []expr.SelectableColumn
 	having         expr.Expression
-	limit          int  // 0 = no limit
-	offset         int  // 0 = no offset
-	forUpdate      bool // append FOR UPDATE
-	forShare       bool // append FOR SHARE
-	forNoKeyUpdate bool // append FOR NO KEY UPDATE (PostgreSQL only)
-	forKeyShare    bool // append FOR KEY SHARE (PostgreSQL only)
+	limit          int           // 0 = no limit
+	offset         int           // 0 = no offset
+	forUpdate      bool          // append FOR UPDATE
+	forShare       bool          // append FOR SHARE
+	forNoKeyUpdate bool          // append FOR NO KEY UPDATE (PostgreSQL only)
+	forKeyShare    bool          // append FOR KEY SHARE (PostgreSQL only)
+	lockOf         []TableSource // OF table list for row-level locking (PostgreSQL/MySQL)
 }
 
 // cteClause holds a single WITH name AS (...) entry.
@@ -108,6 +109,30 @@ func (b *SelectBuilder) ForKeyShare() *SelectBuilder {
 	cp.forUpdate = false
 	cp.forShare = false
 	cp.forNoKeyUpdate = false
+	return &cp
+}
+
+// Of restricts the locking clause to specific tables, rendering
+// OF "alias1", "alias2" after the lock mode keyword.
+//
+// Each table is rendered using its alias (the name used in the FROM or JOIN
+// clause), not the underlying table name. PostgreSQL requires the alias when
+// the table is aliased; using the base name in that case produces an error.
+//
+//	query.Select().
+//	    From(OrdersT.As("o")).
+//	    ForUpdate().
+//	    Of(OrdersT.As("o"))
+//	// ... FOR UPDATE OF "o"
+//
+// Dialect-specific behaviour:
+//   - PostgreSQL: all specified tables are emitted.
+//   - MySQL: OF is supported for FOR UPDATE only (not LOCK IN SHARE MODE).
+//     Only the first table is used; extras are silently dropped.
+//   - SQLite: OF is silently ignored (SQLite has no row-level locking).
+func (b *SelectBuilder) Of(tables ...TableSource) *SelectBuilder {
+	cp := *b
+	cp.lockOf = append(append([]TableSource(nil), cp.lockOf...), tables...)
 	return &cp
 }
 
@@ -401,8 +426,34 @@ func (b *SelectBuilder) buildWith(ctx *expr.BuildContext) string {
 	if ctx.Dialect().SupportsForUpdate() {
 		if b.forUpdate {
 			sb.WriteString(" FOR UPDATE")
+			// OF table list: supported by PostgreSQL and MySQL (FOR UPDATE only).
+			if len(b.lockOf) > 0 {
+				sb.WriteString(" OF ")
+				tables := b.lockOf
+				if ctx.Dialect().Name() == "mysql" && len(tables) > 1 {
+					// MySQL only allows a single table in the OF list.
+					tables = tables[:1]
+				}
+				for i, t := range tables {
+					if i > 0 {
+						sb.WriteString(", ")
+					}
+					sb.WriteString(ctx.Quote(t.GrizTableAlias()))
+				}
+			}
 		} else if b.forShare {
-			sb.WriteString(" " + ctx.Dialect().ForShareClause())
+			forShareClause := ctx.Dialect().ForShareClause()
+			sb.WriteString(" " + forShareClause)
+			// OF table list: PostgreSQL FOR SHARE supports it; MySQL LOCK IN SHARE MODE does not.
+			if forShareClause == "FOR SHARE" && len(b.lockOf) > 0 {
+				sb.WriteString(" OF ")
+				for i, t := range b.lockOf {
+					if i > 0 {
+						sb.WriteString(", ")
+					}
+					sb.WriteString(ctx.Quote(t.GrizTableAlias()))
+				}
+			}
 		}
 	}
 	// FOR NO KEY UPDATE / FOR KEY SHARE are PostgreSQL-only locking modes.
