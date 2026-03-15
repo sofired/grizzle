@@ -210,15 +210,18 @@ func TestLeadWithOffset(t *testing.T) {
 }
 
 func TestLeadWithDefault(t *testing.T) {
-	w := expr.LeadWithDefault(ts.UsersT.Username, 1, "unknown").
+	w := expr.LeadWithDefault(ts.UsersT.Username, 1, expr.Lit("unknown")).
 		OrderBy(ts.UsersT.CreatedAt.Asc()).
 		As("next_user")
 
 	ctx := newPGCtx()
 	got := w.ToSQL(ctx)
-	want := `LEAD("users"."username", 1, unknown) OVER (ORDER BY "users"."created_at" ASC) AS "next_user"`
+	want := `LEAD("users"."username", 1, $1) OVER (ORDER BY "users"."created_at" ASC) AS "next_user"`
 	if got != want {
 		t.Errorf("got  %q\nwant %q", got, want)
+	}
+	if len(ctx.Args()) != 1 || ctx.Args()[0] != "unknown" {
+		t.Errorf("expected bound arg %q, got %v", "unknown", ctx.Args())
 	}
 }
 
@@ -237,13 +240,34 @@ func TestLagWithOffset(t *testing.T) {
 }
 
 func TestLagWithDefault(t *testing.T) {
-	w := expr.LagWithDefault(ts.UsersT.Username, 1, "none").
+	w := expr.LagWithDefault(ts.UsersT.Username, 1, expr.Lit("none")).
 		OrderBy(ts.UsersT.CreatedAt.Asc()).
 		As("prev_user")
 
 	ctx := newPGCtx()
 	got := w.ToSQL(ctx)
-	want := `LAG("users"."username", 1, none) OVER (ORDER BY "users"."created_at" ASC) AS "prev_user"`
+	want := `LAG("users"."username", 1, $1) OVER (ORDER BY "users"."created_at" ASC) AS "prev_user"`
+	if got != want {
+		t.Errorf("got  %q\nwant %q", got, want)
+	}
+	if len(ctx.Args()) != 1 || ctx.Args()[0] != "none" {
+		t.Errorf("expected bound arg %q, got %v", "none", ctx.Args())
+	}
+}
+
+// -------------------------------------------------------------------
+// WinCount emits COUNT(*)
+// -------------------------------------------------------------------
+
+func TestWinCount_EmitsStar(t *testing.T) {
+	w := expr.WinCount().
+		PartitionBy(ts.UsersT.RealmID).
+		OrderBy(ts.UsersT.CreatedAt.Asc()).
+		As("cnt")
+
+	ctx := newPGCtx()
+	got := w.ToSQL(ctx)
+	want := `COUNT(*) OVER (PARTITION BY "users"."realm_id" ORDER BY "users"."created_at" ASC) AS "cnt"`
 	if got != want {
 		t.Errorf("got  %q\nwant %q", got, want)
 	}

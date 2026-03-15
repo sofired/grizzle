@@ -13,16 +13,18 @@ expr.DenseRank()   // DENSE_RANK()
 ## Navigation functions
 
 ```go
-expr.Lead(db.UsersT.Score)                    // LEAD("score")
-expr.LeadWithOffset(db.UsersT.Score, 2)       // LEAD("score", 2)
-expr.LeadWithDefault(db.UsersT.Score, 1, 0)   // LEAD("score", 1, 0)
-expr.Lag(db.UsersT.Score)                     // LAG("score")
-expr.LagWithOffset(db.UsersT.Score, 2)        // LAG("score", 2)
-expr.LagWithDefault(db.UsersT.Score, 1, 0)    // LAG("score", 1, 0)
-expr.FirstValue(db.UsersT.Score)              // FIRST_VALUE("score")
-expr.LastValue(db.UsersT.Score)               // LAST_VALUE("score")
-expr.NthValue(db.UsersT.Score, 3)             // NTH_VALUE("score", 3)
+expr.Lead(db.UsersT.Score)                              // LEAD("score")
+expr.LeadWithOffset(db.UsersT.Score, 2)                 // LEAD("score", 2)
+expr.LeadWithDefault(db.UsersT.Score, 1, expr.Lit(0))   // LEAD("score", 1, $1) — binds 0
+expr.Lag(db.UsersT.Score)                               // LAG("score")
+expr.LagWithOffset(db.UsersT.Score, 2)                  // LAG("score", 2)
+expr.LagWithDefault(db.UsersT.Score, 1, expr.Lit(0))    // LAG("score", 1, $1) — binds 0
+expr.FirstValue(db.UsersT.Score)                        // FIRST_VALUE("score")
+expr.LastValue(db.UsersT.Score)                         // LAST_VALUE("score")
+expr.NthValue(db.UsersT.Score, 3)                       // NTH_VALUE("score", 3)
 ```
+
+The `defaultVal` argument for `LeadWithDefault` and `LagWithDefault` accepts any `Expression`. Use `expr.Lit(v)` to bind a Go value as a safe query parameter, or `expr.Raw("NULL")` for SQL keywords.
 
 ## Aggregate window functions
 

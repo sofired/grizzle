@@ -5,6 +5,12 @@ import (
 	"strings"
 )
 
+// intExpr renders a typed integer value as a raw SQL integer literal.
+// It is safe because the value is always a Go int, never user-controlled input.
+type intExpr struct{ v int }
+
+func (e intExpr) ToSQL(_ *BuildContext) string { return fmt.Sprintf("%d", e.v) }
+
 // -------------------------------------------------------------------
 // FrameBound — describes one end of a window frame
 // -------------------------------------------------------------------
@@ -123,7 +129,7 @@ func (f *frameClause) sql() string {
 type WindowExpr struct {
 	fn          string             // e.g. "ROW_NUMBER", "RANK", "SUM"
 	col         SelectableColumn   // nil for no-argument functions (ROW_NUMBER, RANK, etc.)
-	extraArgs   []string           // additional raw SQL arguments (e.g. NTH_VALUE offset)
+	extraArgs   []Expression       // additional arguments rendered via BuildContext (e.g. NTH_VALUE offset, LEAD default)
 	partitionBy []SelectableColumn // PARTITION BY columns
 	orderBy     []OrderExpr        // ORDER BY inside the window
 	frame       *frameClause       // optional ROWS/RANGE/GROUPS BETWEEN clause
@@ -139,8 +145,11 @@ func (w WindowExpr) ToSQL(ctx *BuildContext) string {
 		sb.WriteString(w.col.colRef(ctx))
 		for _, a := range w.extraArgs {
 			sb.WriteString(", ")
-			sb.WriteString(a)
+			sb.WriteString(a.ToSQL(ctx))
 		}
+	} else if w.fn == "COUNT" {
+		// COUNT with no column argument must emit COUNT(*), not COUNT().
+		sb.WriteString("*")
 	}
 	sb.WriteString(") OVER (")
 
@@ -260,19 +269,22 @@ func Lead(col SelectableColumn) WindowExpr { return WindowExpr{fn: "LEAD", col: 
 //	expr.LeadWithOffset(UsersT.Score, 2)
 //	// → LEAD("users"."score", 2) OVER (...)
 func LeadWithOffset(col SelectableColumn, offset int) WindowExpr {
-	return WindowExpr{fn: "LEAD", col: col, extraArgs: []string{fmt.Sprintf("%d", offset)}}
+	return WindowExpr{fn: "LEAD", col: col, extraArgs: []Expression{intExpr{offset}}}
 }
 
 // LeadWithDefault returns a LEAD(col, offset, default) window expression.
-// The defaultVal must be a literal SQL value (integer, float, boolean, or quoted string).
-// For safety, pass only constant values — not user-controlled input.
+// Pass expr.Lit(v) to bind a Go value as a safe parameter, or expr.Raw("NULL")
+// for SQL keywords:
 //
-//	expr.LeadWithDefault(UsersT.Score, 1, 0)
-//	// → LEAD("users"."score", 1, 0) OVER (...)
-func LeadWithDefault(col SelectableColumn, offset int, defaultVal any) WindowExpr {
-	return WindowExpr{fn: "LEAD", col: col, extraArgs: []string{
-		fmt.Sprintf("%d", offset),
-		fmt.Sprintf("%v", defaultVal),
+//	expr.LeadWithDefault(UsersT.Score, 1, expr.Lit(0))
+//	// → LEAD("users"."score", 1, $1) OVER (...)
+//
+//	expr.LeadWithDefault(UsersT.Username, 1, expr.Lit("unknown"))
+//	// → LEAD("users"."username", 1, $1) OVER (...)
+func LeadWithDefault(col SelectableColumn, offset int, defaultVal Expression) WindowExpr {
+	return WindowExpr{fn: "LEAD", col: col, extraArgs: []Expression{
+		intExpr{offset},
+		defaultVal,
 	}}
 }
 
@@ -284,19 +296,22 @@ func Lag(col SelectableColumn) WindowExpr { return WindowExpr{fn: "LAG", col: co
 //	expr.LagWithOffset(UsersT.Score, 2)
 //	// → LAG("users"."score", 2) OVER (...)
 func LagWithOffset(col SelectableColumn, offset int) WindowExpr {
-	return WindowExpr{fn: "LAG", col: col, extraArgs: []string{fmt.Sprintf("%d", offset)}}
+	return WindowExpr{fn: "LAG", col: col, extraArgs: []Expression{intExpr{offset}}}
 }
 
 // LagWithDefault returns a LAG(col, offset, default) window expression.
-// The defaultVal must be a literal SQL value (integer, float, boolean, or quoted string).
-// For safety, pass only constant values — not user-controlled input.
+// Pass expr.Lit(v) to bind a Go value as a safe parameter, or expr.Raw("NULL")
+// for SQL keywords:
 //
-//	expr.LagWithDefault(UsersT.Score, 1, 0)
-//	// → LAG("users"."score", 1, 0) OVER (...)
-func LagWithDefault(col SelectableColumn, offset int, defaultVal any) WindowExpr {
-	return WindowExpr{fn: "LAG", col: col, extraArgs: []string{
-		fmt.Sprintf("%d", offset),
-		fmt.Sprintf("%v", defaultVal),
+//	expr.LagWithDefault(UsersT.Score, 1, expr.Lit(0))
+//	// → LAG("users"."score", 1, $1) OVER (...)
+//
+//	expr.LagWithDefault(UsersT.Username, 1, expr.Lit("unknown"))
+//	// → LAG("users"."username", 1, $1) OVER (...)
+func LagWithDefault(col SelectableColumn, offset int, defaultVal Expression) WindowExpr {
+	return WindowExpr{fn: "LAG", col: col, extraArgs: []Expression{
+		intExpr{offset},
+		defaultVal,
 	}}
 }
 
@@ -312,7 +327,7 @@ func LastValue(col SelectableColumn) WindowExpr { return WindowExpr{fn: "LAST_VA
 //	expr.NthValue(UsersT.Score, 3)
 //	// → NTH_VALUE("users"."score", 3) OVER (...)
 func NthValue(col SelectableColumn, n int) WindowExpr {
-	return WindowExpr{fn: "NTH_VALUE", col: col, extraArgs: []string{fmt.Sprintf("%d", n)}}
+	return WindowExpr{fn: "NTH_VALUE", col: col, extraArgs: []Expression{intExpr{n}}}
 }
 
 // WinSum returns a SUM(col) window expression (aggregate used as a window function).
