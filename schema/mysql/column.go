@@ -27,6 +27,7 @@ package mysql
 
 import (
 	"fmt"
+	"strings"
 
 	pg "github.com/sofired/grizzle/schema/pg"
 )
@@ -195,6 +196,131 @@ func (b *DoubleBuilder) Default(val float64) *DoubleBuilder {
 	return b
 }
 func (b *DoubleBuilder) Build(name string) pg.ColumnDef {
+	if b.def.Name == "" {
+		b.def.Name = name
+	}
+	return b.def
+}
+
+// MediumIntBuilder builds a MEDIUMINT column definition.
+type MediumIntBuilder struct {
+	def pg.ColumnDef
+}
+
+// MediumInt starts a MEDIUMINT column (3-byte signed integer, -8388608 to 8388607).
+func MediumInt() *MediumIntBuilder {
+	b := &MediumIntBuilder{}
+	b.def.SQLType = "mediumint"
+	b.def.GoType = pg.GoTypeInt
+	return b
+}
+
+func (b *MediumIntBuilder) NotNull() *MediumIntBuilder { b.def.NotNull = true; return b }
+func (b *MediumIntBuilder) PrimaryKey() *MediumIntBuilder {
+	b.def.PrimaryKey = true
+	b.def.NotNull = true
+	return b
+}
+func (b *MediumIntBuilder) Default(val int) *MediumIntBuilder {
+	b.def.HasDefault = true
+	b.def.DefaultExpr = fmt.Sprintf("%d", val)
+	return b
+}
+func (b *MediumIntBuilder) Build(name string) pg.ColumnDef {
+	if b.def.Name == "" {
+		b.def.Name = name
+	}
+	return b.def
+}
+
+// YearBuilder builds a YEAR column definition.
+type YearBuilder struct {
+	def pg.ColumnDef
+}
+
+// Year starts a YEAR column (MySQL YEAR type, stores 1901–2155 as an integer).
+func Year() *YearBuilder {
+	b := &YearBuilder{}
+	b.def.SQLType = "year"
+	b.def.GoType = pg.GoTypeInt
+	return b
+}
+
+func (b *YearBuilder) NotNull() *YearBuilder { b.def.NotNull = true; return b }
+func (b *YearBuilder) Default(val int) *YearBuilder {
+	b.def.HasDefault = true
+	b.def.DefaultExpr = fmt.Sprintf("%d", val)
+	return b
+}
+func (b *YearBuilder) Build(name string) pg.ColumnDef {
+	if b.def.Name == "" {
+		b.def.Name = name
+	}
+	return b.def
+}
+
+// EnumBuilder builds a MySQL ENUM column definition.
+type EnumBuilder struct {
+	def pg.ColumnDef
+}
+
+// Enum starts a MySQL ENUM column with the given allowed values.
+// The values are stored as part of the SQL type: enum('v1','v2',...).
+// The Go type is string.
+//
+//	mysql.C("status", mysql.Enum("active", "inactive", "pending").NotNull())
+func Enum(values ...string) *EnumBuilder {
+	b := &EnumBuilder{}
+	parts := make([]string, len(values))
+	for i, v := range values {
+		parts[i] = "'" + strings.ReplaceAll(v, "'", "''") + "'"
+	}
+	b.def.SQLType = "enum(" + strings.Join(parts, ",") + ")"
+	b.def.GoType = pg.GoTypeString
+	return b
+}
+
+func (b *EnumBuilder) NotNull() *EnumBuilder { b.def.NotNull = true; return b }
+func (b *EnumBuilder) Default(val string) *EnumBuilder {
+	b.def.HasDefault = true
+	b.def.DefaultExpr = fmt.Sprintf("'%s'", strings.ReplaceAll(val, "'", "''"))
+	return b
+}
+func (b *EnumBuilder) Build(name string) pg.ColumnDef {
+	if b.def.Name == "" {
+		b.def.Name = name
+	}
+	return b.def
+}
+
+// SetBuilder builds a MySQL SET column definition.
+type SetBuilder struct {
+	def pg.ColumnDef
+}
+
+// Set starts a MySQL SET column with the given allowed values.
+// The values are stored as part of the SQL type: set('v1','v2',...).
+// A SET column can hold zero or more of the listed values; the Go type is string.
+//
+//	mysql.C("tags", mysql.Set("a", "b", "c"))
+func Set(values ...string) *SetBuilder {
+	b := &SetBuilder{}
+	parts := make([]string, len(values))
+	for i, v := range values {
+		parts[i] = "'" + strings.ReplaceAll(v, "'", "''") + "'"
+	}
+	b.def.SQLType = "set(" + strings.Join(parts, ",") + ")"
+	b.def.GoType = pg.GoTypeString
+	return b
+}
+
+func (b *SetBuilder) NotNull() *SetBuilder { b.def.NotNull = true; return b }
+func (b *SetBuilder) Default(val string) *SetBuilder {
+	b.def.HasDefault = true
+	b.def.DefaultExpr = fmt.Sprintf("'%s'", strings.ReplaceAll(val, "'", "''"))
+	return b
+}
+func (b *SetBuilder) Build(name string) pg.ColumnDef {
 	if b.def.Name == "" {
 		b.def.Name = name
 	}

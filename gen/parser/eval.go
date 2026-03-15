@@ -160,6 +160,38 @@ func applyBaseType(def *pg.ColumnDef, baseFn string, args []any) error {
 		def.SQLType = fmt.Sprintf("numeric(%d,%d)", p, s)
 		def.GoType = pg.GoTypeFloat64
 
+	// MySQL-specific: MEDIUMINT (3-byte signed integer).
+	case "MediumInt":
+		def.SQLType = "mediumint"
+		def.GoType = pg.GoTypeInt
+
+	// MySQL-specific: YEAR (stores 1901–2155 as an integer).
+	case "Year":
+		def.SQLType = "year"
+		def.GoType = pg.GoTypeInt
+
+	// MySQL-specific: ENUM('v1','v2',...) — inline enumeration.
+	case "Enum":
+		parts := make([]string, 0, len(args))
+		for _, a := range args {
+			if s, ok := a.(string); ok {
+				parts = append(parts, "'"+strings.ReplaceAll(s, "'", "''")+"'")
+			}
+		}
+		def.SQLType = "enum(" + strings.Join(parts, ",") + ")"
+		def.GoType = pg.GoTypeString
+
+	// MySQL-specific: SET('v1','v2',...) — multi-value set column.
+	case "Set":
+		parts := make([]string, 0, len(args))
+		for _, a := range args {
+			if s, ok := a.(string); ok {
+				parts = append(parts, "'"+strings.ReplaceAll(s, "'", "''")+"'")
+			}
+		}
+		def.SQLType = "set(" + strings.Join(parts, ",") + ")"
+		def.GoType = pg.GoTypeString
+
 	default:
 		return fmt.Errorf("unknown column builder %q", baseFn)
 	}
