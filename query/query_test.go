@@ -2397,10 +2397,10 @@ func TestWithRecursive_AndRegularCTE(t *testing.T) {
 // noCTEDialect is a test-only dialect that reports SupportsCTE() = false.
 type noCTEDialect struct{}
 
-func (noCTEDialect) Name() string                  { return "no_cte" }
-func (noCTEDialect) Placeholder(_ int) string      { return "?" }
-func (noCTEDialect) QuoteIdent(n string) string    { return `"` + n + `"` }
-func (noCTEDialect) SupportsReturning() bool       { return false }
+func (noCTEDialect) Name() string               { return "no_cte" }
+func (noCTEDialect) Placeholder(_ int) string   { return "?" }
+func (noCTEDialect) QuoteIdent(n string) string { return `"` + n + `"` }
+func (noCTEDialect) SupportsReturning() bool    { return false }
 func (noCTEDialect) UpsertStyle() dialect.UpsertStyle {
 	return dialect.UpsertOnConflict
 }
