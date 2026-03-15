@@ -10,24 +10,24 @@ import (
 	"strings"
 )
 
-// ParsedColumn holds the raw parsed information extracted from a pg.C(...) call.
+// ParsedColumn holds the raw parsed information extracted from a pg.C / mysql.C / sqlite.C call.
 type ParsedColumn struct {
 	Name  string
 	Chain *ChainResult // e.g. BaseFn="Varchar", BaseArgs=[255], Methods=[{NotNull}, {Default, ["foo"]}]
 }
 
-// ParsedTable holds extracted information from a pg.Table(...) declaration.
+// ParsedTable holds extracted information from a pg/mysql/sqlite Table(...) declaration.
 type ParsedTable struct {
 	VarName    string // Go variable name, e.g. "Users"
 	TableName  string // SQL table name, e.g. "users"
-	SchemaName string // SQL schema if pg.SchemaTable used
+	SchemaName string // SQL schema if SchemaTable used (any dialect)
 	Columns    []ParsedColumn
 	// RawConstraintsNode is kept for future Kit/migration work but not used in codegen.
 	HasConstraints bool
 }
 
-// ParseDir scans a directory for Go files and returns all pg.Table / pg.SchemaTable
-// declarations found. It skips _test.go files and *_gen.go files.
+// ParseDir scans a directory for Go files and returns all pg/mysql/sqlite Table /
+// SchemaTable declarations found. It skips _test.go files and *_gen.go files.
 func ParseDir(dir string) ([]*ParsedTable, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -56,7 +56,8 @@ func ParseDir(dir string) ([]*ParsedTable, error) {
 	return tables, nil
 }
 
-// ParseFile parses a single Go source file and extracts pg.Table/SchemaTable declarations.
+// ParseFile parses a single Go source file and extracts Table/SchemaTable declarations
+// from any supported dialect (pg, mysql, sqlite).
 func ParseFile(path string) ([]*ParsedTable, error) {
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, path, nil, 0)
@@ -70,6 +71,8 @@ func ParseFile(path string) ([]*ParsedTable, error) {
 //
 //	var X = pg.Table("name", pg.C(...), ...).WithConstraints(...)
 //	var X = pg.SchemaTable("schema", "name", pg.C(...), ...)
+//	var X = mysql.Table("name", mysql.C(...), ...)
+//	var X = sqlite.Table("name", sqlite.C(...), ...)
 func extractTables(f *ast.File) ([]*ParsedTable, error) {
 	var tables []*ParsedTable
 
@@ -96,11 +99,12 @@ func extractTables(f *ast.File) ([]*ParsedTable, error) {
 	return tables, nil
 }
 
-// tryExtractTable attempts to parse an expression as a pg.Table or pg.SchemaTable call.
+// tryExtractTable attempts to parse an expression as a Table or SchemaTable call
+// from any supported dialect (pg, mysql, sqlite).
 // Returns nil, nil if the expression is not a table declaration.
 func tryExtractTable(varName string, expr ast.Expr) (*ParsedTable, error) {
-	// The value may be a direct call: pg.Table(...) or pg.SchemaTable(...)
-	// OR a method chain on it: pg.Table(...).WithConstraints(...)
+	// The value may be a direct call: <dialect>.Table(...) or <dialect>.SchemaTable(...)
+	// OR a method chain on it: <dialect>.Table(...).WithConstraints(...)
 	// We strip .WithConstraints() and similar suffixes to get the core call.
 	core, hasConstraints := stripTableSuffix(expr)
 
@@ -155,7 +159,7 @@ func tryExtractTable(varName string, expr ast.Expr) (*ParsedTable, error) {
 		return nil, nil
 	}
 
-	// Parse each pg.C("col_name", <chain>) argument.
+	// Parse each <dialect>.C("col_name", <chain>) argument.
 	cols, err := extractColumns(colArgs)
 	if err != nil {
 		return nil, err
@@ -171,7 +175,7 @@ func tryExtractTable(varName string, expr ast.Expr) (*ParsedTable, error) {
 }
 
 // stripTableSuffix removes .WithConstraints(...) and .Build() suffixes from a
-// table expression, returning the inner pg.Table(...) call.
+// table expression, returning the inner Table(...) call.
 func stripTableSuffix(expr ast.Expr) (inner ast.Expr, hasConstraints bool) {
 	call, ok := expr.(*ast.CallExpr)
 	if !ok {
@@ -193,7 +197,7 @@ func stripTableSuffix(expr ast.Expr) (inner ast.Expr, hasConstraints bool) {
 	}
 }
 
-// extractColumns parses a slice of pg.C("name", <chain>) AST arguments.
+// extractColumns parses a slice of <dialect>.C("name", <chain>) AST arguments.
 func extractColumns(args []ast.Expr) ([]ParsedColumn, error) {
 	var cols []ParsedColumn
 	for _, arg := range args {
@@ -208,7 +212,7 @@ func extractColumns(args []ast.Expr) ([]ParsedColumn, error) {
 	return cols, nil
 }
 
-// extractColumn parses: pg.C("col_name", <builder_chain>)
+// extractColumn parses: <dialect>.C("col_name", <builder_chain>)
 func extractColumn(arg ast.Expr) (*ParsedColumn, error) {
 	call, ok := arg.(*ast.CallExpr)
 	if !ok {
