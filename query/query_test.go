@@ -1585,6 +1585,60 @@ func TestSelect_DistinctOn_NoopOnSQLite(t *testing.T) {
 	}
 }
 
+func TestSelect_DistinctOn_AliasedFuncExprStripped(t *testing.T) {
+	// DISTINCT ON must not include AS alias — PostgreSQL rejects aliases inside
+	// DISTINCT ON (...). Aliased FuncExpr should render without the alias there.
+	upper := expr.Upper(ts.UsersT.Username).As("uname")
+	assertSQL(t, "DISTINCT ON aliased FuncExpr strips alias",
+		query.Select(upper).
+			From(ts.UsersT).
+			DistinctOn(upper).
+			OrderBy(ts.UsersT.Username.Asc()),
+		`SELECT DISTINCT ON (UPPER("users"."username")) UPPER("users"."username") AS "uname" FROM "users" ORDER BY "users"."username" ASC`,
+		nil,
+	)
+}
+
+func TestSelect_DistinctOn_AliasedAggExprStripped(t *testing.T) {
+	// Aliased AggExpr passed to DistinctOn must render without AS alias inside
+	// the DISTINCT ON (...) clause.
+	cnt := expr.CountCol(ts.UsersT.ID).As("cnt")
+	gotSQL, _ := query.Select(cnt).
+		From(ts.UsersT).
+		DistinctOn(cnt).
+		Build(dialect.Postgres)
+	const want = `SELECT DISTINCT ON (COUNT("users"."id")) COUNT("users"."id") AS "cnt" FROM "users"`
+	if gotSQL != want {
+		t.Errorf("DISTINCT ON aliased AggExpr SQL mismatch\n got:  %s\nwant: %s", gotSQL, want)
+	}
+}
+
+func TestSelect_DistinctOn_ZeroArgsIsNoop(t *testing.T) {
+	// DistinctOn() with zero arguments must be a no-op and must not clear a
+	// previously set Distinct() flag or any prior DistinctOn() state.
+
+	// Case 1: calling DistinctOn() after Distinct() must leave DISTINCT intact.
+	assertSQL(t, "DistinctOn() zero args after Distinct is no-op",
+		query.Select(ts.UsersT.ID).
+			From(ts.UsersT).
+			Distinct().
+			DistinctOn(), // zero args — should not clear DISTINCT
+		`SELECT DISTINCT "users"."id" FROM "users"`,
+		nil,
+	)
+
+	// Case 2: calling DistinctOn() after DistinctOn(col) must leave the original
+	// DISTINCT ON intact.
+	assertSQL(t, "DistinctOn() zero args after DistinctOn(col) is no-op",
+		query.Select(ts.UsersT.ID).
+			From(ts.UsersT).
+			DistinctOn(ts.UsersT.RealmID).
+			DistinctOn(), // zero args — should not clear DISTINCT ON
+		`SELECT DISTINCT ON ("users"."realm_id") "users"."id" FROM "users"`,
+		nil,
+	)
+}
+
 // -------------------------------------------------------------------
 // NULLS FIRST / NULLS LAST tests
 // -------------------------------------------------------------------

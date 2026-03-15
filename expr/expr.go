@@ -12,6 +12,17 @@ type Expression interface {
 	ToSQL(ctx *BuildContext) string
 }
 
+// BareExpression is an optional extension of Expression for types that support
+// rendering without a SELECT alias. It is implemented by aliasable expression
+// types (FuncExpr, AggExpr, ArithExpr, CastExpr) and is used by the query
+// builder when a bare expression is required — for example, inside DISTINCT ON
+// (...), where PostgreSQL does not permit AS aliases.
+type BareExpression interface {
+	Expression
+	// ToSQLBare renders the expression without any AS alias suffix.
+	ToSQLBare(ctx *BuildContext) string
+}
+
 // -------------------------------------------------------------------
 // Logical combinators
 // -------------------------------------------------------------------

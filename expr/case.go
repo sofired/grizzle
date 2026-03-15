@@ -55,8 +55,8 @@ func (c *CaseExpr) As(alias string) *CaseExpr {
 	return &cp
 }
 
-// ToSQL renders the CASE expression.
-func (c *CaseExpr) ToSQL(ctx *BuildContext) string {
+// renderCore renders the CASE expression without any alias.
+func (c *CaseExpr) renderCore(ctx *BuildContext) string {
 	var sb strings.Builder
 	sb.WriteString("CASE")
 	for _, w := range c.whens {
@@ -70,15 +70,23 @@ func (c *CaseExpr) ToSQL(ctx *BuildContext) string {
 		sb.WriteString(c.else_.ToSQL(ctx))
 	}
 	sb.WriteString(" END")
-	if c.alias != "" {
-		sb.WriteString(" AS ")
-		sb.WriteString(ctx.Quote(c.alias))
-	}
 	return sb.String()
 }
 
+// ToSQL renders the CASE expression.
+func (c *CaseExpr) ToSQL(ctx *BuildContext) string {
+	s := c.renderCore(ctx)
+	if c.alias != "" {
+		s += " AS " + ctx.Quote(c.alias)
+	}
+	return s
+}
+
+// ToSQLBare implements BareExpression. Renders the CASE expression without any alias.
+func (c *CaseExpr) ToSQLBare(ctx *BuildContext) string { return c.renderCore(ctx) }
+
 // colRef implements colRefer so CaseExpr can appear in OrderExpr and binary expressions.
-func (c *CaseExpr) colRef(ctx *BuildContext) string { return c.ToSQL(ctx) }
+func (c *CaseExpr) colRef(ctx *BuildContext) string { return c.renderCore(ctx) }
 
 // ColumnName implements SelectableColumn. Returns the alias if set, otherwise "case".
 func (c *CaseExpr) ColumnName() string {
@@ -153,8 +161,8 @@ func (c *SimpleCaseExpr) As(alias string) *SimpleCaseExpr {
 	return &cp
 }
 
-// ToSQL renders the simple CASE expression.
-func (c *SimpleCaseExpr) ToSQL(ctx *BuildContext) string {
+// renderCore renders the simple CASE expression without any alias.
+func (c *SimpleCaseExpr) renderCore(ctx *BuildContext) string {
 	var sb strings.Builder
 	sb.WriteString("CASE ")
 	sb.WriteString(c.subject.colRef(ctx))
@@ -169,14 +177,22 @@ func (c *SimpleCaseExpr) ToSQL(ctx *BuildContext) string {
 		sb.WriteString(c.else_.ToSQL(ctx))
 	}
 	sb.WriteString(" END")
-	if c.alias != "" {
-		sb.WriteString(" AS ")
-		sb.WriteString(ctx.Quote(c.alias))
-	}
 	return sb.String()
 }
 
-func (c *SimpleCaseExpr) colRef(ctx *BuildContext) string { return c.ToSQL(ctx) }
+// ToSQL renders the simple CASE expression.
+func (c *SimpleCaseExpr) ToSQL(ctx *BuildContext) string {
+	s := c.renderCore(ctx)
+	if c.alias != "" {
+		s += " AS " + ctx.Quote(c.alias)
+	}
+	return s
+}
+
+// ToSQLBare implements BareExpression. Renders the simple CASE expression without any alias.
+func (c *SimpleCaseExpr) ToSQLBare(ctx *BuildContext) string { return c.renderCore(ctx) }
+
+func (c *SimpleCaseExpr) colRef(ctx *BuildContext) string { return c.renderCore(ctx) }
 func (c *SimpleCaseExpr) ColumnName() string {
 	if c.alias != "" {
 		return c.alias

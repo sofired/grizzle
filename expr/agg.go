@@ -20,10 +20,8 @@ type AggExpr struct {
 	alias    string // optional AS alias (for SELECT only)
 }
 
-// ToSQL renders the aggregate function call, including AS alias when set.
-// This is the form used in SELECT lists. For HAVING/ORDER BY, create the
-// aggregate without As() so no alias is emitted.
-func (a AggExpr) ToSQL(ctx *BuildContext) string {
+// renderCore renders the aggregate function call without any alias.
+func (a AggExpr) renderCore(ctx *BuildContext) string {
 	var arg string
 	if a.col == nil {
 		arg = "*"
@@ -33,15 +31,25 @@ func (a AggExpr) ToSQL(ctx *BuildContext) string {
 	if a.distinct {
 		arg = "DISTINCT " + arg
 	}
-	result := a.fn + "(" + arg + ")"
+	return a.fn + "(" + arg + ")"
+}
+
+// ToSQL renders the aggregate function call, including AS alias when set.
+// This is the form used in SELECT lists. For HAVING/ORDER BY, create the
+// aggregate without As() so no alias is emitted.
+func (a AggExpr) ToSQL(ctx *BuildContext) string {
+	result := a.renderCore(ctx)
 	if a.alias != "" {
 		result += " AS " + ctx.Quote(a.alias)
 	}
 	return result
 }
 
+// ToSQLBare implements BareExpression. Renders the aggregate call without any alias.
+func (a AggExpr) ToSQLBare(ctx *BuildContext) string { return a.renderCore(ctx) }
+
 // colRef implements colRefer so AggExpr can be embedded in OrderExpr.
-func (a AggExpr) colRef(ctx *BuildContext) string { return a.ToSQL(ctx) }
+func (a AggExpr) colRef(ctx *BuildContext) string { return a.renderCore(ctx) }
 
 // ColumnName implements SelectableColumn. Returns the alias if set, otherwise
 // the lower-case function name.

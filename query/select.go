@@ -79,6 +79,9 @@ func (b *SelectBuilder) Distinct() *SelectBuilder {
 //	// FROM "users"
 //	// ORDER BY "users"."realm_id" ASC, "users"."created_at" DESC
 func (b *SelectBuilder) DistinctOn(cols ...expr.SelectableColumn) *SelectBuilder {
+	if len(cols) == 0 {
+		return b
+	}
 	cp := *b
 	cp.distinct = false
 	cp.distinctOn = append([]expr.SelectableColumn(nil), cols...)
@@ -316,7 +319,7 @@ func (b *SelectBuilder) buildWith(ctx *expr.BuildContext) string {
 			if i > 0 {
 				sb.WriteString(", ")
 			}
-			sb.WriteString(selectColSQL(ctx, c))
+			sb.WriteString(distinctOnColSQL(ctx, c))
 		}
 		sb.WriteString(") ")
 	} else if b.distinct {
@@ -419,6 +422,21 @@ func (b *SelectBuilder) buildWith(ctx *expr.BuildContext) string {
 // ToSQL is called directly so the aggregate function syntax is preserved.
 // For plain columns the standard quoted "table"."col" form is returned.
 func selectColSQL(ctx *expr.BuildContext, c expr.SelectableColumn) string {
+	if e, ok := c.(expr.Expression); ok {
+		return e.ToSQL(ctx)
+	}
+	return ctx.ColRef(c.TableName(), c.ColumnName())
+}
+
+// distinctOnColSQL produces the SQL fragment for a column inside a DISTINCT ON (...)
+// clause. PostgreSQL does not permit AS aliases inside DISTINCT ON, so aliased
+// expressions must be rendered without their alias. Types that implement
+// expr.BareExpression provide a ToSQLBare method for exactly this purpose.
+// Plain columns are rendered using their standard quoted reference.
+func distinctOnColSQL(ctx *expr.BuildContext, c expr.SelectableColumn) string {
+	if be, ok := c.(expr.BareExpression); ok {
+		return be.ToSQLBare(ctx)
+	}
 	if e, ok := c.(expr.Expression); ok {
 		return e.ToSQL(ctx)
 	}

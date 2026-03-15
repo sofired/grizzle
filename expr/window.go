@@ -24,8 +24,8 @@ type WindowExpr struct {
 	alias       string             // optional AS alias
 }
 
-// ToSQL renders the window function including the OVER clause and optional alias.
-func (w WindowExpr) ToSQL(ctx *BuildContext) string {
+// renderCore renders the window function and OVER clause without any alias.
+func (w WindowExpr) renderCore(ctx *BuildContext) string {
 	var sb strings.Builder
 	sb.WriteString(w.fn)
 	sb.WriteString("(")
@@ -51,16 +51,23 @@ func (w WindowExpr) ToSQL(ctx *BuildContext) string {
 	}
 	sb.WriteString(strings.Join(parts, " "))
 	sb.WriteString(")")
-
-	if w.alias != "" {
-		sb.WriteString(" AS ")
-		sb.WriteString(ctx.Quote(w.alias))
-	}
 	return sb.String()
 }
 
+// ToSQL renders the window function including the OVER clause and optional alias.
+func (w WindowExpr) ToSQL(ctx *BuildContext) string {
+	s := w.renderCore(ctx)
+	if w.alias != "" {
+		s += " AS " + ctx.Quote(w.alias)
+	}
+	return s
+}
+
+// ToSQLBare implements BareExpression. Renders the window function without any alias.
+func (w WindowExpr) ToSQLBare(ctx *BuildContext) string { return w.renderCore(ctx) }
+
 // colRef implements colRefer so WindowExpr can appear in OrderExpr and binary expressions.
-func (w WindowExpr) colRef(ctx *BuildContext) string { return w.ToSQL(ctx) }
+func (w WindowExpr) colRef(ctx *BuildContext) string { return w.renderCore(ctx) }
 
 // ColumnName implements SelectableColumn. Returns the alias if set, otherwise
 // the lower-case function name.

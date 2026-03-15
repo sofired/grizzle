@@ -79,6 +79,9 @@ func (f FuncExpr) ToSQL(ctx *BuildContext) string {
 	return s
 }
 
+// ToSQLBare implements BareExpression. Renders the function call without any alias.
+func (f FuncExpr) ToSQLBare(ctx *BuildContext) string { return f.renderCore(ctx) }
+
 // colRef implements colRefer (no alias — for use inside other expressions).
 func (f FuncExpr) colRef(ctx *BuildContext) string { return f.renderCore(ctx) }
 
@@ -156,6 +159,9 @@ func (a ArithExpr) ToSQL(ctx *BuildContext) string {
 	return s
 }
 
+// ToSQLBare implements BareExpression. Renders the arithmetic expression without any alias.
+func (a ArithExpr) ToSQLBare(ctx *BuildContext) string { return a.renderCore(ctx) }
+
 // colRef implements colRefer (no alias — for use inside other expressions).
 func (a ArithExpr) colRef(ctx *BuildContext) string { return a.renderCore(ctx) }
 
@@ -227,6 +233,9 @@ func (e CastExpr) ToSQL(ctx *BuildContext) string {
 	}
 	return s
 }
+
+// ToSQLBare implements BareExpression. Renders the CAST expression without any alias.
+func (e CastExpr) ToSQLBare(ctx *BuildContext) string { return e.renderCore(ctx) }
 
 func (e CastExpr) colRef(ctx *BuildContext) string { return e.renderCore(ctx) }
 func (e CastExpr) ColumnName() string {
