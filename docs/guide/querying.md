@@ -205,3 +205,48 @@ query.Select().From(db.UsersT).
 ::: warning
 Never pass user-controlled input to `expr.Raw`. Use parameterized expressions whenever possible.
 :::
+
+## Pessimistic locking
+
+Use `ForUpdate()` or `ForShare()` to lock rows for the duration of a transaction.
+
+```go
+// Lock selected rows against concurrent updates (PostgreSQL, MySQL).
+users, err := pgxdb.ScanAll[db.UserSelect](
+    d.Query(ctx,
+        query.Select().
+            From(db.UsersT).
+            Where(db.UsersT.Status.EQ("active")).
+            ForUpdate(),
+    ),
+)
+```
+
+### Restricting locks with OF
+
+Pass `Of(table)` to lock only specific tables in a multi-table join:
+
+```go
+// Only lock orders rows, not the joined items rows.
+sql, args := query.Select().
+    From(db.OrdersT.As("o")).
+    LeftJoin(db.ItemsT.As("i"), db.ItemsT.OrderID.EQ(db.OrdersT.ID)).
+    ForUpdate().
+    Of(db.OrdersT.As("o")).
+    Build(dialect.Postgres)
+// SELECT … FOR UPDATE OF "o"
+```
+
+Each table passed to `Of()` is identified by its **alias** (the name used in `FROM`/`JOIN`), not the underlying table name. Using the base table name when an alias is in scope causes a PostgreSQL error.
+
+`Of()` and `ForUpdate()`/`ForShare()` can be called in any order.
+
+### Dialect behaviour
+
+| | `ForUpdate()` | `ForShare()` | `Of()` |
+|---|---|---|---|
+| **PostgreSQL** | `FOR UPDATE` | `FOR SHARE` | Emits all tables |
+| **MySQL** | `FOR UPDATE` | `LOCK IN SHARE MODE` | Emitted for `FOR UPDATE`; silently dropped for `LOCK IN SHARE MODE` |
+| **SQLite** | Silently dropped | Silently dropped | Silently dropped |
+
+See [Dialect comparison](../reference/dialects.md) for the full feature table.

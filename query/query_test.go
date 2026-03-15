@@ -1693,18 +1693,32 @@ func TestSelect_ForShare_Of_MySQL_Dropped(t *testing.T) {
 	}
 }
 
-func TestSelect_ForUpdate_Of_MySQL_SingleTable(t *testing.T) {
-	// MySQL FOR UPDATE supports OF but only with a single table.
+func TestSelect_ForUpdate_Of_MySQL_MultiTable(t *testing.T) {
+	// MySQL 8.0+ FOR UPDATE supports OF with multiple tables.
 	t1 := aliasedTable{name: "orders", alias: "o"}
 	t2 := aliasedTable{name: "items", alias: "i"}
 	q := query.Select().From(t1).ForUpdate().Of(t1, t2)
 	got, _ := q.Build(dialect.MySQL)
-	// Only the first table should appear.
 	if strings.Count(got, " OF ") != 1 {
 		t.Fatalf("expected exactly one OF clause in: %s", got)
 	}
-	if strings.Contains(got, `"i"`) {
-		t.Errorf("MySQL OF must drop extra tables, got: %s", got)
+	// MySQL uses backtick quoting.
+	if !strings.Contains(got, "`o`") {
+		t.Errorf("expected first table alias `o` in OF clause: %s", got)
+	}
+	if !strings.Contains(got, "`i`") {
+		t.Errorf("expected second table alias `i` in OF clause: %s", got)
+	}
+}
+
+func TestSelect_Of_BeforeForUpdate(t *testing.T) {
+	// Of() can precede ForUpdate(); call order does not matter.
+	tbl := aliasedTable{name: "orders", alias: "o"}
+	q := query.Select().From(tbl).Of(tbl).ForUpdate()
+	got, _ := q.Build(dialect.Postgres)
+	want := `SELECT * FROM "orders" AS "o" FOR UPDATE OF "o"`
+	if got != want {
+		t.Errorf("Of before ForUpdate\ngot:  %s\nwant: %s", got, want)
 	}
 }
 

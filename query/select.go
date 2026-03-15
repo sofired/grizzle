@@ -76,7 +76,7 @@ func (b *SelectBuilder) ForUpdate() *SelectBuilder {
 
 // ForShare appends FOR SHARE (PostgreSQL) / LOCK IN SHARE MODE (MySQL) to
 // the query, locking rows for read while allowing other readers.
-// Silently dropped for dialects that do not support row-level locking (e.g. SQLite).
+// PostgreSQL and MySQL only — SQLite silently drops the clause.
 func (b *SelectBuilder) ForShare() *SelectBuilder {
 	cp := *b
 	cp.forShare = true
@@ -126,10 +126,14 @@ func (b *SelectBuilder) ForKeyShare() *SelectBuilder {
 //	// ... FOR UPDATE OF "o"
 //
 // Dialect-specific behaviour:
-//   - PostgreSQL: all specified tables are emitted.
-//   - MySQL: OF is supported for FOR UPDATE only (not LOCK IN SHARE MODE).
-//     Only the first table is used; extras are silently dropped.
+//   - PostgreSQL: all specified tables are emitted for both FOR UPDATE and FOR SHARE.
+//   - MySQL: all specified tables are emitted for FOR UPDATE (MySQL 8.0+).
+//     For LOCK IN SHARE MODE (ForShare on MySQL), OF is not supported and is
+//     silently dropped.
 //   - SQLite: OF is silently ignored (SQLite has no row-level locking).
+//
+// If neither ForUpdate nor ForShare is active, Of has no effect.
+// The call order relative to ForUpdate/ForShare does not matter.
 func (b *SelectBuilder) Of(tables ...TableSource) *SelectBuilder {
 	cp := *b
 	cp.lockOf = append(append([]TableSource(nil), cp.lockOf...), tables...)
@@ -426,15 +430,10 @@ func (b *SelectBuilder) buildWith(ctx *expr.BuildContext) string {
 	if ctx.Dialect().SupportsForUpdate() {
 		if b.forUpdate {
 			sb.WriteString(" FOR UPDATE")
-			// OF table list: supported by PostgreSQL and MySQL (FOR UPDATE only).
+			// OF table list: supported by PostgreSQL and MySQL 8.0+ FOR UPDATE.
 			if len(b.lockOf) > 0 {
 				sb.WriteString(" OF ")
-				tables := b.lockOf
-				if ctx.Dialect().Name() == "mysql" && len(tables) > 1 {
-					// MySQL only allows a single table in the OF list.
-					tables = tables[:1]
-				}
-				for i, t := range tables {
+				for i, t := range b.lockOf {
 					if i > 0 {
 						sb.WriteString(", ")
 					}
