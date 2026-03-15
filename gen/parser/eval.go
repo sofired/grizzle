@@ -4,24 +4,28 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/sofired/grizzle/schema/mysql"
 	pg "github.com/sofired/grizzle/schema/pg"
+	"github.com/sofired/grizzle/schema/sqlite"
 )
 
-// EvalTable converts a ParsedTable (from the AST parser) into a *pg.TableDef
-// by evaluating each column's builder chain. This lets the CLI use the same
-// schema source files that the code generator reads, without importing them.
+// EvalTable converts a ParsedTable (from the AST parser) into a pg.TableDefiner
+// by evaluating each column's builder chain. The concrete type returned
+// depends on the dialect recorded in the ParsedTable:
 //
-// The return type is *pg.TableDef for all three dialects (pg, mysql, sqlite)
-// because mysql.TableDef and sqlite.TableDef are Go type aliases for pg.TableDef,
-// not separate types. This is intentional: pg.TableDef is the shared intermediate
-// representation used by the kit and codegen layers regardless of dialect.
+//   - "pg"     → *pg.TableDef     (implements pg.TableDefiner, Dialect() == "postgres")
+//   - "mysql"  → *mysql.TableDef  (implements pg.TableDefiner, Dialect() == "mysql")
+//   - "sqlite" → *sqlite.TableDef (implements pg.TableDefiner, Dialect() == "sqlite")
+//
+// This ensures that parseSchemaDir in the CLI returns the correct dialect type
+// for each parsed table, resolving the cross-dialect type leak (issue #156).
 //
 // Note: Constraint expressions that reference column values at runtime (like
 // partial index WHERE clauses defined via string literals) are preserved as-is.
 // The WithConstraints callback is not re-executed here; constraints parsed from
 // pg.UniqueIndex(...).On(...).Where(...).Build() calls are reconstructed structurally.
-func EvalTable(pt *ParsedTable) (*pg.TableDef, error) {
-	def := &pg.TableDef{
+func EvalTable(pt *ParsedTable) (pg.TableDefiner, error) {
+	inner := &pg.TableDef{
 		Name:   pt.TableName,
 		Schema: pt.SchemaName,
 	}
@@ -31,10 +35,18 @@ func EvalTable(pt *ParsedTable) (*pg.TableDef, error) {
 		if err != nil {
 			return nil, fmt.Errorf("column %q: %w", pc.Name, err)
 		}
-		def.Columns = append(def.Columns, colDef)
+		inner.Columns = append(inner.Columns, colDef)
 	}
 
-	return def, nil
+	switch pt.Dialect {
+	case "mysql":
+		return &mysql.TableDef{TableDef: inner}, nil
+	case "sqlite":
+		return &sqlite.TableDef{TableDef: inner}, nil
+	default:
+		// "pg" or any unrecognised dialect falls back to the PostgreSQL type.
+		return inner, nil
+	}
 }
 
 // evalColumn evaluates a ParsedColumn's chain into a pg.ColumnDef.

@@ -24,9 +24,12 @@ import (
 //   - gen_random_uuid() → UUID() in MySQL 8.0+ or (UUID()) in MariaDB
 
 // GenerateCreateSQLMySQL returns CREATE TABLE statements using MySQL syntax.
-func GenerateCreateSQLMySQL(tables ...*pg.TableDef) string {
+// It accepts tables from any dialect via the TableDefiner interface; the
+// DDL is always rendered in MySQL syntax regardless of origin dialect.
+func GenerateCreateSQLMySQL(tables ...pg.TableDefiner) string {
 	var stmts []string
-	for _, t := range tables {
+	for _, td := range tables {
+		t := td.Def()
 		stmts = append(stmts, createTableSQLMySQL(t))
 		for _, c := range t.Constraints {
 			if sql := indexSQLMySQL(t.QualifiedName(), c); sql != "" {

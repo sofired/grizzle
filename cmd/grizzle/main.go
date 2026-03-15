@@ -280,7 +280,7 @@ func runMigrate(args []string) error {
 	}
 }
 
-func runMigratePostgres(ctx context.Context, dsn string, dryRun bool, tables ...*pg.TableDef) error {
+func runMigratePostgres(ctx context.Context, dsn string, dryRun bool, tables ...pg.TableDefiner) error {
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
 		return fmt.Errorf("connect: %w", err)
@@ -314,7 +314,7 @@ func runMigratePostgres(ctx context.Context, dsn string, dryRun bool, tables ...
 	return nil
 }
 
-func runMigrateMySQL(ctx context.Context, dsn string, dryRun bool, tables ...*pg.TableDef) error {
+func runMigrateMySQL(ctx context.Context, dsn string, dryRun bool, tables ...pg.TableDefiner) error {
 	db, err := openMySQL(dsn)
 	if err != nil {
 		return err
@@ -348,7 +348,7 @@ func runMigrateMySQL(ctx context.Context, dsn string, dryRun bool, tables ...*pg
 	return nil
 }
 
-func runMigrateSQLite(ctx context.Context, dsn string, dryRun bool, tables ...*pg.TableDef) error {
+func runMigrateSQLite(ctx context.Context, dsn string, dryRun bool, tables ...pg.TableDefiner) error {
 	db, err := sql.Open("sqlite3", dsn)
 	if err != nil {
 		return fmt.Errorf("open sqlite3: %w", err)
@@ -474,8 +474,11 @@ func openMySQL(dsn string) (*sql.DB, error) {
 	return db, nil
 }
 
-// parseSchemaDir parses schema Go files and evaluates them into *pg.TableDef values.
-func parseSchemaDir(dir string) ([]*pg.TableDef, error) {
+// parseSchemaDir parses schema Go files and evaluates them into pg.TableDefiner
+// values. Each table is returned as the correct dialect-specific type:
+// *pg.TableDef for PostgreSQL schemas, *mysql.TableDef for MySQL schemas, and
+// *sqlite.TableDef for SQLite schemas.
+func parseSchemaDir(dir string) ([]pg.TableDefiner, error) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return nil, fmt.Errorf("resolve schema dir: %w", err)
@@ -487,7 +490,7 @@ func parseSchemaDir(dir string) ([]*pg.TableDef, error) {
 	if len(parsed) == 0 {
 		return nil, fmt.Errorf("no table declarations found in %s (expected pg.Table, mysql.Table, or sqlite.Table calls)", abs)
 	}
-	defs := make([]*pg.TableDef, 0, len(parsed))
+	defs := make([]pg.TableDefiner, 0, len(parsed))
 	for _, pt := range parsed {
 		td, err := parser.EvalTable(pt)
 		if err != nil {

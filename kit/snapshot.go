@@ -45,15 +45,17 @@ func (t *TableSnap) QualifiedName() string {
 	return t.Name
 }
 
-// FromDefs builds a Snapshot from a set of *pg.TableDef values.
+// FromDefs builds a Snapshot from a set of dialect-agnostic TableDefiner values.
 // This is the normal way to capture your schema definition.
-func FromDefs(tables ...*pg.TableDef) Snapshot {
+// It accepts tables from any dialect (pg, mysql, sqlite).
+func FromDefs(tables ...pg.TableDefiner) Snapshot {
 	snap := Snapshot{
 		Version:   snapshotVersion,
 		CreatedAt: time.Now().UTC(),
 		Tables:    make(map[string]*TableSnap, len(tables)),
 	}
-	for _, t := range tables {
+	for _, td := range tables {
+		t := td.Def()
 		ts := &TableSnap{
 			Name:        t.Name,
 			Schema:      t.Schema,

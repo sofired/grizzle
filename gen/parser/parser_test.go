@@ -326,10 +326,11 @@ func evalOne(t *testing.T, colDecl string) pg.ColumnDef {
 import pg "github.com/sofired/grizzle/schema/pg"
 var T = pg.Table("t", ` + colDecl + `)`
 	tbl := oneTable(t, parseSource(t, src))
-	def, err := parser.EvalTable(tbl)
+	td, err := parser.EvalTable(tbl)
 	if err != nil {
 		t.Fatalf("EvalTable: %v", err)
 	}
+	def := td.Def()
 	if len(def.Columns) != 1 {
 		t.Fatalf("expected 1 column, got %d", len(def.Columns))
 	}
@@ -526,10 +527,11 @@ func TestEvalTable_SchemaName_Propagated(t *testing.T) {
 import pg "github.com/sofired/grizzle/schema/pg"
 var T = pg.SchemaTable("audit", "logs", pg.C("id", pg.UUID().PrimaryKey()))`
 	tbl := oneTable(t, parseSource(t, src))
-	def, err := parser.EvalTable(tbl)
+	td, err := parser.EvalTable(tbl)
 	if err != nil {
 		t.Fatalf("EvalTable: %v", err)
 	}
+	def := td.Def()
 	if def.Schema != "audit" {
 		t.Errorf("Schema: got %q, want audit", def.Schema)
 	}
@@ -572,10 +574,15 @@ var T = mysql.Table("items",
 	if len(tables) != 1 {
 		t.Fatalf("expected 1 table, got %d", len(tables))
 	}
-	def, err := parser.EvalTable(tables[0])
+	td, err := parser.EvalTable(tables[0])
 	if err != nil {
 		t.Fatalf("EvalTable: %v", err)
 	}
+	// Verify EvalTable returns the correct dialect type for MySQL tables.
+	if td.Dialect() != "mysql" {
+		t.Errorf("Dialect: got %q, want mysql", td.Dialect())
+	}
+	def := td.Def()
 	if len(def.Columns) != 4 {
 		t.Errorf("expected 4 columns, got %d", len(def.Columns))
 	}
@@ -614,10 +621,15 @@ var T = sqlite.Table("assets",
 	if len(tables) != 1 {
 		t.Fatalf("expected 1 table, got %d", len(tables))
 	}
-	def, err := parser.EvalTable(tables[0])
+	td, err := parser.EvalTable(tables[0])
 	if err != nil {
 		t.Fatalf("EvalTable: %v", err)
 	}
+	// Verify EvalTable returns the correct dialect type for SQLite tables.
+	if td.Dialect() != "sqlite" {
+		t.Errorf("Dialect: got %q, want sqlite", td.Dialect())
+	}
+	def := td.Def()
 	if len(def.Columns) != 3 {
 		t.Errorf("expected 3 columns, got %d", len(def.Columns))
 	}
@@ -656,11 +668,15 @@ func TestEvalTable_MySQL_OnDelete(t *testing.T) {
 import mysql "github.com/sofired/grizzle/schema/mysql"
 var T = mysql.Table("t", mysql.C("realm_id", mysql.UUID().NotNull().References("realms", "id", mysql.OnDelete(mysql.FKActionCascade))))`
 	tbl := oneTable(t, parseSource(t, src))
-	def, err := parser.EvalTable(tbl)
+	td, err := parser.EvalTable(tbl)
 	if err != nil {
 		t.Fatalf("EvalTable: %v", err)
 	}
-	c := def.Columns[0]
+	// Verify EvalTable returns mysql.TableDef for MySQL schema tables.
+	if td.Dialect() != "mysql" {
+		t.Errorf("Dialect: got %q, want mysql", td.Dialect())
+	}
+	c := td.Def().Columns[0]
 	if c.References == nil {
 		t.Fatal("References: want non-nil FKRef")
 	}
@@ -676,11 +692,15 @@ func TestEvalTable_SQLite_OnDelete(t *testing.T) {
 import sqlite "github.com/sofired/grizzle/schema/sqlite"
 var T = sqlite.Table("t", sqlite.C("parent_id", sqlite.Integer().References("parents", "id", sqlite.OnDelete(sqlite.FKActionRestrict))))`
 	tbl := oneTable(t, parseSource(t, src))
-	def, err := parser.EvalTable(tbl)
+	td, err := parser.EvalTable(tbl)
 	if err != nil {
 		t.Fatalf("EvalTable: %v", err)
 	}
-	c := def.Columns[0]
+	// Verify EvalTable returns sqlite.TableDef for SQLite schema tables.
+	if td.Dialect() != "sqlite" {
+		t.Errorf("Dialect: got %q, want sqlite", td.Dialect())
+	}
+	c := td.Def().Columns[0]
 	if c.References == nil {
 		t.Fatal("References: want non-nil FKRef")
 	}
@@ -724,11 +744,11 @@ func TestEvalTable_MySQL_OnUpdate(t *testing.T) {
 import mysql "github.com/sofired/grizzle/schema/mysql"
 var T = mysql.Table("t", mysql.C("ref_id", mysql.UUID().References("other", "id", mysql.OnUpdate(mysql.FKActionSetNull))))`
 	tbl := oneTable(t, parseSource(t, src))
-	def, err := parser.EvalTable(tbl)
+	td, err := parser.EvalTable(tbl)
 	if err != nil {
 		t.Fatalf("EvalTable: %v", err)
 	}
-	c := def.Columns[0]
+	c := td.Def().Columns[0]
 	if c.References == nil {
 		t.Fatal("References: want non-nil FKRef")
 	}
