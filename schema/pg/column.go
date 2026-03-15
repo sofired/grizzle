@@ -450,6 +450,21 @@ func (b *TimeBuilder) WithTimezone() *TimeBuilder {
 func (b *TimeBuilder) NotNull() *TimeBuilder       { b.setNotNull(); return b }
 func (b *TimeBuilder) Build(name string) ColumnDef { return b.build(name) }
 
+// TimeTZ starts a timetz (time with timezone) column.
+// It is a convenience constructor equivalent to Time().WithTimezone(),
+// provided for API parity with the Timestamp / Timestamptz pattern and
+// for immediate discoverability via IDE auto-complete.
+//
+// Example:
+//
+//	pg.C("start_time", pg.TimeTZ().NotNull())  // timetz NOT NULL
+func TimeTZ() *TimeBuilder {
+	b := &TimeBuilder{}
+	b.def.SQLType = "timetz"
+	b.def.GoType = GoTypeTime
+	return b
+}
+
 // -------------------------------------------------------------------
 // Bytea
 // -------------------------------------------------------------------
@@ -538,7 +553,10 @@ type ArrayBuilder struct{ colBuilder }
 //	pg.C("tags",   pg.Array(pg.Text()))          // text[]
 //	pg.C("scores", pg.Array(pg.Integer()))        // integer[]
 func Array(inner ColumnBuilder) *ArrayBuilder {
-	innerDef := inner.Build("_elem")
+	// Call Build("") so the name-guard leaves the inner builder's Name unchanged.
+	// Passing "_elem" would permanently set Name to "_elem" on first call,
+	// making the builder unusable for any subsequent column.
+	innerDef := inner.Build("")
 	b := &ArrayBuilder{}
 	b.def.SQLType = innerDef.SQLType + "[]"
 	b.def.GoType = GoTypeAny // array values scan as []T; use any for generic support

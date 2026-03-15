@@ -48,10 +48,26 @@ func TestTime_ColumnDef(t *testing.T) {
 	}
 }
 
-func TestTimeTZ_ColumnDef(t *testing.T) {
+func TestTimeTZ_WithTimezone_ColumnDef(t *testing.T) {
 	col := pg.Time().WithTimezone().NotNull().Build("start_time_tz")
 	if col.SQLType != "timetz" {
 		t.Errorf("SQLType: got %q, want %q", col.SQLType, "timetz")
+	}
+}
+
+func TestTimeTZ_Constructor(t *testing.T) {
+	col := pg.TimeTZ().NotNull().Build("start_time_tz")
+	if col.SQLType != "timetz" {
+		t.Errorf("TimeTZ() SQLType: got %q, want %q", col.SQLType, "timetz")
+	}
+	if col.GoType != pg.GoTypeTime {
+		t.Errorf("TimeTZ() GoType: got %v, want %v", col.GoType, pg.GoTypeTime)
+	}
+	if !col.NotNull {
+		t.Error("expected NotNull=true")
+	}
+	if col.Name != "start_time_tz" {
+		t.Errorf("TimeTZ() Name: got %q, want %q", col.Name, "start_time_tz")
 	}
 }
 
@@ -253,5 +269,29 @@ func TestArray_NestedVarchar(t *testing.T) {
 	}
 	if col.SQLType != "varchar(50)[]" {
 		t.Errorf("SQLType: got %q, want %q", col.SQLType, "varchar(50)[]")
+	}
+}
+
+// TestArray_InnerBuilderReuse verifies that passing an inner builder to Array()
+// does not mutate the inner builder's Name, so the same builder instance can be
+// used again afterwards without producing a stale "_elem" Name.
+func TestArray_InnerBuilderReuse(t *testing.T) {
+	inner := pg.Text()
+
+	// First use: as the element type of an array column.
+	arrCol := pg.Array(inner).Build("tags")
+	if arrCol.SQLType != "text[]" {
+		t.Fatalf("array SQLType: got %q, want %q", arrCol.SQLType, "text[]")
+	}
+
+	// Second use: the same builder used directly for a plain text column.
+	// Before the fix, inner.def.Name would have been permanently set to "_elem",
+	// causing the resulting ColumnDef.Name to be "_elem" instead of "bio".
+	plainCol := inner.Build("bio")
+	if plainCol.Name != "bio" {
+		t.Errorf("inner builder Name after reuse: got %q, want %q (builder was mutated by Array())", plainCol.Name, "bio")
+	}
+	if plainCol.SQLType != "text" {
+		t.Errorf("inner builder SQLType after reuse: got %q, want %q", plainCol.SQLType, "text")
 	}
 }
