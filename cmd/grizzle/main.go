@@ -118,7 +118,7 @@ func runGen(args []string) error {
 		return fmt.Errorf("parse schema: %w", err)
 	}
 	if len(tables) == 0 {
-		log.Printf("warning: no pg.Table, mysql.Table, or pg.SchemaTable declarations found in %s", schemaAbs)
+		log.Printf("warning: no table declarations found in %s (expected pg.Table, mysql.Table, or sqlite.Table calls)", schemaAbs)
 		return nil
 	}
 	if *verbose {
@@ -485,7 +485,7 @@ func parseSchemaDir(dir string) ([]*pg.TableDef, error) {
 		return nil, fmt.Errorf("parse schema: %w", err)
 	}
 	if len(parsed) == 0 {
-		return nil, fmt.Errorf("no pg.Table declarations found in %s", abs)
+		return nil, fmt.Errorf("no table declarations found in %s (expected pg.Table, mysql.Table, or sqlite.Table calls)", abs)
 	}
 	defs := make([]*pg.TableDef, 0, len(parsed))
 	for _, pt := range parsed {
