@@ -2173,4 +2173,3 @@ func TestUpdate_From_SubquerySource(t *testing.T) {
 		[]any{"shipped"},
 	)
 }
-
