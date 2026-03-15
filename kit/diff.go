@@ -48,7 +48,9 @@ type Change struct {
 //  4. Drop removed tables.
 //
 // Output is sorted for determinism: within each phase, changes are sorted by
-// table name, then by change kind, then by column name where applicable.
+// table name. Within a single table, changes are emitted in slice order
+// (added/modified columns first, then dropped columns, then added/dropped
+// constraints). No secondary sort by change kind or column name is applied.
 func Diff(old, new Snapshot) []Change {
 	var changes []Change
 

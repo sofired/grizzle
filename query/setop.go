@@ -19,10 +19,10 @@ import (
 //	sql, args := active.Union(admin).
 //	    OrderBy(UsersT.Email.Asc()).
 //	    Build(dialect.Postgres)
-//	// SELECT "users"."email" FROM "users" WHERE "users"."active" = $1
+//	// (SELECT "users"."email" FROM "users" WHERE "users"."active" = $1)
 //	// UNION
 //	// (SELECT "admins"."email" FROM "admins")
-//	// ORDER BY "users"."email" ASC
+//	// ORDER BY "email" ASC
 type SetOpBuilder struct {
 	parts   []setPart
 	orderBy []expr.OrderExpr

@@ -16,8 +16,10 @@ import (
 // Pre-validation means any SQL error (wrong column name, type mismatch, bad
 // syntax) is surfaced at server startup rather than during a live request.
 //
-// The statement name is visible in pg_stat_statements and pg_prepared_statements,
-// making it easy to track query performance in production.
+// The statement name is used only for validation at startup (it identifies
+// which query failed in error messages). At execution time the SQL string is
+// used directly, so the name does not appear in pg_stat_statements or
+// pg_prepared_statements during normal query execution.
 //
 // Example (static active-users list):
 //
@@ -37,9 +39,8 @@ import (
 //	users, err := activeUsers.QueryAll(ctx, db)
 //
 // PreparedSelect holds the pre-built SQL and its bound args.
-// pgx v5 automatically maintains a per-connection prepared statement cache
-// keyed by the statement name — so queries using the same name benefit from
-// the server-side parse cache on every subsequent execution.
+// Execution uses the SQL string directly; pgx v5's per-connection statement
+// cache handles re-preparation transparently across pool connections.
 type PreparedSelect[T any] struct {
 	name string
 	sql  string
@@ -57,7 +58,7 @@ func PrepareSelect[T any](ctx context.Context, db *DB, name string, b *query.Sel
 	return &PreparedSelect[T]{name: name, sql: sql, args: args}, nil
 }
 
-// Name returns the statement name (visible in pg_stat_statements).
+// Name returns the validation label supplied when the statement was prepared.
 func (p *PreparedSelect[T]) Name() string { return p.name }
 
 // SQL returns the pre-built SQL string.
@@ -129,7 +130,7 @@ func PrepareExec(ctx context.Context, db *DB, name string, b interface {
 	return &PreparedExec{name: name, sql: sql, args: args}, nil
 }
 
-// Name returns the statement name.
+// Name returns the validation label supplied when the statement was prepared.
 func (p *PreparedExec) Name() string { return p.name }
 
 // SQL returns the pre-built SQL string.
