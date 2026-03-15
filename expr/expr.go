@@ -104,6 +104,43 @@ type rawExpr struct{ sql string }
 
 func (e rawExpr) ToSQL(_ *BuildContext) string { return e.sql }
 
+// RawArgs wraps a SQL fragment containing $? placeholders together with the
+// argument values that fill them in order. Each $? placeholder is replaced with
+// the next bound-parameter placeholder ($1, ?, etc.) from the dialect.
+//
+// If the number of $? placeholders does not match the number of args, RawArgs
+// panics with a clear message at build time (Fix #129).
+//
+// Example:
+//
+//	expr.RawArgs("ST_DWithin(location, ST_MakePoint($?, $?), $?)", lon, lat, radius)
+func RawArgs(sql string, args ...any) Expression {
+	return rawArgsExpr{sql: sql, args: args}
+}
+
+type rawArgsExpr struct {
+	sql  string
+	args []any
+}
+
+func (e rawArgsExpr) ToSQL(ctx *BuildContext) string {
+	// Count $? placeholders.
+	count := strings.Count(e.sql, "$?")
+	if count != len(e.args) {
+		panic(fmt.Sprintf("expr.RawArgs: placeholder count (%d) does not match arg count (%d) in %q",
+			count, len(e.args), e.sql))
+	}
+	// Replace each $? with the next dialect placeholder, binding each arg.
+	result := e.sql
+	for i := 0; i < count; i++ {
+		placeholder := ctx.Add(e.args[i])
+		// Replace only the first occurrence of $? in each iteration.
+		idx := strings.Index(result, "$?")
+		result = result[:idx] + placeholder + result[idx+2:]
+	}
+	return result
+}
+
 // -------------------------------------------------------------------
 // Internal expression types (produced by column operator methods)
 // -------------------------------------------------------------------

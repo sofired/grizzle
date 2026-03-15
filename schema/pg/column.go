@@ -21,7 +21,10 @@
 //	})
 package pg
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // -------------------------------------------------------------------
 // ColumnDef — the result of building a column
@@ -91,15 +94,6 @@ func (b *colBuilder) setDefault(expr string) {
 	b.def.HasDefault = true
 	b.def.DefaultExpr = expr
 }
-func (b *colBuilder) setReferences(table, col string, onDelete, onUpdate FKAction) { //nolint:unused
-	b.def.References = &FKRef{
-		Table:    table,
-		Column:   col,
-		OnDelete: onDelete,
-		OnUpdate: onUpdate,
-	}
-}
-
 func (b *colBuilder) setPrimaryKey() {
 	b.def.PrimaryKey = true
 	b.def.NotNull = true    // PK is implicitly NOT NULL
@@ -401,6 +395,48 @@ func (b *NumericBuilder) Default(val string) *NumericBuilder {
 	return b
 }
 func (b *NumericBuilder) Build(name string) ColumnDef { return b.build(name) }
+
+// -------------------------------------------------------------------
+// Enum
+// -------------------------------------------------------------------
+
+// EnumColumnBuilder builds a column whose type is a PostgreSQL custom enum type.
+type EnumColumnBuilder struct {
+	colBuilder
+	typeName string
+}
+
+// Enum starts an enum column using the given PostgreSQL enum type name.
+// values must be non-empty and no individual value may be the empty string (Fix #118).
+//
+// Panics if values is empty or any value is the empty string.
+func Enum(typeName string, values ...string) *EnumColumnBuilder {
+	if len(values) == 0 {
+		panic("pg.Enum: values must not be empty")
+	}
+	for i, v := range values {
+		if v == "" {
+			panic(fmt.Sprintf("pg.Enum: value at index %d must not be empty", i))
+		}
+	}
+	b := &EnumColumnBuilder{typeName: typeName}
+	b.def.SQLType = typeName
+	b.def.GoType = GoTypeString
+	return b
+}
+
+func (b *EnumColumnBuilder) NotNull() *EnumColumnBuilder { b.setNotNull(); return b }
+
+// Default sets the DEFAULT value for the enum column.
+// Single quotes in the value are doubled to produce valid SQL (Fix #111).
+func (b *EnumColumnBuilder) Default(val string) *EnumColumnBuilder {
+	// Escape single quotes by doubling them (SQL standard quoting).
+	escaped := strings.ReplaceAll(val, "'", "''")
+	b.setDefault(fmt.Sprintf("'%s'::%s", escaped, b.typeName))
+	return b
+}
+
+func (b *EnumColumnBuilder) Build(name string) ColumnDef { return b.build(name) }
 
 // -------------------------------------------------------------------
 // ColumnBuilder interface — satisfied by all typed builders

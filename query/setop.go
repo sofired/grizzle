@@ -19,10 +19,10 @@ import (
 //	sql, args := active.Union(admin).
 //	    OrderBy(UsersT.Email.Asc()).
 //	    Build(dialect.Postgres)
-//	// SELECT "users"."email" FROM "users" WHERE "users"."active" = $1
+//	// (SELECT "users"."email" FROM "users" WHERE "users"."active" = $1)
 //	// UNION
 //	// (SELECT "admins"."email" FROM "admins")
-//	// ORDER BY "users"."email" ASC
+//	// ORDER BY "email" ASC
 type SetOpBuilder struct {
 	parts   []setPart
 	orderBy []expr.OrderExpr
@@ -33,6 +33,26 @@ type SetOpBuilder struct {
 type setPart struct {
 	op  string // "", "UNION", "UNION ALL", "INTERSECT", "EXCEPT"
 	sel *SelectBuilder
+}
+
+// buildSetOpOrderBy renders ORDER BY for a set operation, stripping table
+// qualifiers: only the column name is valid in UNION/INTERSECT/EXCEPT ORDER BY.
+func buildSetOpOrderBy(ctx *expr.BuildContext, exprs []expr.OrderExpr) string {
+	if len(exprs) == 0 {
+		return ""
+	}
+	parts := make([]string, len(exprs))
+	for i, o := range exprs {
+		parts[i] = o.ToSQLUnqualified(ctx)
+	}
+	s := " ORDER BY "
+	for i, p := range parts {
+		if i > 0 {
+			s += ", "
+		}
+		s += p
+	}
+	return s
 }
 
 // -------------------------------------------------------------------
@@ -147,8 +167,10 @@ func (b *SetOpBuilder) Build(d dialect.Dialect) (string, []any) {
 		sb.WriteString(")")
 	}
 
-	// Overall ORDER BY, LIMIT, OFFSET (applied to the combined result set).
-	sb.WriteString(buildOrderBy(ctx, b.orderBy))
+	// Overall ORDER BY for set operations must use bare column names only
+	// (no table qualifier) — SQL does not allow table-qualified references
+	// in the ORDER BY of a UNION / INTERSECT / EXCEPT.
+	sb.WriteString(buildSetOpOrderBy(ctx, b.orderBy))
 	if b.limit > 0 {
 		fmt.Fprintf(&sb, " LIMIT %d", b.limit)
 	}

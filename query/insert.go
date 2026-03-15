@@ -137,8 +137,9 @@ func (b *InsertBuilder) DoUpdateSetExcluded(cols ...string) *InsertBuilder {
 // DoUpdateSetStruct extracts non-nil db-tagged fields and adds them to the
 // DO UPDATE SET clause as explicit col = val assignments. Nil pointer fields
 // are skipped (same semantics as UpdateBuilder.SetStruct).
+// If row is nil or non-struct, this is a no-op (no SET assignments are added).
 func (b *InsertBuilder) DoUpdateSetStruct(row any) *InsertBuilder {
-	cols, vals := structSetsForUpdate(row)
+	cols, vals, _ := structSetsForUpdate(row)
 	cp := *b
 	u := b.upsertCopy()
 	u.doNothing = false

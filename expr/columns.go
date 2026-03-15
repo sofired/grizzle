@@ -59,6 +59,35 @@ func (o OrderExpr) ToSQL(ctx *BuildContext) string {
 	return s
 }
 
+// ToSQLUnqualified renders the ORDER BY expression using only the column name,
+// without a table qualifier. Required for set operation (UNION/INTERSECT/EXCEPT)
+// ORDER BY clauses, where table qualifiers are not valid SQL.
+func (o OrderExpr) ToSQLUnqualified(ctx *BuildContext) string {
+	name := unqualifiedColRef(o.ref, ctx)
+	s := name + " " + o.dir
+	if o.nulls != "" {
+		s += " " + o.nulls
+	}
+	return s
+}
+
+// unqualifiedColRef returns only the column name portion of a colRef,
+// stripping any table qualifier. Falls back to the full colRef for complex
+// expressions (window functions, arithmetic, etc.) that have no table prefix.
+func unqualifiedColRef(ref colRefer, ctx *BuildContext) string {
+	// For ColBase (the common case), we can access the column name directly.
+	type namedCol interface {
+		ColumnName() string
+		TableName() string
+	}
+	if nc, ok := ref.(namedCol); ok && nc.TableName() != "" {
+		// Has a table qualifier — emit only the quoted column name.
+		return ctx.Quote(nc.ColumnName())
+	}
+	// No table qualifier or complex expression — use full colRef.
+	return ref.colRef(ctx)
+}
+
 // NullsFirst returns a copy of the ORDER BY expression with NULLS FIRST appended.
 func (o OrderExpr) NullsFirst() OrderExpr {
 	o.nulls = "NULLS FIRST"
