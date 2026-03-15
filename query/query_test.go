@@ -1596,6 +1596,34 @@ func TestSelect_ForShare_MySQL(t *testing.T) {
 // UPDATE / DELETE LIMIT tests
 // -------------------------------------------------------------------
 
+// -------------------------------------------------------------------
+// Update nil / invalid struct guard (Fix #3 / Fix #120)
+// -------------------------------------------------------------------
+
+func TestUpdate_SetStruct_Nil(t *testing.T) {
+	t.Run("nil interface", func(t *testing.T) {
+		sql, args := query.Update(ts.UsersT).SetStruct(nil).Build(dialect.Postgres)
+		if sql != "" || args != nil {
+			t.Errorf("expected empty result for nil SetStruct, got sql=%q args=%v", sql, args)
+		}
+	})
+
+	t.Run("nil pointer exercises !rv.IsValid() guard", func(t *testing.T) {
+		var p *ts.UserUpdate // nil pointer — Elem() returns invalid reflect.Value
+		sql, args := query.Update(ts.UsersT).SetStruct(p).Build(dialect.Postgres)
+		if sql != "" || args != nil {
+			t.Errorf("expected empty result for nil pointer SetStruct, got sql=%q args=%v", sql, args)
+		}
+	})
+
+	t.Run("non-struct value", func(t *testing.T) {
+		sql, args := query.Update(ts.UsersT).SetStruct(42).Build(dialect.Postgres)
+		if sql != "" || args != nil {
+			t.Errorf("expected empty result for non-struct SetStruct, got sql=%q args=%v", sql, args)
+		}
+	})
+}
+
 func TestUpdate_Limit_MySQL(t *testing.T) {
 	q := query.Update(ts.UsersT).
 		Set("enabled", false).
@@ -1728,9 +1756,51 @@ func TestSetOp_UnionAll_ThreeParts(t *testing.T) {
 func TestSetOp_Union_WithLimitOrderBy(t *testing.T) {
 	a := query.Select(ts.UsersT.Username).From(ts.UsersT)
 	b := query.Select(ts.RealmsT.Name).From(ts.RealmsT)
+	// Set operation ORDER BY must strip the table qualifier (Fix #11).
 	assertSQL(t, "union with limit and order",
 		a.Union(b).OrderBy(ts.UsersT.Username.Asc()).Limit(10),
-		`(SELECT "users"."username" FROM "users") UNION (SELECT "realms"."name" FROM "realms") ORDER BY "users"."username" ASC LIMIT 10`,
+		`(SELECT "users"."username" FROM "users") UNION (SELECT "realms"."name" FROM "realms") ORDER BY "username" ASC LIMIT 10`,
+		nil,
+	)
+}
+
+// Fix #134 — SetOpBuilder.OrderByCols edge cases
+func TestSetOp_Intersect_WithOrderBy(t *testing.T) {
+	a := query.Select(ts.UsersT.Username).From(ts.UsersT)
+	b := query.Select(ts.RealmsT.Name).From(ts.RealmsT)
+	assertSQL(t, "intersect with order by",
+		a.Intersect(b).OrderBy(ts.UsersT.Username.Asc()),
+		`(SELECT "users"."username" FROM "users") INTERSECT (SELECT "realms"."name" FROM "realms") ORDER BY "username" ASC`,
+		nil,
+	)
+}
+
+func TestSetOp_Except_WithOrderBy(t *testing.T) {
+	a := query.Select(ts.UsersT.Username).From(ts.UsersT)
+	b := query.Select(ts.RealmsT.Name).From(ts.RealmsT)
+	assertSQL(t, "except with order by",
+		a.Except(b).OrderBy(ts.UsersT.Username.Desc()),
+		`(SELECT "users"."username" FROM "users") EXCEPT (SELECT "realms"."name" FROM "realms") ORDER BY "username" DESC`,
+		nil,
+	)
+}
+
+func TestSetOp_EmptyOrderBy(t *testing.T) {
+	// No OrderBy call — result must not contain ORDER BY.
+	a := query.Select(ts.UsersT.Username).From(ts.UsersT)
+	b := query.Select(ts.RealmsT.Name).From(ts.RealmsT)
+	sql, _ := a.Union(b).Build(dialect.Postgres)
+	if strings.Contains(sql, "ORDER BY") {
+		t.Errorf("expected no ORDER BY in result without OrderBy() call, got: %s", sql)
+	}
+}
+
+func TestSetOp_LimitOffset(t *testing.T) {
+	a := query.Select(ts.UsersT.Username).From(ts.UsersT)
+	b := query.Select(ts.RealmsT.Name).From(ts.RealmsT)
+	assertSQL(t, "union with limit and offset",
+		a.Union(b).OrderBy(ts.UsersT.Username.Asc()).Limit(5).Offset(10),
+		`(SELECT "users"."username" FROM "users") UNION (SELECT "realms"."name" FROM "realms") ORDER BY "username" ASC LIMIT 5 OFFSET 10`,
 		nil,
 	)
 }
