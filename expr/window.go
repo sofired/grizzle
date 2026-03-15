@@ -1,6 +1,9 @@
 package expr
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
 // WindowExpr represents a SQL window function call:
 //
@@ -19,6 +22,9 @@ import "strings"
 type WindowExpr struct {
 	fn          string             // e.g. "ROW_NUMBER", "RANK", "SUM"
 	col         SelectableColumn   // nil for no-argument functions (ROW_NUMBER, RANK, etc.)
+	offset      *int               // optional numeric argument (NTH_VALUE n, LAG/LEAD offset)
+	defaultVal  any                // optional default value for LAG/LEAD
+	hasDefault  bool               // true when defaultVal was explicitly set
 	partitionBy []SelectableColumn // PARTITION BY columns
 	orderBy     []OrderExpr        // ORDER BY inside the window
 	alias       string             // optional AS alias
@@ -31,6 +37,16 @@ func (w WindowExpr) ToSQL(ctx *BuildContext) string {
 	sb.WriteString("(")
 	if w.col != nil {
 		sb.WriteString(w.col.colRef(ctx))
+		// Render optional numeric offset (NTH_VALUE n, LAG/LEAD offset).
+		if w.offset != nil {
+			sb.WriteString(", ")
+			sb.WriteString(ctx.Add(*w.offset))
+		}
+		// Render optional default value for LAG/LEAD (Fix #93 — must use ctx.Add).
+		if w.hasDefault {
+			sb.WriteString(", ")
+			sb.WriteString(ctx.Add(w.defaultVal))
+		}
 	}
 	sb.WriteString(") OVER (")
 
@@ -114,8 +130,20 @@ func DenseRank() WindowExpr { return WindowExpr{fn: "DENSE_RANK"} }
 // Lead returns a LEAD(col) window expression.
 func Lead(col SelectableColumn) WindowExpr { return WindowExpr{fn: "LEAD", col: col} }
 
+// LeadWithDefault returns a LEAD(col, offset, default) window expression.
+// The default value is bound as a parameter (Fix #93 — not interpolated directly).
+func LeadWithDefault(col SelectableColumn, offset int, defaultVal any) WindowExpr {
+	return WindowExpr{fn: "LEAD", col: col, offset: &offset, defaultVal: defaultVal, hasDefault: true}
+}
+
 // Lag returns a LAG(col) window expression.
 func Lag(col SelectableColumn) WindowExpr { return WindowExpr{fn: "LAG", col: col} }
+
+// LagWithDefault returns a LAG(col, offset, default) window expression.
+// The default value is bound as a parameter (Fix #93 — not interpolated directly).
+func LagWithDefault(col SelectableColumn, offset int, defaultVal any) WindowExpr {
+	return WindowExpr{fn: "LAG", col: col, offset: &offset, defaultVal: defaultVal, hasDefault: true}
+}
 
 // FirstValue returns a FIRST_VALUE(col) window expression.
 func FirstValue(col SelectableColumn) WindowExpr { return WindowExpr{fn: "FIRST_VALUE", col: col} }
@@ -123,8 +151,14 @@ func FirstValue(col SelectableColumn) WindowExpr { return WindowExpr{fn: "FIRST_
 // LastValue returns a LAST_VALUE(col) window expression.
 func LastValue(col SelectableColumn) WindowExpr { return WindowExpr{fn: "LAST_VALUE", col: col} }
 
-// NthValue returns an NTH_VALUE(col) window expression.
-func NthValue(col SelectableColumn) WindowExpr { return WindowExpr{fn: "NTH_VALUE", col: col} }
+// NthValue returns an NTH_VALUE(col, n) window expression.
+// n must be >= 1; panics with a clear message if n < 1 (Fix #99).
+func NthValue(col SelectableColumn, n int) WindowExpr {
+	if n < 1 {
+		panic(fmt.Sprintf("expr.NthValue: n must be >= 1, got %d", n))
+	}
+	return WindowExpr{fn: "NTH_VALUE", col: col, offset: &n}
+}
 
 // WinSum returns a SUM(col) window expression (aggregate used as a window function).
 func WinSum(col SelectableColumn) WindowExpr { return WindowExpr{fn: "SUM", col: col} }
@@ -134,3 +168,33 @@ func WinAvg(col SelectableColumn) WindowExpr { return WindowExpr{fn: "AVG", col:
 
 // WinCount returns a COUNT(*) window expression.
 func WinCount() WindowExpr { return WindowExpr{fn: "COUNT"} }
+
+// -------------------------------------------------------------------
+// Window frame sentinels (Fix #104 — immutable, cannot be mutated)
+// -------------------------------------------------------------------
+
+// WindowFrameBound represents a window frame boundary sentinel.
+// Values are immutable zero-value structs; they cannot be assigned to or mutated.
+type WindowFrameBound struct {
+	sql string
+}
+
+// SQL returns the raw SQL fragment for this frame bound.
+func (w WindowFrameBound) SQL() string { return w.sql }
+
+// unboundedPrecedingBound, currentRowBound, unboundedFollowingBound are the
+// unexported singleton values backing the exported accessor functions.
+var (
+	unboundedPrecedingBound  = WindowFrameBound{sql: "UNBOUNDED PRECEDING"}
+	currentRowBound          = WindowFrameBound{sql: "CURRENT ROW"}
+	unboundedFollowingBound  = WindowFrameBound{sql: "UNBOUNDED FOLLOWING"}
+)
+
+// UnboundedPreceding returns the UNBOUNDED PRECEDING window frame bound.
+func UnboundedPreceding() WindowFrameBound { return unboundedPrecedingBound }
+
+// CurrentRow returns the CURRENT ROW window frame bound.
+func CurrentRow() WindowFrameBound { return currentRowBound }
+
+// UnboundedFollowing returns the UNBOUNDED FOLLOWING window frame bound.
+func UnboundedFollowing() WindowFrameBound { return unboundedFollowingBound }

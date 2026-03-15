@@ -352,3 +352,62 @@ func Round(col SelectableColumn, decimals ...int) FuncExpr {
 	}
 	return FuncExpr{fn: "ROUND", args: []Expression{Col(col)}}
 }
+
+// -------------------------------------------------------------------
+// AliasedCol — column with a SELECT-list alias (Fix #131)
+// -------------------------------------------------------------------
+
+// AliasedCol wraps a SelectableColumn and adds a SELECT-list alias.
+// The AS clause is only emitted when the column appears in a SELECT list
+// (via ToSQL); colRef — used internally for ORDER BY and GROUP BY — emits
+// only the underlying column reference without the alias.
+//
+// Usage:
+//
+//	expr.ColAs(UsersT.Email, "user_email")
+type AliasedCol struct {
+	col   SelectableColumn
+	alias string
+}
+
+// ColAs returns col aliased to alias for use in SELECT lists.
+// In ORDER BY and GROUP BY contexts only the underlying column reference
+// is emitted (no AS clause), which is required by SQL.
+func ColAs(col SelectableColumn, alias string) AliasedCol {
+	return AliasedCol{col: col, alias: alias}
+}
+
+// ToSQL emits "col AS alias" — for SELECT list position.
+func (a AliasedCol) ToSQL(ctx *BuildContext) string {
+	ref := a.colRef(ctx)
+	if a.alias != "" {
+		return ref + " AS " + ctx.Quote(a.alias)
+	}
+	return ref
+}
+
+// colRef emits only the underlying column reference — no alias.
+// Used in ORDER BY, GROUP BY, and any other non-SELECT position.
+func (a AliasedCol) colRef(ctx *BuildContext) string {
+	if cr, ok := a.col.(colRefer); ok {
+		return cr.colRef(ctx)
+	}
+	return ctx.ColRef(a.col.TableName(), a.col.ColumnName())
+}
+
+// ColumnName returns the alias (used as the result column name in scans).
+func (a AliasedCol) ColumnName() string {
+	if a.alias != "" {
+		return a.alias
+	}
+	return a.col.ColumnName()
+}
+
+// TableName returns the underlying column's table name.
+func (a AliasedCol) TableName() string { return a.col.TableName() }
+
+// Asc returns an ascending ORDER BY on the underlying column (no alias).
+func (a AliasedCol) Asc() OrderExpr { return OrderExpr{ref: a, dir: "ASC"} }
+
+// Desc returns a descending ORDER BY on the underlying column (no alias).
+func (a AliasedCol) Desc() OrderExpr { return OrderExpr{ref: a, dir: "DESC"} }
