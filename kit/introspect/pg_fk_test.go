@@ -32,13 +32,15 @@ func TestNormalizeFKAction(t *testing.T) {
 
 // TestFKConstraintFields verifies that the FK constraint struct is populated
 // with the expected fields when constructed as queryForeignKeys would produce.
+// FKTable is schema-qualified (e.g. "public.customers") because queryForeignKeys
+// selects ccu.table_schema || '.' || ccu.table_name to avoid cross-schema mismatches.
 func TestFKConstraintFields(t *testing.T) {
 	// Simulate what queryForeignKeys assembles from query rows.
 	c := pg.Constraint{
 		Kind:       pg.KindForeignKey,
 		Name:       "orders_customer_fk",
 		Columns:    []string{"customer_id"},
-		FKTable:    "customers",
+		FKTable:    "public.customers",
 		FKColumns:  []string{"id"},
 		FKOnDelete: pg.FKAction(normalizeFKAction("CASCADE")),
 		FKOnUpdate: pg.FKAction(normalizeFKAction("NO ACTION")),
@@ -53,7 +55,7 @@ func TestFKConstraintFields(t *testing.T) {
 	if len(c.Columns) != 1 || c.Columns[0] != "customer_id" {
 		t.Errorf("unexpected local columns: %v", c.Columns)
 	}
-	if c.FKTable != "customers" {
+	if c.FKTable != "public.customers" {
 		t.Errorf("unexpected FK table: %q", c.FKTable)
 	}
 	if len(c.FKColumns) != 1 || c.FKColumns[0] != "id" {
@@ -73,7 +75,7 @@ func TestFKConstraintFields_MultiColumn(t *testing.T) {
 		Kind:       pg.KindForeignKey,
 		Name:       "orders_product_fk",
 		Columns:    []string{"product_id", "variant_id"},
-		FKTable:    "products",
+		FKTable:    "public.products",
 		FKColumns:  []string{"id", "variant_id"},
 		FKOnDelete: pg.FKAction(normalizeFKAction("RESTRICT")),
 		FKOnUpdate: pg.FKAction(normalizeFKAction("CASCADE")),
@@ -96,5 +98,31 @@ func TestFKConstraintFields_MultiColumn(t *testing.T) {
 	}
 	if c.FKOnUpdate != pg.FKActionCascade {
 		t.Errorf("unexpected FKOnUpdate: %q", c.FKOnUpdate)
+	}
+}
+
+// TestFKConstraintFields_NonPublicSchema verifies that FKTable is correctly
+// schema-qualified when the referenced table lives in a non-public schema.
+// This guards against the regression where only ccu.table_name was selected,
+// causing incorrect diffs for multi-schema setups.
+func TestFKConstraintFields_NonPublicSchema(t *testing.T) {
+	// Simulate a FK that references a table in a non-public schema, as
+	// queryForeignKeys would produce after selecting
+	// ccu.table_schema || '.' || ccu.table_name.
+	c := pg.Constraint{
+		Kind:       pg.KindForeignKey,
+		Name:       "orders_tenant_fk",
+		Columns:    []string{"tenant_id"},
+		FKTable:    "billing.tenants",
+		FKColumns:  []string{"id"},
+		FKOnDelete: pg.FKAction(normalizeFKAction("RESTRICT")),
+		FKOnUpdate: pg.FKAction(normalizeFKAction("NO ACTION")),
+	}
+
+	if c.FKTable != "billing.tenants" {
+		t.Errorf("expected schema-qualified FKTable %q, got %q", "billing.tenants", c.FKTable)
+	}
+	if c.FKOnDelete != pg.FKActionRestrict {
+		t.Errorf("unexpected FKOnDelete: %q", c.FKOnDelete)
 	}
 }

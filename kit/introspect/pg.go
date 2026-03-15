@@ -299,14 +299,20 @@ func queryForeignKeys(ctx context.Context, pool *pgxpool.Pool, schema, table str
 	// This query returns one row per column involved in a FK constraint.
 	// We group by constraint name on the Go side to build the Columns /
 	// FKColumns slices in the correct ordinal order.
+	// fk_table is selected as schema-qualified (ccu.table_schema || '.' || ccu.table_name)
+	// so that FKTable values are consistent with how snapshots key tables by schema.
+	// Without schema qualification, FKs referencing tables in non-public schemas would
+	// produce incorrect diffs (spurious drop+add) or fail to match the target definition.
+	//
+	// ordinal_position / position_in_unique_constraint are not selected here; column
+	// ordering is guaranteed by the ORDER BY clause below, so the Go side can iterate
+	// in row order without needing to track explicit ordinal values.
 	q := `
 		SELECT
 			rc.constraint_name,
-			kcu_local.column_name              AS local_col,
-			kcu_local.ordinal_position         AS local_ord,
-			ccu.table_name                     AS fk_table,
-			ccu.column_name                    AS fk_col,
-			kcu_local.position_in_unique_constraint AS fk_ord,
+			kcu_local.column_name                     AS local_col,
+			ccu.table_schema || '.' || ccu.table_name AS fk_table,
+			ccu.column_name                           AS fk_col,
 			rc.delete_rule,
 			rc.update_rule
 		FROM information_schema.referential_constraints rc
@@ -340,10 +346,8 @@ func queryForeignKeys(ctx context.Context, pool *pgxpool.Pool, schema, table str
 	// Accumulate per-constraint data keyed by name.
 	type fkRow struct {
 		localCol string
-		localOrd int
 		fkTable  string
 		fkCol    string
-		fkOrd    int
 	}
 
 	type fkData struct {
@@ -360,10 +364,9 @@ func queryForeignKeys(ctx context.Context, pool *pgxpool.Pool, schema, table str
 	for rows.Next() {
 		var (
 			name, localCol, fkTable, fkCol string
-			localOrd, fkOrd                int
 			delRule, updRule               string
 		)
-		if err := rows.Scan(&name, &localCol, &localOrd, &fkTable, &fkCol, &fkOrd, &delRule, &updRule); err != nil {
+		if err := rows.Scan(&name, &localCol, &fkTable, &fkCol, &delRule, &updRule); err != nil {
 			return nil, err
 		}
 
@@ -375,10 +378,8 @@ func queryForeignKeys(ctx context.Context, pool *pgxpool.Pool, schema, table str
 		}
 		fd.rows = append(fd.rows, fkRow{
 			localCol: localCol,
-			localOrd: localOrd,
 			fkTable:  fkTable,
 			fkCol:    fkCol,
-			fkOrd:    fkOrd,
 		})
 	}
 	if err := rows.Err(); err != nil {
