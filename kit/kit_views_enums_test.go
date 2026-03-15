@@ -450,6 +450,45 @@ func TestEnumColumn_InTable(t *testing.T) {
 	}
 }
 
+// --- EnumColumnBuilder.Default escaping ---
+
+func TestEnumColumn_Default_EscapesSingleQuotes(t *testing.T) {
+	// A value containing a single quote must be escaped as '' in SQL.
+	col := pg.EnumColumn("status").Default("it's").Build("state")
+	want := "'it''s'"
+	if col.DefaultExpr != want {
+		t.Errorf("Default(%q): got DefaultExpr %q, want %q", "it's", col.DefaultExpr, want)
+	}
+}
+
+func TestEnumColumn_Default_EscapesMultipleSingleQuotes(t *testing.T) {
+	col := pg.EnumColumn("status").Default("l'amour's").Build("state")
+	want := "'l''amour''s'"
+	if col.DefaultExpr != want {
+		t.Errorf("Default(%q): got DefaultExpr %q, want %q", "l'amour's", col.DefaultExpr, want)
+	}
+}
+
+// --- Enum() empty-value validation ---
+
+func TestEnum_PanicsOnEmptyValue(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("expected pg.Enum to panic on empty value, but it did not")
+		}
+	}()
+	pg.Enum("status", "active", "", "archived")
+}
+
+func TestSchemaEnum_PanicsOnEmptyValue(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("expected pg.SchemaEnum to panic on empty value, but it did not")
+		}
+	}()
+	pg.SchemaEnum("auth", "role", "admin", "")
+}
+
 // --- View DSL tests ---
 
 func TestCreateView_QualifiedName(t *testing.T) {

@@ -1,6 +1,9 @@
 package pg
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // EnumDef is the definition of a PostgreSQL enum type (CREATE TYPE ... AS ENUM).
 // Create one with Enum().
@@ -19,17 +22,29 @@ func (e *EnumDef) QualifiedName() string {
 }
 
 // Enum declares a PostgreSQL enum type with the given name and values.
-// Values are stored in declaration order and must be non-empty strings.
+// Values are stored in declaration order and must be non-empty strings;
+// Enum panics if any value is empty.
 //
 //	var StatusEnum = pg.Enum("status", "pending", "active", "archived")
 func Enum(name string, values ...string) *EnumDef {
+	for i, v := range values {
+		if v == "" {
+			panic(fmt.Sprintf("pg.Enum: value at index %d is empty; all enum values must be non-empty strings", i))
+		}
+	}
 	return &EnumDef{Name: name, Values: values}
 }
 
 // SchemaEnum declares an enum type inside a named PostgreSQL schema namespace.
+// SchemaEnum panics if any value is empty.
 //
 //	var RoleEnum = pg.SchemaEnum("auth", "role", "admin", "user", "guest")
 func SchemaEnum(schema, name string, values ...string) *EnumDef {
+	for i, v := range values {
+		if v == "" {
+			panic(fmt.Sprintf("pg.SchemaEnum: value at index %d is empty; all enum values must be non-empty strings", i))
+		}
+	}
 	return &EnumDef{Schema: schema, Name: name, Values: values}
 }
 
@@ -57,7 +72,7 @@ func EnumColumn(typeName string) *EnumColumnBuilder {
 
 func (b *EnumColumnBuilder) NotNull() *EnumColumnBuilder { b.setNotNull(); return b }
 func (b *EnumColumnBuilder) Default(val string) *EnumColumnBuilder {
-	b.setDefault(fmt.Sprintf("'%s'", val))
+	b.setDefault("'" + strings.ReplaceAll(val, "'", "''") + "'")
 	return b
 }
 func (b *EnumColumnBuilder) Build(name string) ColumnDef { return b.build(name) }
