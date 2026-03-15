@@ -145,8 +145,15 @@ func TestWindowFrameBound_Immutable(t *testing.T) {
 	}
 
 	// Each call returns the same value (they are functionally constant).
-	if expr.UnboundedPreceding().SQL() != expr.UnboundedPreceding().SQL() {
+	// Compare a second call against the known constant, not against itself.
+	if expr.UnboundedPreceding().SQL() != "UNBOUNDED PRECEDING" {
 		t.Error("UnboundedPreceding() must return same value on each call")
+	}
+	if expr.CurrentRow().SQL() != "CURRENT ROW" {
+		t.Error("CurrentRow() must return same value on each call")
+	}
+	if expr.UnboundedFollowing().SQL() != "UNBOUNDED FOLLOWING" {
+		t.Error("UnboundedFollowing() must return same value on each call")
 	}
 }
 

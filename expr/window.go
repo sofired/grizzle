@@ -185,9 +185,9 @@ func (w WindowFrameBound) SQL() string { return w.sql }
 // unboundedPrecedingBound, currentRowBound, unboundedFollowingBound are the
 // unexported singleton values backing the exported accessor functions.
 var (
-	unboundedPrecedingBound  = WindowFrameBound{sql: "UNBOUNDED PRECEDING"}
-	currentRowBound          = WindowFrameBound{sql: "CURRENT ROW"}
-	unboundedFollowingBound  = WindowFrameBound{sql: "UNBOUNDED FOLLOWING"}
+	unboundedPrecedingBound = WindowFrameBound{sql: "UNBOUNDED PRECEDING"}
+	currentRowBound         = WindowFrameBound{sql: "CURRENT ROW"}
+	unboundedFollowingBound = WindowFrameBound{sql: "UNBOUNDED FOLLOWING"}
 )
 
 // UnboundedPreceding returns the UNBOUNDED PRECEDING window frame bound.
