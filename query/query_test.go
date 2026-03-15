@@ -898,6 +898,24 @@ func TestIndex(t *testing.T) {
 			t.Errorf("expected map length 2, got %d", len(idx))
 		}
 	})
+
+	t.Run("empty slice", func(t *testing.T) {
+		idx := query.Index([]Realm{}, func(r Realm) uuid.UUID { return r.ID })
+		if len(idx) != 0 {
+			t.Errorf("expected empty map, got %d entries", len(idx))
+		}
+	})
+
+	t.Run("single item", func(t *testing.T) {
+		realms := []Realm{{ID: r1, Name: "Only"}}
+		idx := query.Index(realms, func(r Realm) uuid.UUID { return r.ID })
+		if idx[r1].Name != "Only" {
+			t.Errorf("expected Only, got %s", idx[r1].Name)
+		}
+		if len(idx) != 1 {
+			t.Errorf("expected map length 1, got %d", len(idx))
+		}
+	})
 }
 
 func TestFirst(t *testing.T) {
