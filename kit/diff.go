@@ -1,6 +1,10 @@
 package kit
 
 import (
+	"fmt"
+	"sort"
+	"strings"
+
 	pg "github.com/sofired/grizzle/schema/pg"
 )
 
@@ -41,12 +45,19 @@ type Change struct {
 //  1. Create new tables (so FK references resolve).
 //  2. Alter existing tables (columns first, then constraints).
 //  3. Drop removed constraints.
-//  4. Drop removed tables (in reverse to respect FKs — caller may need to reorder).
+//  4. Drop removed tables.
+//
+// Output is sorted for determinism: within each phase, changes are sorted by
+// table name, then by change kind, then by column name where applicable.
 func Diff(old, new Snapshot) []Change {
 	var changes []Change
 
+	// Collect sorted table names to ensure deterministic output.
+	newNames := sortedTableNames(new.Tables)
+	oldNames := sortedTableNames(old.Tables)
+
 	// Phase 1: new tables not in old → CREATE TABLE.
-	for name := range new.Tables {
+	for _, name := range newNames {
 		if _, exists := old.Tables[name]; !exists {
 			changes = append(changes, Change{
 				Kind:      ChangeCreateTable,
@@ -58,16 +69,16 @@ func Diff(old, new Snapshot) []Change {
 	}
 
 	// Phase 2: tables present in both → diff columns and constraints.
-	for name, newT := range new.Tables {
+	for _, name := range newNames {
 		oldT, exists := old.Tables[name]
 		if !exists {
 			continue // handled above
 		}
-		changes = append(changes, diffTable(name, oldT, newT)...)
+		changes = append(changes, diffTable(name, oldT, new.Tables[name])...)
 	}
 
 	// Phase 3: tables in old but not new → DROP TABLE.
-	for name := range old.Tables {
+	for _, name := range oldNames {
 		if _, exists := new.Tables[name]; !exists {
 			changes = append(changes, Change{
 				Kind:      ChangeDropTable,
@@ -77,6 +88,16 @@ func Diff(old, new Snapshot) []Change {
 	}
 
 	return changes
+}
+
+// sortedTableNames returns the keys of the given map, sorted alphabetically.
+func sortedTableNames(tables map[string]*TableSnap) []string {
+	names := make([]string, 0, len(tables))
+	for name := range tables {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 // diffTable computes column- and constraint-level changes for one table.
@@ -119,9 +140,10 @@ func diffTable(tableName string, old, new *TableSnap) []Change {
 	oldCons := constraintMap(old.Constraints)
 	newCons := constraintMap(new.Constraints)
 
-	// Added constraints.
+	// Added constraints (preserve new.Constraints order for stability).
 	for _, nc := range new.Constraints {
-		if _, exists := oldCons[nc.Name]; !exists {
+		key := constraintKey(nc)
+		if _, exists := oldCons[key]; !exists {
 			nc := nc
 			changes = append(changes, Change{
 				Kind:       ChangeAddConstraint,
@@ -133,7 +155,8 @@ func diffTable(tableName string, old, new *TableSnap) []Change {
 
 	// Dropped constraints (or changed — drop+re-add).
 	for _, oc := range old.Constraints {
-		nc, exists := newCons[oc.Name]
+		key := constraintKey(oc)
+		nc, exists := newCons[key]
 		if !exists {
 			oc := oc
 			changes = append(changes, Change{
@@ -195,14 +218,27 @@ func colMap(cols []pg.ColumnDef) map[string]pg.ColumnDef {
 	return m
 }
 
+// constraintKey returns a stable, collision-free key for a constraint.
+// It incorporates the kind and sorted column list so that unnamed constraints
+// or constraints sharing a name do not collide in the map (Fix #6).
+func constraintKey(c pg.Constraint) string {
+	cols := make([]string, len(c.Columns))
+	copy(cols, c.Columns)
+	sort.Strings(cols)
+	return fmt.Sprintf("%s:%s:%s", c.Kind, c.Name, strings.Join(cols, ","))
+}
+
+// constraintMap returns constraints keyed by their stable synthetic key.
 func constraintMap(cons []pg.Constraint) map[string]pg.Constraint {
 	m := make(map[string]pg.Constraint, len(cons))
 	for _, c := range cons {
-		m[c.Name] = c
+		m[constraintKey(c)] = c
 	}
 	return m
 }
 
+// constraintsEqual compares two constraints for logical equality,
+// including FK-specific fields (Fix #9).
 func constraintsEqual(a, b pg.Constraint) bool {
 	if a.Kind != b.Kind || a.Name != b.Name || a.WhereExpr != b.WhereExpr || a.CheckExpr != b.CheckExpr {
 		return false
@@ -212,6 +248,23 @@ func constraintsEqual(a, b pg.Constraint) bool {
 	}
 	for i := range a.Columns {
 		if a.Columns[i] != b.Columns[i] {
+			return false
+		}
+	}
+	// Compare FK-specific fields (Fix #9).
+	if a.Kind == pg.KindForeignKey {
+		if a.FKTable != b.FKTable {
+			return false
+		}
+		if len(a.FKColumns) != len(b.FKColumns) {
+			return false
+		}
+		for i := range a.FKColumns {
+			if a.FKColumns[i] != b.FKColumns[i] {
+				return false
+			}
+		}
+		if a.FKOnDelete != b.FKOnDelete || a.FKOnUpdate != b.FKOnUpdate {
 			return false
 		}
 	}

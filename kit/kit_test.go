@@ -498,3 +498,128 @@ func TestRenameColumn_NilGuard(t *testing.T) {
 		t.Errorf("expected nil for nil cols, got %v", stmts)
 	}
 }
+
+// -------------------------------------------------------------------
+// Fix #8 — Diff() deterministic output
+// -------------------------------------------------------------------
+
+func TestDiff_Deterministic(t *testing.T) {
+	// Run Diff many times and verify the output order is always the same.
+	old := kit.EmptySnapshot()
+	new := kit.FromDefs(realmsDef, usersDef)
+	first := kit.Diff(old, new)
+	for i := 0; i < 20; i++ {
+		got := kit.Diff(old, new)
+		if len(got) != len(first) {
+			t.Fatalf("run %d: length mismatch: got %d, want %d", i, len(got), len(first))
+		}
+		for j := range first {
+			if got[j].Kind != first[j].Kind || got[j].TableName != first[j].TableName {
+				t.Errorf("run %d, change[%d]: got {%s %s}, want {%s %s}",
+					i, j, got[j].Kind, got[j].TableName, first[j].Kind, first[j].TableName)
+			}
+		}
+	}
+}
+
+// -------------------------------------------------------------------
+// Fix #6 — constraintMap key collision
+// -------------------------------------------------------------------
+
+func TestDiff_ConstraintCollision_UnnamedConstraints(t *testing.T) {
+	// Two constraints with the same Name field (e.g. both empty) on different
+	// column sets must not collide in the constraint map.
+	oldDef := pg.Table("t",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("a", pg.Varchar(50)),
+		pg.C("b", pg.Varchar(50)),
+	).WithConstraints(func(t pg.TableRef) []pg.Constraint {
+		return []pg.Constraint{
+			pg.UniqueIndex("").On(t.Col("a")).Build(),
+		}
+	})
+	newDef := pg.Table("t",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("a", pg.Varchar(50)),
+		pg.C("b", pg.Varchar(50)),
+	).WithConstraints(func(t pg.TableRef) []pg.Constraint {
+		return []pg.Constraint{
+			pg.UniqueIndex("").On(t.Col("a")).Build(),
+			pg.UniqueIndex("").On(t.Col("b")).Build(),
+		}
+	})
+	changes := kit.Diff(kit.FromDefs(oldDef), kit.FromDefs(newDef))
+	adds := countKind(changes, kit.ChangeAddConstraint)
+	if adds != 1 {
+		t.Errorf("expected 1 AddConstraint for the new unnamed unique index, got %d: %v", adds, changes)
+	}
+}
+
+// -------------------------------------------------------------------
+// Fix #9 — constraintsEqual ignores FK fields
+// -------------------------------------------------------------------
+
+func TestDiff_FK_OnDeleteChange_DetectedAsChange(t *testing.T) {
+	// Change FK ON DELETE action — must be detected as a drop+re-add.
+	oldDef := pg.Table("posts",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("user_id", pg.UUID().NotNull()),
+	).WithConstraints(func(t pg.TableRef) []pg.Constraint {
+		return []pg.Constraint{
+			pg.ForeignKey("posts_user_fk").
+				From(t.Col("user_id")).
+				References("users", "id").
+				OnDelete(pg.FKActionNoAction).
+				Build(),
+		}
+	})
+	newDef := pg.Table("posts",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("user_id", pg.UUID().NotNull()),
+	).WithConstraints(func(t pg.TableRef) []pg.Constraint {
+		return []pg.Constraint{
+			pg.ForeignKey("posts_user_fk").
+				From(t.Col("user_id")).
+				References("users", "id").
+				OnDelete(pg.FKActionCascade). // changed
+				Build(),
+		}
+	})
+	changes := kit.Diff(kit.FromDefs(oldDef), kit.FromDefs(newDef))
+	drops := countKind(changes, kit.ChangeDropConstraint)
+	adds := countKind(changes, kit.ChangeAddConstraint)
+	if drops != 1 || adds != 1 {
+		t.Errorf("expected 1 drop + 1 add for FK ON DELETE change, got %d drops %d adds: %v", drops, adds, changes)
+	}
+}
+
+func TestDiff_FK_RefTableChange_DetectedAsChange(t *testing.T) {
+	oldDef := pg.Table("posts",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("author_id", pg.UUID().NotNull()),
+	).WithConstraints(func(t pg.TableRef) []pg.Constraint {
+		return []pg.Constraint{
+			pg.ForeignKey("posts_author_fk").
+				From(t.Col("author_id")).
+				References("users", "id").
+				Build(),
+		}
+	})
+	newDef := pg.Table("posts",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("author_id", pg.UUID().NotNull()),
+	).WithConstraints(func(t pg.TableRef) []pg.Constraint {
+		return []pg.Constraint{
+			pg.ForeignKey("posts_author_fk").
+				From(t.Col("author_id")).
+				References("admins", "id"). // changed target table
+				Build(),
+		}
+	})
+	changes := kit.Diff(kit.FromDefs(oldDef), kit.FromDefs(newDef))
+	drops := countKind(changes, kit.ChangeDropConstraint)
+	adds := countKind(changes, kit.ChangeAddConstraint)
+	if drops != 1 || adds != 1 {
+		t.Errorf("expected 1 drop + 1 add for FK table change, got %d drops %d adds: %v", drops, adds, changes)
+	}
+}
