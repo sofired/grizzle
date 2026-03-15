@@ -2,6 +2,7 @@ package parser
 
 import (
 	"fmt"
+	"strings"
 
 	pg "github.com/sofired/grizzle/schema/pg"
 )
@@ -256,15 +257,23 @@ func applyMethod(def *pg.ColumnDef, m MethodCall) error { //nolint:unparam
 	return nil
 }
 
-// applyFKOption interprets a ChainResult for pg.OnDelete(action) / pg.OnUpdate(action).
+// isKnownDialectPkg reports whether pkg is one of the three built-in schema packages.
+// FK option functions (OnDelete, OnUpdate) may be called as pg.OnDelete(…),
+// mysql.OnDelete(…), or sqlite.OnDelete(…) — all are equivalent.
+func isKnownDialectPkg(pkg string) bool {
+	return pkg == "pg" || pkg == "mysql" || pkg == "sqlite"
+}
+
+// applyFKOption interprets a ChainResult for OnDelete(action) / OnUpdate(action)
+// from any of the three built-in schema packages (pg, mysql, sqlite).
 func applyFKOption(ref *pg.FKRef, chain *ChainResult) {
-	if chain.BasePkg != "pg" {
+	if !isKnownDialectPkg(chain.BasePkg) {
 		return
 	}
 	var action pg.FKAction
 	if len(chain.BaseArgs) > 0 {
-		// The arg may be "pg.FKActionRestrict" (as a string from the selector eval)
-		// or the constant value directly.
+		// The arg may be "pg.FKActionRestrict" / "mysql.FKActionCascade" (as a
+		// string from the selector eval) or the unqualified constant name.
 		switch v := chain.BaseArgs[0].(type) {
 		case string:
 			action = fkActionFromString(v)
@@ -278,16 +287,22 @@ func applyFKOption(ref *pg.FKRef, chain *ChainResult) {
 	}
 }
 
-// fkActionFromString maps "pg.FKActionRestrict" → pg.FKActionRestrict etc.
+// fkActionFromString maps a dialect-qualified or bare FKAction constant name to
+// its pg.FKAction value. Any dialect prefix (pg., mysql., sqlite.) is accepted.
 func fkActionFromString(s string) pg.FKAction {
+	// Strip any "pkg." prefix so that "mysql.FKActionCascade" and
+	// "pg.FKActionCascade" and plain "FKActionCascade" all resolve the same way.
+	if dot := strings.LastIndex(s, "."); dot >= 0 {
+		s = s[dot+1:]
+	}
 	switch s {
-	case "pg.FKActionRestrict", "FKActionRestrict":
+	case "FKActionRestrict":
 		return pg.FKActionRestrict
-	case "pg.FKActionCascade", "FKActionCascade":
+	case "FKActionCascade":
 		return pg.FKActionCascade
-	case "pg.FKActionSetNull", "FKActionSetNull":
+	case "FKActionSetNull":
 		return pg.FKActionSetNull
-	case "pg.FKActionSetDefault", "FKActionSetDefault":
+	case "FKActionSetDefault":
 		return pg.FKActionSetDefault
 	default:
 		return pg.FKActionNoAction

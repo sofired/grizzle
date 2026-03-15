@@ -647,3 +647,72 @@ var T = sqlite.SchemaTable("main", "events", sqlite.C("id", sqlite.Integer().Pri
 		t.Errorf("TableName: got %q, want events", tbl.TableName)
 	}
 }
+
+// TestEvalTable_MySQL_OnDelete verifies that mysql.OnDelete(mysql.FKActionCascade)
+// is correctly parsed — fixing the DEVIATION:BROKEN where BasePkg != "pg" caused
+// FK options to be silently dropped for non-PostgreSQL schemas (#156, #114).
+func TestEvalTable_MySQL_OnDelete(t *testing.T) {
+	src := `package s
+import mysql "github.com/sofired/grizzle/schema/mysql"
+var T = mysql.Table("t", mysql.C("realm_id", mysql.UUID().NotNull().References("realms", "id", mysql.OnDelete(mysql.FKActionCascade))))`
+	tbl := oneTable(t, parseSource(t, src))
+	def, err := parser.EvalTable(tbl)
+	if err != nil {
+		t.Fatalf("EvalTable: %v", err)
+	}
+	c := def.Columns[0]
+	if c.References == nil {
+		t.Fatal("References: want non-nil FKRef")
+	}
+	if c.References.OnDelete != pg.FKActionCascade {
+		t.Errorf("OnDelete: got %v, want FKActionCascade", c.References.OnDelete)
+	}
+}
+
+// TestEvalTable_SQLite_OnDelete verifies that sqlite.OnDelete(sqlite.FKActionRestrict)
+// is correctly parsed for SQLite schemas (#156, #114).
+func TestEvalTable_SQLite_OnDelete(t *testing.T) {
+	src := `package s
+import sqlite "github.com/sofired/grizzle/schema/sqlite"
+var T = sqlite.Table("t", sqlite.C("parent_id", sqlite.Integer().References("parents", "id", sqlite.OnDelete(sqlite.FKActionRestrict))))`
+	tbl := oneTable(t, parseSource(t, src))
+	def, err := parser.EvalTable(tbl)
+	if err != nil {
+		t.Fatalf("EvalTable: %v", err)
+	}
+	c := def.Columns[0]
+	if c.References == nil {
+		t.Fatal("References: want non-nil FKRef")
+	}
+	if c.References.OnDelete != pg.FKActionRestrict {
+		t.Errorf("OnDelete: got %v, want FKActionRestrict", c.References.OnDelete)
+	}
+}
+
+// TestParsedTable_Dialect verifies that the Dialect field is populated from the
+// schema package name (pg, mysql, sqlite) for each dialect (#156).
+func TestParsedTable_Dialect(t *testing.T) {
+	cases := []struct {
+		src     string
+		dialect string
+	}{
+		{
+			src:     "package s\nimport pg \"github.com/sofired/grizzle/schema/pg\"\nvar T = pg.Table(\"t\", pg.C(\"id\", pg.UUID().PrimaryKey()))",
+			dialect: "pg",
+		},
+		{
+			src:     "package s\nimport mysql \"github.com/sofired/grizzle/schema/mysql\"\nvar T = mysql.Table(\"t\", mysql.C(\"id\", mysql.UUID().PrimaryKey()))",
+			dialect: "mysql",
+		},
+		{
+			src:     "package s\nimport sqlite \"github.com/sofired/grizzle/schema/sqlite\"\nvar T = sqlite.Table(\"t\", sqlite.C(\"id\", sqlite.Integer().PrimaryKey()))",
+			dialect: "sqlite",
+		},
+	}
+	for _, c := range cases {
+		tbl := oneTable(t, parseSource(t, c.src))
+		if tbl.Dialect != c.dialect {
+			t.Errorf("Dialect: got %q, want %q", tbl.Dialect, c.dialect)
+		}
+	}
+}
