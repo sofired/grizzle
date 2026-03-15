@@ -66,13 +66,17 @@ func (b *Batch) QueueQuery(bl builder) {
 // as an exec entry (rows affected). Use QueueRawQuery for SELECT statements
 // whose rows you want to read.
 func (b *Batch) QueueRaw(sql string, args ...any) {
-	b.entries = append(b.entries, batchEntry{sql: sql, args: args, isQuery: false})
+	argsCopy := make([]any, len(args))
+	copy(argsCopy, args)
+	b.entries = append(b.entries, batchEntry{sql: sql, args: argsCopy, isQuery: false})
 }
 
 // QueueRawQuery adds a raw SQL SELECT to the batch as a query entry. Rows are
 // readable via BatchResults.Query after Send.
 func (b *Batch) QueueRawQuery(sql string, args ...any) {
-	b.entries = append(b.entries, batchEntry{sql: sql, args: args, isQuery: true})
+	argsCopy := make([]any, len(args))
+	copy(argsCopy, args)
+	b.entries = append(b.entries, batchEntry{sql: sql, args: argsCopy, isQuery: true})
 }
 
 // Len returns the number of statements queued so far.
@@ -98,7 +102,9 @@ func (b *Batch) Send(ctx context.Context) (*BatchResults, error) {
 	}
 
 	br := b.pool.sendBatch(ctx, pgxBatch)
-	return &BatchResults{br: br, entries: b.entries}, nil
+	snapshot := make([]batchEntry, len(b.entries))
+	copy(snapshot, b.entries)
+	return &BatchResults{br: br, entries: snapshot}, nil
 }
 
 // -------------------------------------------------------------------
