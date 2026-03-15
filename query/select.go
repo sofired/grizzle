@@ -139,8 +139,10 @@ func (b *SelectBuilder) NoWait() *SelectBuilder {
 
 // Of restricts the locking clause to the specified tables, adding
 // OF "table1", "table2" after the lock mode keyword.
-// Supported by PostgreSQL; on MySQL only a single table may be specified.
+// Supported by PostgreSQL (any number of tables) and MySQL FOR UPDATE (single
+// table only — additional tables are silently dropped at render time).
 // Has no effect when used with SQLite (locking is silently dropped).
+// The OF clause uses each table's alias as it appears in the FROM/JOIN clause.
 //
 //	query.Select().From(OrdersT).LeftJoin(UsersT, ...).ForUpdate().Of(OrdersT)
 //	// → ... FOR UPDATE OF "orders"
@@ -438,6 +440,8 @@ func (b *SelectBuilder) buildWith(ctx *expr.BuildContext) string {
 
 	// Locking clauses — dialect-aware.
 	// SQLite does not support row-level locking; clauses are silently dropped.
+	// FOR NO KEY UPDATE and FOR KEY SHARE are PostgreSQL-only; they are silently
+	// dropped on other dialects.
 	if b.lock != lockNone && ctx.Dialect().Name() != "sqlite" {
 		d := ctx.Dialect().Name()
 		switch b.lock {
@@ -450,24 +454,38 @@ func (b *SelectBuilder) buildWith(ctx *expr.BuildContext) string {
 				sb.WriteString(" FOR SHARE")
 			}
 		case lockForNoKeyUpdate:
-			sb.WriteString(" FOR NO KEY UPDATE")
+			if d == "postgres" {
+				sb.WriteString(" FOR NO KEY UPDATE")
+			}
 		case lockForKeyShare:
-			sb.WriteString(" FOR KEY SHARE")
+			if d == "postgres" {
+				sb.WriteString(" FOR KEY SHARE")
+			}
 		}
-		// OF table list (not applicable to MySQL LOCK IN SHARE MODE syntax)
-		if len(b.lockOf) > 0 && (b.lock != lockForShare || d != "mysql") {
+		// OF table list (not applicable to MySQL LOCK IN SHARE MODE syntax, and
+		// not applicable to non-postgres dialects when using postgres-only lock modes).
+		// On MySQL only a single table may be specified; additional tables are dropped.
+		lockModeEmitted := b.lock == lockForUpdate ||
+			b.lock == lockForShare ||
+			(d == "postgres" && (b.lock == lockForNoKeyUpdate || b.lock == lockForKeyShare))
+		if len(b.lockOf) > 0 && lockModeEmitted && (b.lock != lockForShare || d != "mysql") {
 			sb.WriteString(" OF ")
-			for i, t := range b.lockOf {
+			tables := b.lockOf
+			if d == "mysql" && len(tables) > 1 {
+				tables = tables[:1]
+			}
+			for i, t := range tables {
 				if i > 0 {
 					sb.WriteString(", ")
 				}
-				sb.WriteString(ctx.Quote(t.GrizTableName()))
+				sb.WriteString(ctx.Quote(t.GrizTableAlias()))
 			}
 		}
 		// Behaviour modifiers — NOWAIT and SKIP LOCKED.
-		// MySQL supports them only on FOR UPDATE / FOR SHARE (not LOCK IN SHARE MODE alias).
+		// MySQL renders FOR SHARE as LOCK IN SHARE MODE, which does not support
+		// NOWAIT or SKIP LOCKED; modifiers are only applied for FOR UPDATE on MySQL.
 		applyModifier := d == "postgres" ||
-			(d == "mysql" && b.lock != lockForShare)
+			(d == "mysql" && b.lock == lockForUpdate)
 		if applyModifier {
 			if b.lockSkipLocked {
 				sb.WriteString(" SKIP LOCKED")

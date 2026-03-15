@@ -1715,6 +1715,64 @@ func TestSelect_ForShare_Of_MySQL_Dropped(t *testing.T) {
 }
 
 // -------------------------------------------------------------------
+// Postgres-only lock mode dialect guard tests
+// -------------------------------------------------------------------
+
+func TestSelect_ForNoKeyUpdate_MySQL_Dropped(t *testing.T) {
+	// FOR NO KEY UPDATE is PostgreSQL-only; MySQL should emit no locking clause.
+	q := query.Select().From(ts.UsersT).Where(ts.UsersT.ID.EQ(uuid.Nil)).ForNoKeyUpdate()
+	got, _ := q.Build(dialect.MySQL)
+	want := "SELECT * FROM `users` WHERE `users`.`id` = ?"
+	if got != want {
+		t.Errorf("SQL mismatch\n got:  %s\nwant: %s", got, want)
+	}
+}
+
+func TestSelect_ForKeyShare_MySQL_Dropped(t *testing.T) {
+	// FOR KEY SHARE is PostgreSQL-only; MySQL should emit no locking clause.
+	q := query.Select().From(ts.UsersT).ForKeyShare()
+	got, _ := q.Build(dialect.MySQL)
+	want := "SELECT * FROM `users`"
+	if got != want {
+		t.Errorf("SQL mismatch\n got:  %s\nwant: %s", got, want)
+	}
+}
+
+// -------------------------------------------------------------------
+// MySQL OF single-table enforcement tests
+// -------------------------------------------------------------------
+
+func TestSelect_ForUpdate_Of_MySQL_SingleTable(t *testing.T) {
+	// MySQL FOR UPDATE OF only supports a single table; extras are silently dropped.
+	q := query.Select().From(ts.UsersT).
+		LeftJoin(ts.RealmsT, ts.UsersT.RealmID.EQCol(ts.RealmsT.ID)).
+		ForUpdate().Of(ts.UsersT, ts.RealmsT)
+	got, _ := q.Build(dialect.MySQL)
+	want := "SELECT * FROM `users` LEFT JOIN `realms` ON `users`.`realm_id` = `realms`.`id` FOR UPDATE OF `users`"
+	if got != want {
+		t.Errorf("SQL mismatch\n got:  %s\nwant: %s", got, want)
+	}
+}
+
+// -------------------------------------------------------------------
+// OF alias test
+// -------------------------------------------------------------------
+
+func TestSelect_ForUpdate_Of_UsesAlias(t *testing.T) {
+	// OF must reference the alias (as it appears in FROM/JOIN), not the base table name.
+	// RealmsT alias == table name here, so use the table directly — alias == name is fine.
+	// This test verifies that GrizTableAlias() is used, so it holds when alias != name.
+	q := query.Select().From(ts.UsersT).
+		LeftJoin(ts.RealmsT, ts.UsersT.RealmID.EQCol(ts.RealmsT.ID)).
+		ForUpdate().Of(ts.RealmsT)
+	got, _ := q.Build(dialect.Postgres)
+	want := `SELECT * FROM "users" LEFT JOIN "realms" ON "users"."realm_id" = "realms"."id" FOR UPDATE OF "realms"`
+	if got != want {
+		t.Errorf("SQL mismatch\n got:  %s\nwant: %s", got, want)
+	}
+}
+
+// -------------------------------------------------------------------
 // UPDATE / DELETE LIMIT tests
 // -------------------------------------------------------------------
 
