@@ -1612,6 +1612,38 @@ func TestSelect_ForShare_SQLite(t *testing.T) {
 	}
 }
 
+func TestSelect_ForNoKeyUpdate_Postgres(t *testing.T) {
+	q := query.Select().From(ts.UsersT).ForNoKeyUpdate()
+	got, _ := q.Build(dialect.Postgres)
+	if !strings.Contains(got, "FOR NO KEY UPDATE") {
+		t.Errorf("expected FOR NO KEY UPDATE in: %s", got)
+	}
+}
+
+func TestSelect_ForNoKeyUpdate_MySQL(t *testing.T) {
+	q := query.Select().From(ts.UsersT).ForNoKeyUpdate()
+	got, _ := q.Build(dialect.MySQL)
+	if strings.Contains(got, "NO KEY") {
+		t.Errorf("FOR NO KEY UPDATE should not be emitted for MySQL, got: %s", got)
+	}
+}
+
+func TestSelect_ForKeyShare_Postgres(t *testing.T) {
+	q := query.Select().From(ts.UsersT).ForKeyShare()
+	got, _ := q.Build(dialect.Postgres)
+	if !strings.Contains(got, "FOR KEY SHARE") {
+		t.Errorf("expected FOR KEY SHARE in: %s", got)
+	}
+}
+
+func TestSelect_ForKeyShare_MySQL(t *testing.T) {
+	q := query.Select().From(ts.UsersT).ForKeyShare()
+	got, _ := q.Build(dialect.MySQL)
+	if strings.Contains(got, "KEY SHARE") {
+		t.Errorf("FOR KEY SHARE should not be emitted for MySQL, got: %s", got)
+	}
+}
+
 // -------------------------------------------------------------------
 // UPDATE / DELETE LIMIT tests
 // -------------------------------------------------------------------

@@ -23,8 +23,10 @@ type SelectBuilder struct {
 	having    expr.Expression
 	limit     int  // 0 = no limit
 	offset    int  // 0 = no offset
-	forUpdate bool // append FOR UPDATE
-	forShare  bool // append FOR SHARE
+	forUpdate    bool // append FOR UPDATE
+	forShare     bool // append FOR SHARE
+	forNoKeyUpdate bool // append FOR NO KEY UPDATE (PostgreSQL only)
+	forKeyShare  bool // append FOR KEY SHARE (PostgreSQL only)
 }
 
 // cteClause holds a single WITH name AS (...) entry.
@@ -58,22 +60,54 @@ func (b *SelectBuilder) Distinct() *SelectBuilder {
 }
 
 // ForUpdate appends FOR UPDATE to the query, locking selected rows against
-// concurrent updates. PostgreSQL and MySQL only — not supported by SQLite.
+// concurrent updates. Supported by PostgreSQL and MySQL; silently dropped for
+// SQLite, which uses file-level locking only.
 //
 //	query.Select().From(UsersT).Where(UsersT.ID.EQ(id)).ForUpdate()
 func (b *SelectBuilder) ForUpdate() *SelectBuilder {
 	cp := *b
 	cp.forUpdate = true
 	cp.forShare = false
+	cp.forNoKeyUpdate = false
+	cp.forKeyShare = false
 	return &cp
 }
 
 // ForShare appends FOR SHARE (PostgreSQL) / LOCK IN SHARE MODE (MySQL) to
 // the query, locking rows for read while allowing other readers.
+// Silently dropped for dialects that do not support row-level locking (e.g. SQLite).
 func (b *SelectBuilder) ForShare() *SelectBuilder {
 	cp := *b
 	cp.forShare = true
 	cp.forUpdate = false
+	cp.forNoKeyUpdate = false
+	cp.forKeyShare = false
+	return &cp
+}
+
+// ForNoKeyUpdate appends FOR NO KEY UPDATE to the query. This PostgreSQL-specific
+// lock mode is weaker than FOR UPDATE: it does not block INSERT of child rows that
+// reference this row via a foreign key. Silently dropped for dialects that do not
+// support this locking mode (e.g. MySQL, SQLite).
+func (b *SelectBuilder) ForNoKeyUpdate() *SelectBuilder {
+	cp := *b
+	cp.forNoKeyUpdate = true
+	cp.forUpdate = false
+	cp.forShare = false
+	cp.forKeyShare = false
+	return &cp
+}
+
+// ForKeyShare appends FOR KEY SHARE to the query. This PostgreSQL-specific
+// lock mode is the weakest row lock: it only blocks DELETE and FOR UPDATE
+// operations that would delete or change key values. Silently dropped for
+// dialects that do not support this locking mode (e.g. MySQL, SQLite).
+func (b *SelectBuilder) ForKeyShare() *SelectBuilder {
+	cp := *b
+	cp.forKeyShare = true
+	cp.forUpdate = false
+	cp.forShare = false
+	cp.forNoKeyUpdate = false
 	return &cp
 }
 
@@ -368,11 +402,15 @@ func (b *SelectBuilder) buildWith(ctx *expr.BuildContext) string {
 		if b.forUpdate {
 			sb.WriteString(" FOR UPDATE")
 		} else if b.forShare {
-			if ctx.Dialect().Name() == "mysql" {
-				sb.WriteString(" LOCK IN SHARE MODE")
-			} else {
-				sb.WriteString(" FOR SHARE")
-			}
+			sb.WriteString(" " + ctx.Dialect().ForShareClause())
+		}
+	}
+	// FOR NO KEY UPDATE / FOR KEY SHARE are PostgreSQL-only locking modes.
+	if ctx.Dialect().SupportsForNoKeyUpdate() {
+		if b.forNoKeyUpdate {
+			sb.WriteString(" FOR NO KEY UPDATE")
+		} else if b.forKeyShare {
+			sb.WriteString(" FOR KEY SHARE")
 		}
 	}
 

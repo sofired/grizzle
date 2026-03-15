@@ -48,29 +48,51 @@ type Dialect interface {
 	InsertIgnoreClause() string
 
 	// SupportsCTE reports whether the dialect supports Common Table Expressions
-	// (WITH clauses). True for PostgreSQL, MySQL 8.0+, and SQLite 3.35+.
+	// (WITH clauses). True for PostgreSQL, MySQL 8.0+, and SQLite 3.8.3+.
+	//
+	// Advisory: the query builder does not currently enforce this at build time.
+	// Callers targeting older engine versions must guard usage themselves.
 	SupportsCTE() bool
 
 	// SupportsWindowFunctions reports whether the dialect supports window
 	// functions (OVER clause). True for PostgreSQL, MySQL 8.0+, and SQLite 3.25+.
+	//
+	// Advisory: the query builder does not currently enforce this at build time.
+	// Callers targeting older engine versions must guard usage themselves.
 	SupportsWindowFunctions() bool
 
 	// SupportsDistinctOn reports whether the dialect supports SELECT DISTINCT ON
 	// (expr, ...). This is a PostgreSQL extension; MySQL and SQLite do not support it.
+	//
+	// Advisory: the query builder does not currently enforce this at build time.
+	// Callers targeting non-PostgreSQL dialects must avoid DISTINCT ON themselves.
 	SupportsDistinctOn() bool
 
 	// SupportsForUpdate reports whether the dialect supports row-level locking
 	// via FOR UPDATE and FOR SHARE. True for PostgreSQL and MySQL; false for SQLite,
 	// which uses file-level locking only.
+	//
+	// The query builder gates FOR UPDATE / FOR SHARE generation on this flag.
+	// When false, locking clauses are silently dropped from the output SQL.
 	SupportsForUpdate() bool
 
-	// SupportsForNoKeyUpdate reports whether the dialect supports the PostgreSQL-specific
-	// FOR NO KEY UPDATE and FOR KEY SHARE locking modes. False for MySQL and SQLite.
+	// SupportsForNoKeyUpdate reports whether the dialect supports the
+	// PostgreSQL-specific FOR NO KEY UPDATE and FOR KEY SHARE locking modes.
+	// False for MySQL and SQLite.
+	//
+	// The query builder gates ForNoKeyUpdate() and ForKeyShare() on this flag.
 	SupportsForNoKeyUpdate() bool
 
 	// SupportsFullJoin reports whether the dialect supports FULL [OUTER] JOIN.
 	// True for PostgreSQL; false for MySQL and SQLite.
+	//
+	// Advisory: the query builder does not currently enforce this at build time.
 	SupportsFullJoin() bool
+
+	// ForShareClause returns the SQL keyword phrase for a shared row lock.
+	// PostgreSQL/SQLite: "FOR SHARE". MySQL: "LOCK IN SHARE MODE".
+	// Returns "" for dialects that do not support row-level locking.
+	ForShareClause() string
 }
 
 // -------------------------------------------------------------------
@@ -92,6 +114,7 @@ func (postgresDialect) SupportsDistinctOn() bool      { return true }
 func (postgresDialect) SupportsForUpdate() bool       { return true }
 func (postgresDialect) SupportsForNoKeyUpdate() bool  { return true }
 func (postgresDialect) SupportsFullJoin() bool        { return true }
+func (postgresDialect) ForShareClause() string        { return "FOR SHARE" }
 
 func (postgresDialect) Placeholder(n int) string {
 	return fmt.Sprintf("$%d", n)
@@ -115,12 +138,13 @@ func (mysqlDialect) Name() string                  { return "mysql" }
 func (mysqlDialect) SupportsReturning() bool       { return false }
 func (mysqlDialect) UpsertStyle() UpsertStyle      { return UpsertDuplicateKey }
 func (mysqlDialect) InsertIgnoreClause() string    { return "INSERT IGNORE" }
-func (mysqlDialect) SupportsCTE() bool             { return true }  // MySQL 8.0+
-func (mysqlDialect) SupportsWindowFunctions() bool { return true }  // MySQL 8.0+
+func (mysqlDialect) SupportsCTE() bool             { return true } // MySQL 8.0+
+func (mysqlDialect) SupportsWindowFunctions() bool { return true } // MySQL 8.0+
 func (mysqlDialect) SupportsDistinctOn() bool      { return false }
 func (mysqlDialect) SupportsForUpdate() bool       { return true }
 func (mysqlDialect) SupportsForNoKeyUpdate() bool  { return false }
 func (mysqlDialect) SupportsFullJoin() bool        { return false }
+func (mysqlDialect) ForShareClause() string        { return "LOCK IN SHARE MODE" }
 
 func (mysqlDialect) Placeholder(_ int) string { return "?" }
 
@@ -141,12 +165,13 @@ func (sqliteDialect) Name() string                  { return "sqlite" }
 func (sqliteDialect) SupportsReturning() bool       { return true } // SQLite 3.35+
 func (sqliteDialect) UpsertStyle() UpsertStyle      { return UpsertOnConflict }
 func (sqliteDialect) InsertIgnoreClause() string    { return "INSERT OR IGNORE" }
-func (sqliteDialect) SupportsCTE() bool             { return true }  // SQLite 3.35+
-func (sqliteDialect) SupportsWindowFunctions() bool { return true }  // SQLite 3.25+
+func (sqliteDialect) SupportsCTE() bool             { return true } // SQLite 3.8.3+
+func (sqliteDialect) SupportsWindowFunctions() bool { return true } // SQLite 3.25+
 func (sqliteDialect) SupportsDistinctOn() bool      { return false }
 func (sqliteDialect) SupportsForUpdate() bool       { return false }
 func (sqliteDialect) SupportsForNoKeyUpdate() bool  { return false }
 func (sqliteDialect) SupportsFullJoin() bool        { return false }
+func (sqliteDialect) ForShareClause() string        { return "" }
 
 func (sqliteDialect) Placeholder(_ int) string { return "?" }
 

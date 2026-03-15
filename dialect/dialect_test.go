@@ -10,14 +10,15 @@ import (
 // capabilities for all feature-detection methods added in #155.
 func TestDialectFeatureMatrix(t *testing.T) {
 	type row struct {
-		name                string
-		d                   dialect.Dialect
-		supportsCTE         bool
-		supportsWindow      bool
-		supportsDistinctOn  bool
-		supportsForUpdate   bool
-		supportsForNoKey    bool
-		supportsFullJoin    bool
+		name               string
+		d                  dialect.Dialect
+		supportsCTE        bool
+		supportsWindow     bool
+		supportsDistinctOn bool
+		supportsForUpdate  bool
+		supportsForNoKey   bool
+		supportsFullJoin   bool
+		forShareClause     string
 	}
 
 	cases := []row{
@@ -30,6 +31,7 @@ func TestDialectFeatureMatrix(t *testing.T) {
 			supportsForUpdate:  true,
 			supportsForNoKey:   true,
 			supportsFullJoin:   true,
+			forShareClause:     "FOR SHARE",
 		},
 		{
 			name:               "mysql",
@@ -40,6 +42,7 @@ func TestDialectFeatureMatrix(t *testing.T) {
 			supportsForUpdate:  true,
 			supportsForNoKey:   false,
 			supportsFullJoin:   false,
+			forShareClause:     "LOCK IN SHARE MODE",
 		},
 		{
 			name:               "sqlite",
@@ -50,23 +53,31 @@ func TestDialectFeatureMatrix(t *testing.T) {
 			supportsForUpdate:  false,
 			supportsForNoKey:   false,
 			supportsFullJoin:   false,
+			forShareClause:     "",
 		},
 	}
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			check := func(method string, got, want bool) {
+			checkBool := func(method string, got, want bool) {
 				t.Helper()
 				if got != want {
 					t.Errorf("%s.%s() = %v, want %v", c.name, method, got, want)
 				}
 			}
-			check("SupportsCTE", c.d.SupportsCTE(), c.supportsCTE)
-			check("SupportsWindowFunctions", c.d.SupportsWindowFunctions(), c.supportsWindow)
-			check("SupportsDistinctOn", c.d.SupportsDistinctOn(), c.supportsDistinctOn)
-			check("SupportsForUpdate", c.d.SupportsForUpdate(), c.supportsForUpdate)
-			check("SupportsForNoKeyUpdate", c.d.SupportsForNoKeyUpdate(), c.supportsForNoKey)
-			check("SupportsFullJoin", c.d.SupportsFullJoin(), c.supportsFullJoin)
+			checkStr := func(method, got, want string) {
+				t.Helper()
+				if got != want {
+					t.Errorf("%s.%s() = %q, want %q", c.name, method, got, want)
+				}
+			}
+			checkBool("SupportsCTE", c.d.SupportsCTE(), c.supportsCTE)
+			checkBool("SupportsWindowFunctions", c.d.SupportsWindowFunctions(), c.supportsWindow)
+			checkBool("SupportsDistinctOn", c.d.SupportsDistinctOn(), c.supportsDistinctOn)
+			checkBool("SupportsForUpdate", c.d.SupportsForUpdate(), c.supportsForUpdate)
+			checkBool("SupportsForNoKeyUpdate", c.d.SupportsForNoKeyUpdate(), c.supportsForNoKey)
+			checkBool("SupportsFullJoin", c.d.SupportsFullJoin(), c.supportsFullJoin)
+			checkStr("ForShareClause", c.d.ForShareClause(), c.forShareClause)
 		})
 	}
 }
