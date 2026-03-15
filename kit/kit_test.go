@@ -739,3 +739,93 @@ func TestRenameColumn_NilGuard(t *testing.T) {
 		t.Errorf("expected nil for nil cols, got %v", stmts)
 	}
 }
+
+// -------------------------------------------------------------------
+// addConstraintSQL ON UPDATE clause — regression tests for Copilot PR #52 feedback
+// -------------------------------------------------------------------
+
+func TestAddConstraintSQL_FKOnUpdate_Postgres(t *testing.T) {
+	// ALTER TABLE ... ADD CONSTRAINT for a FK with ON UPDATE SET NULL must include
+	// the ON UPDATE clause so that re-applying a detected FKOnUpdate change produces
+	// correct SQL instead of silently writing the DB default.
+	snap := kit.FromDefs(usersDef)
+	con := pg.Constraint{
+		Kind:      pg.KindForeignKey,
+		Name:      "orders_customer_fk",
+		Columns:   []string{"customer_id"},
+		FKTable:   "customers",
+		FKColumns: []string{"id"},
+		FKOnUpdate: pg.FKActionSetNull,
+	}
+	c := kit.Change{
+		Kind:       kit.ChangeAddConstraint,
+		TableName:  "orders",
+		Constraint: &con,
+	}
+	stmts := kit.GenerateChangeSQL(snap, c)
+	if len(stmts) != 1 {
+		t.Fatalf("expected 1 statement, got %d: %v", len(stmts), stmts)
+	}
+	if !strings.Contains(stmts[0], "ON UPDATE SET NULL") {
+		t.Errorf("expected ON UPDATE SET NULL in Postgres ADD CONSTRAINT SQL, got:\n  %s", stmts[0])
+	}
+}
+
+func TestAddConstraintSQL_FKOnUpdate_MySQL(t *testing.T) {
+	// Same assertion for the MySQL dialect.
+	snap := kit.FromDefs(usersDef)
+	con := pg.Constraint{
+		Kind:      pg.KindForeignKey,
+		Name:      "orders_customer_fk",
+		Columns:   []string{"customer_id"},
+		FKTable:   "customers",
+		FKColumns: []string{"id"},
+		FKOnUpdate: pg.FKActionSetNull,
+	}
+	c := kit.Change{
+		Kind:       kit.ChangeAddConstraint,
+		TableName:  "orders",
+		Constraint: &con,
+	}
+	stmts := kit.GenerateChangeSQLMySQL(snap, c)
+	if len(stmts) != 1 {
+		t.Fatalf("expected 1 statement, got %d: %v", len(stmts), stmts)
+	}
+	if !strings.Contains(stmts[0], "ON UPDATE SET NULL") {
+		t.Errorf("expected ON UPDATE SET NULL in MySQL ADD CONSTRAINT SQL, got:\n  %s", stmts[0])
+	}
+}
+
+func TestAddConstraintSQL_FKOnUpdate_NoAction_Omitted(t *testing.T) {
+	// NO ACTION is the database default and must be omitted from generated SQL
+	// to keep migrations minimal and portable.
+	snap := kit.FromDefs(usersDef)
+	con := pg.Constraint{
+		Kind:      pg.KindForeignKey,
+		Name:      "orders_customer_fk",
+		Columns:   []string{"customer_id"},
+		FKTable:   "customers",
+		FKColumns: []string{"id"},
+		FKOnUpdate: pg.FKActionNoAction,
+	}
+	c := kit.Change{
+		Kind:       kit.ChangeAddConstraint,
+		TableName:  "orders",
+		Constraint: &con,
+	}
+	pgStmts := kit.GenerateChangeSQL(snap, c)
+	if len(pgStmts) != 1 {
+		t.Fatalf("postgres: expected 1 statement, got %d: %v", len(pgStmts), pgStmts)
+	}
+	if strings.Contains(pgStmts[0], "ON UPDATE") {
+		t.Errorf("postgres: NO ACTION should be omitted, got:\n  %s", pgStmts[0])
+	}
+
+	myStmts := kit.GenerateChangeSQLMySQL(snap, c)
+	if len(myStmts) != 1 {
+		t.Fatalf("mysql: expected 1 statement, got %d: %v", len(myStmts), myStmts)
+	}
+	if strings.Contains(myStmts[0], "ON UPDATE") {
+		t.Errorf("mysql: NO ACTION should be omitted, got:\n  %s", myStmts[0])
+	}
+}
