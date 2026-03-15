@@ -2604,3 +2604,49 @@ func TestFullJoin_MixedJoins_OnlyFullDropped(t *testing.T) {
 		t.Errorf("INNER JOIN should remain, got: %s", sql)
 	}
 }
+
+func TestWindowFunctions_AliasedColWrappingWindowExpr_DroppedWhenNotSupported(t *testing.T) {
+	// expr.ColAs(windowExpr, alias) wraps a WindowExpr in an AliasedCol.
+	// The window-function gate must unwrap AliasedCol to detect the inner WindowExpr
+	// and drop it on dialects that do not support window functions.
+	sql, _ := query.Select(
+		ts.UsersT.ID,
+		expr.ColAs(expr.RowNumber(), "rn"), // AliasedCol wrapping a WindowExpr
+	).From(ts.UsersT).Build(noWindowDialect{})
+
+	if strings.Contains(sql, "ROW_NUMBER") {
+		t.Errorf("ColAs-wrapped WindowExpr should be dropped on no-window dialect, got: %s", sql)
+	}
+	if !strings.Contains(sql, `"users"."id"`) {
+		t.Errorf("non-window column should remain after dropping ColAs-wrapped WindowExpr, got: %s", sql)
+	}
+}
+
+func TestWindowFunctions_AliasedColWrappingWindowExpr_AllDroppedFallsBackToStar(t *testing.T) {
+	// When all columns are ColAs-wrapped WindowExprs and the dialect drops them,
+	// the query should fall back to SELECT * (same as bare WindowExpr).
+	sql, _ := query.Select(
+		expr.ColAs(expr.RowNumber(), "rn"),
+		expr.ColAs(expr.Rank(), "rnk"),
+	).From(ts.UsersT).Build(noWindowDialect{})
+
+	if !strings.Contains(sql, "SELECT *") {
+		t.Errorf("expected SELECT * fallback when all ColAs-wrapped window cols dropped, got: %s", sql)
+	}
+}
+
+func TestWindowFunctions_DistinctOnEmptyColsIsNoOp(t *testing.T) {
+	// DistinctOn() with no arguments sets distinct=true but distinctOn stays empty.
+	// On non-supporting dialects this should degrade to SELECT DISTINCT (not panic).
+	sql, _ := query.Select(ts.UsersT.ID).
+		From(ts.UsersT).
+		DistinctOn(). // empty variadic
+		Build(dialect.MySQL)
+
+	if !strings.Contains(sql, "SELECT DISTINCT") {
+		t.Errorf("empty DistinctOn() should degrade to SELECT DISTINCT on MySQL, got: %s", sql)
+	}
+	if strings.Contains(sql, "DISTINCT ON") {
+		t.Errorf("DISTINCT ON must not appear for empty DistinctOn() on MySQL, got: %s", sql)
+	}
+}

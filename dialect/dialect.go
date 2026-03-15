@@ -61,10 +61,14 @@ type Dialect interface {
 	// SupportsWindowFunctions reports whether the dialect supports window
 	// functions (OVER clause). True for PostgreSQL, MySQL 8.0+, and SQLite 3.25+.
 	//
-	// When false, the query builder silently drops only the window function columns
-	// from the SELECT list at build time; non-window columns are preserved as-is.
+	// When false, the query builder drops only the window function columns from
+	// the SELECT list at build time; non-window columns are preserved as-is.
 	// If every column in the SELECT list is a window function (i.e. no non-window
-	// columns remain after dropping), the query falls back to SELECT *.
+	// columns remain after dropping), the query falls back to SELECT *. In that
+	// case SELECT * returns all table columns, including any that were
+	// intentionally excluded from the original SELECT list — callers that rely
+	// on column restriction for data access control should check this flag before
+	// building such queries.
 	SupportsWindowFunctions() bool
 
 	// SupportsDistinctOn reports whether the dialect supports SELECT DISTINCT ON

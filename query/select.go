@@ -456,10 +456,12 @@ func (b *SelectBuilder) buildWith(ctx *expr.BuildContext) string {
 	if len(b.cols) == 0 {
 		sb.WriteString("*")
 	} else {
-		// Window functions are silently dropped for dialects that do not support them.
+		// Window functions are dropped for dialects that do not support them.
+		// AliasedCol is unwrapped one level (via Unwrap()) so that
+		// expr.ColAs(expr.RowNumber(), "rn") is also correctly gated.
 		written := 0
 		for _, c := range b.cols {
-			if _, isWin := c.(expr.WindowExpr); isWin && !ctx.Dialect().SupportsWindowFunctions() {
+			if !ctx.Dialect().SupportsWindowFunctions() && isWindowFunction(c) {
 				continue
 			}
 			if written > 0 {
@@ -469,7 +471,13 @@ func (b *SelectBuilder) buildWith(ctx *expr.BuildContext) string {
 			written++
 		}
 		if written == 0 {
-			// All selected columns were window functions dropped by the dialect — fall back to *.
+			// All selected columns were window functions dropped by the dialect.
+			// Fall back to SELECT * to produce a runnable query rather than a
+			// syntax error. Note: SELECT * returns all table columns, including
+			// any that were intentionally excluded from the original SELECT list.
+			// Callers that rely on column restriction for correctness or data
+			// access control must check dialect.SupportsWindowFunctions() before
+			// building the query in this configuration.
 			sb.WriteString("*")
 		}
 	}
@@ -605,6 +613,21 @@ func (b *SelectBuilder) buildWith(ctx *expr.BuildContext) string {
 	}
 
 	return sb.String()
+}
+
+// isWindowFunction reports whether c is a window function expression.
+// It unwraps one level of AliasedCol so that expr.ColAs(expr.RowNumber(), "rn")
+// is correctly identified alongside a bare WindowExpr.
+func isWindowFunction(c expr.SelectableColumn) bool {
+	if _, ok := c.(expr.WindowExpr); ok {
+		return true
+	}
+	type unwrapper interface{ Unwrap() expr.SelectableColumn }
+	if u, ok := c.(unwrapper); ok {
+		_, ok = u.Unwrap().(expr.WindowExpr)
+		return ok
+	}
+	return false
 }
 
 // selectColSQL produces the SQL fragment for a selectable column.
