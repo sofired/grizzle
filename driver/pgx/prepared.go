@@ -4,9 +4,24 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+
 	"github.com/sofired/grizzle/dialect"
 	"github.com/sofired/grizzle/query"
 )
+
+// poolQuerier is satisfied by *pgxpool.Pool and any test stub — it captures
+// the minimal Query surface used by PreparedSelect execution.
+type poolQuerier interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}
+
+// poolExecer is satisfied by *pgxpool.Pool, pgx.Tx, and any test stub — it
+// captures the minimal Exec surface used by PreparedExec execution.
+type poolExecer interface {
+	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
+}
 
 // PreparedSelect is a SELECT query whose SQL has been pre-built and validated
 // against the database at initialization time. Use it for static queries —
@@ -16,7 +31,8 @@ import (
 // Pre-validation means any SQL error (wrong column name, type mismatch, bad
 // syntax) is surfaced at server startup rather than during a live request.
 //
-// The name is a human-readable label used for logging and error messages.
+// The name is a human-readable label available via Name() for callers to use
+// in their own logging and diagnostics.
 // At execution time, queries run by SQL so that pgx v5's per-connection
 // statement cache (QueryExecModeCacheStatement) automatically prepares and
 // reuses the plan on each pool connection — avoiding the cross-connection
@@ -57,7 +73,8 @@ func PrepareSelect[T any](ctx context.Context, db *DB, name string, b *query.Sel
 	return &PreparedSelect[T]{name: name, sql: sql, args: args}, nil
 }
 
-// Name returns the statement name used for logging and error messages.
+// Name returns the statement name, available for callers to use in their own
+// logging and diagnostics.
 func (p *PreparedSelect[T]) Name() string { return p.name }
 
 // SQL returns the pre-built SQL string.
@@ -65,20 +82,37 @@ func (p *PreparedSelect[T]) SQL() string { return p.sql }
 
 // QueryAll executes the prepared query and returns all matching rows.
 func (p *PreparedSelect[T]) QueryAll(ctx context.Context, db *DB) ([]T, error) {
-	rows, err := db.Pool().Query(ctx, p.sql, p.args...)
-	return ScanAll[T](rows, err)
+	return p.queryAllWith(ctx, db.Pool())
 }
 
 // QueryOne executes the prepared query and expects exactly one row.
 // Returns an error if zero or more than one row is returned.
 func (p *PreparedSelect[T]) QueryOne(ctx context.Context, db *DB) (T, error) {
-	rows, err := db.Pool().Query(ctx, p.sql, p.args...)
-	return ScanOne[T](rows, err)
+	return p.queryOneWith(ctx, db.Pool())
 }
 
 // QueryOpt executes the prepared query and returns nil if no rows are found.
 func (p *PreparedSelect[T]) QueryOpt(ctx context.Context, db *DB) (*T, error) {
-	rows, err := db.Pool().Query(ctx, p.sql, p.args...)
+	return p.queryOptWith(ctx, db.Pool())
+}
+
+// queryAllWith is the internal implementation used by QueryAll. It accepts a
+// poolQuerier so that tests can inject a stub and assert the SQL string passed
+// to the pool — verifying that execution uses p.sql, not p.name.
+func (p *PreparedSelect[T]) queryAllWith(ctx context.Context, q poolQuerier) ([]T, error) {
+	rows, err := q.Query(ctx, p.sql, p.args...)
+	return ScanAll[T](rows, err)
+}
+
+// queryOneWith is the internal implementation used by QueryOne.
+func (p *PreparedSelect[T]) queryOneWith(ctx context.Context, q poolQuerier) (T, error) {
+	rows, err := q.Query(ctx, p.sql, p.args...)
+	return ScanOne[T](rows, err)
+}
+
+// queryOptWith is the internal implementation used by QueryOpt.
+func (p *PreparedSelect[T]) queryOptWith(ctx context.Context, q poolQuerier) (*T, error) {
+	rows, err := q.Query(ctx, p.sql, p.args...)
 	return ScanOneOpt[T](rows, err)
 }
 
@@ -123,7 +157,8 @@ func PrepareExec(ctx context.Context, db *DB, name string, b interface {
 	return &PreparedExec{name: name, sql: sql, args: args}, nil
 }
 
-// Name returns the statement name.
+// Name returns the statement name, available for callers to use in their own
+// logging and diagnostics.
 func (p *PreparedExec) Name() string { return p.name }
 
 // SQL returns the pre-built SQL string.
@@ -131,16 +166,19 @@ func (p *PreparedExec) SQL() string { return p.sql }
 
 // Exec runs the prepared mutation and returns the number of rows affected.
 func (p *PreparedExec) Exec(ctx context.Context, db *DB) (int64, error) {
-	tag, err := db.Pool().Exec(ctx, p.sql, p.args...)
-	if err != nil {
-		return 0, err
-	}
-	return tag.RowsAffected(), nil
+	return p.execWith(ctx, db.Pool())
 }
 
 // ExecTx runs the prepared mutation inside an existing transaction.
 func (p *PreparedExec) ExecTx(ctx context.Context, tx *Tx) (int64, error) {
-	tag, err := tx.tx.Exec(ctx, p.sql, p.args...)
+	return p.execWith(ctx, tx.tx)
+}
+
+// execWith is the internal implementation used by Exec and ExecTx. It accepts
+// a poolExecer so that tests can inject a stub and assert the SQL string passed
+// to the pool — verifying that execution uses p.sql, not p.name.
+func (p *PreparedExec) execWith(ctx context.Context, e poolExecer) (int64, error) {
+	tag, err := e.Exec(ctx, p.sql, p.args...)
 	if err != nil {
 		return 0, err
 	}
