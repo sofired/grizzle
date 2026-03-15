@@ -2,7 +2,7 @@
 // It wraps pgxpool.Pool and exposes a transaction helper, keeping the
 // query builder and execution layer cleanly separated.
 //
-// Usage:
+// # Basic usage
 //
 //	pool, err := pgxpool.New(ctx, os.Getenv("DATABASE_URL"))
 //	db := pgxdb.New(pool)
@@ -15,6 +15,24 @@
 //
 //	rows, err := db.Pool().Query(ctx, sql, args...)
 //	users, err := pgxdb.ScanAll[UserSelect](rows, err)
+//
+// # Transactions
+//
+// Use [DB.Transaction] to run a function inside a database transaction that
+// automatically commits on success and rolls back on error.
+// [DB.TransactionWithOptions] accepts [pgx.TxOptions] to set an isolation
+// level, access mode, or deferrable behaviour.
+//
+// # Savepoints and nested transactions
+//
+// [Tx.Savepoint], [Tx.RollbackToSavepoint], and [Tx.ReleaseSavepoint] expose
+// raw PostgreSQL savepoint commands for fine-grained partial rollback control.
+// Savepoint names are validated against PostgreSQL identifier rules before
+// being interpolated into SQL, preventing injection attacks.
+//
+// [Tx.NestedTransaction] is a higher-level helper: it creates an auto-named
+// savepoint, runs the supplied function, and releases the savepoint on success
+// or rolls it back on error — leaving the outer transaction intact either way.
 package pgx
 
 import (
