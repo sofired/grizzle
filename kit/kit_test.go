@@ -750,11 +750,11 @@ func TestAddConstraintSQL_FKOnUpdate_Postgres(t *testing.T) {
 	// correct SQL instead of silently writing the DB default.
 	snap := kit.FromDefs(usersDef)
 	con := pg.Constraint{
-		Kind:      pg.KindForeignKey,
-		Name:      "orders_customer_fk",
-		Columns:   []string{"customer_id"},
-		FKTable:   "customers",
-		FKColumns: []string{"id"},
+		Kind:       pg.KindForeignKey,
+		Name:       "orders_customer_fk",
+		Columns:    []string{"customer_id"},
+		FKTable:    "customers",
+		FKColumns:  []string{"id"},
 		FKOnUpdate: pg.FKActionSetNull,
 	}
 	c := kit.Change{
@@ -775,11 +775,11 @@ func TestAddConstraintSQL_FKOnUpdate_MySQL(t *testing.T) {
 	// Same assertion for the MySQL dialect.
 	snap := kit.FromDefs(usersDef)
 	con := pg.Constraint{
-		Kind:      pg.KindForeignKey,
-		Name:      "orders_customer_fk",
-		Columns:   []string{"customer_id"},
-		FKTable:   "customers",
-		FKColumns: []string{"id"},
+		Kind:       pg.KindForeignKey,
+		Name:       "orders_customer_fk",
+		Columns:    []string{"customer_id"},
+		FKTable:    "customers",
+		FKColumns:  []string{"id"},
 		FKOnUpdate: pg.FKActionSetNull,
 	}
 	c := kit.Change{
@@ -801,11 +801,11 @@ func TestAddConstraintSQL_FKOnUpdate_NoAction_Omitted(t *testing.T) {
 	// to keep migrations minimal and portable.
 	snap := kit.FromDefs(usersDef)
 	con := pg.Constraint{
-		Kind:      pg.KindForeignKey,
-		Name:      "orders_customer_fk",
-		Columns:   []string{"customer_id"},
-		FKTable:   "customers",
-		FKColumns: []string{"id"},
+		Kind:       pg.KindForeignKey,
+		Name:       "orders_customer_fk",
+		Columns:    []string{"customer_id"},
+		FKTable:    "customers",
+		FKColumns:  []string{"id"},
 		FKOnUpdate: pg.FKActionNoAction,
 	}
 	c := kit.Change{
