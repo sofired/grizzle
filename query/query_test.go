@@ -2432,6 +2432,19 @@ func TestCTE_DroppedWhenNotSupported(t *testing.T) {
 	}
 }
 
+func TestCTE_RecursiveDroppedWhenNotSupported(t *testing.T) {
+	anchor := query.Select(ts.UsersT.ID).From(ts.UsersT).Where(ts.UsersT.Enabled.IsTrue())
+	recursive := query.Select(ts.UsersT.ID).From(ts.UsersT)
+	sql, _ := query.Select(ts.UsersT.ID).
+		WithRecursive("tree", anchor, recursive).
+		From(query.CTERef("tree")).
+		Build(noCTEDialect{})
+
+	if strings.Contains(sql, "WITH") {
+		t.Errorf("expected WITH RECURSIVE clause to be dropped, got: %s", sql)
+	}
+}
+
 func TestCTE_EmittedWhenSupported(t *testing.T) {
 	sub := query.Select(ts.UsersT.ID).From(ts.UsersT)
 	sql, _ := query.Select(ts.UsersT.ID).
@@ -2466,6 +2479,21 @@ func TestDistinctOn_DegradesToDistinctOnUnsupportedDialect(t *testing.T) {
 
 	if strings.Contains(sql, "DISTINCT ON") {
 		t.Errorf("DISTINCT ON should be dropped for MySQL, got: %s", sql)
+	}
+	if !strings.Contains(sql, "SELECT DISTINCT") {
+		t.Errorf("expected SELECT DISTINCT fallback, got: %s", sql)
+	}
+}
+
+func TestDistinctOn_DegradesToDistinctForSQLite(t *testing.T) {
+	// SQLite does not support DISTINCT ON — should degrade to SELECT DISTINCT.
+	sql, _ := query.Select(ts.UsersT.RealmID, ts.UsersT.Username).
+		From(ts.UsersT).
+		DistinctOn(ts.UsersT.RealmID).
+		Build(dialect.SQLite)
+
+	if strings.Contains(sql, "DISTINCT ON") {
+		t.Errorf("DISTINCT ON should be dropped for SQLite, got: %s", sql)
 	}
 	if !strings.Contains(sql, "SELECT DISTINCT") {
 		t.Errorf("expected SELECT DISTINCT fallback, got: %s", sql)
