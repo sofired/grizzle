@@ -94,18 +94,39 @@ query.Select(expr.Raw(`"counts"."realm_id"`), expr.Raw(`"counts"."cnt"`)).
 
 ## CTEs (Common Table Expressions)
 
-Grizzle does not yet have a dedicated CTE builder. Use `expr.Raw` to prepend a WITH clause when needed:
+Use `With` and `WithRecursive` on a `SelectBuilder` to define Common Table Expressions:
 
 ```go
-sql, args := query.Select(expr.Raw(`"active"."id"`), expr.Raw(`"active"."username"`)).
-    From(expr.RawSource(`"active"`)).
-    Build(dialect.Postgres)
+// Non-recursive CTE
+recent := query.Select(db.PostsT.ID, db.PostsT.AuthorID).
+    From(db.PostsT).
+    Where(db.PostsT.CreatedAt.GTE(cutoff))
 
-// Prepend the CTE manually
-fullSQL := `WITH active AS (
-    SELECT id, username FROM users WHERE deleted_at IS NULL
-) ` + sql
+sql, args := query.Select(expr.Raw(`"recent"."id"`)).
+    With("recent", recent).
+    From(query.CTERef("recent")).
+    Build(dialect.Postgres)
+// WITH "recent" AS (SELECT ...) SELECT "recent"."id" FROM "recent"
 ```
+
+```go
+// Recursive CTE — traverse an org-chart by manager_id
+anchor := query.Select(db.EmployeesT.ID, db.EmployeesT.ManagerID).
+    From(db.EmployeesT).
+    Where(db.EmployeesT.ID.EQ(rootID))
+
+rec := query.Select(db.EmployeesT.ID, db.EmployeesT.ManagerID).
+    From(db.EmployeesT).
+    InnerJoin(query.CTERef("org"), db.EmployeesT.ManagerID.EQCol(managerIDCol))
+
+sql, args := query.Select().
+    WithRecursive("org", anchor, rec).
+    From(query.CTERef("org")).
+    Build(dialect.Postgres)
+// WITH RECURSIVE "org" AS (SELECT ... UNION ALL SELECT ...) SELECT * FROM "org"
+```
+
+CTE support requires a dialect where `SupportsCTE()` is true. All built-in dialects return `true` (PostgreSQL, MySQL 8.0+, SQLite 3.8.3+). When a custom dialect returns `false`, the `WITH` clause is silently dropped.
 
 ::: tip
 For most CTE use cases, the batch preloading utilities (`query.PreloadUUIDs`, `query.Index`, `query.GroupBy`) are a simpler alternative that avoids raw SQL entirely. See [Preloading](/guide/preloading).

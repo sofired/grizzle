@@ -21,6 +21,10 @@ dialect.SQLite    // SQLite 3.35+
 | `RETURNING` clause | Yes | No | Yes (3.35+) |
 | Upsert style | `ON CONFLICT … DO UPDATE` | `ON DUPLICATE KEY UPDATE` | `ON CONFLICT … DO UPDATE` |
 | Insert ignore | `ON CONFLICT … DO NOTHING` | `INSERT IGNORE` | `INSERT OR IGNORE` |
+| CTEs (`With` / `WithRecursive`) | Yes | Yes (8.0+) | Yes (3.8.3+) |
+| Window functions (`OVER`) | Yes | Yes (8.0+) | Yes (3.25+) |
+| `DISTINCT ON` | Yes | No (degrades to `DISTINCT`) | No (degrades to `DISTINCT`) |
+| `FULL JOIN` | Yes | No (silently dropped) | No (silently dropped) |
 | `FOR UPDATE OF` | All tables emitted | All tables emitted (8.0+) | Silently ignored |
 | `FOR SHARE OF` | All tables emitted | Not emitted (`LOCK IN SHARE MODE`) | Silently ignored |
 | `NOWAIT` / `SKIP LOCKED` | Supported | Supported (8.0+) | Silently ignored |
@@ -60,6 +64,15 @@ type Dialect interface {
 
     // InsertIgnoreClause returns the INSERT-ignore keyword phrase.
     InsertIgnoreClause() string
+
+    // Feature-detection methods — the query builder enforces these at Build() time.
+    SupportsCTE() bool             // false → WITH clause silently dropped
+    SupportsWindowFunctions() bool // false → window fn columns silently dropped
+    SupportsDistinctOn() bool      // false → DistinctOn() degrades to DISTINCT
+    SupportsFullJoin() bool        // false → FULL JOIN silently dropped
+    SupportsForUpdate() bool       // false → FOR UPDATE / FOR SHARE dropped
+    SupportsForNoKeyUpdate() bool  // false → FOR NO KEY UPDATE / FOR KEY SHARE dropped
+    ForShareClause() string        // "FOR SHARE" or "LOCK IN SHARE MODE"
 }
 ```
 
@@ -75,9 +88,16 @@ func (CRDBDialect) Placeholder(n int) string    { return fmt.Sprintf("$%d", n) }
 func (CRDBDialect) QuoteIdent(name string) string {
     return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
 }
-func (CRDBDialect) SupportsReturning() bool     { return true }
-func (CRDBDialect) UpsertStyle() UpsertStyle    { return dialect.UpsertOnConflict }
-func (CRDBDialect) InsertIgnoreClause() string  { return "" }
+func (CRDBDialect) SupportsReturning() bool       { return true }
+func (CRDBDialect) UpsertStyle() UpsertStyle      { return dialect.UpsertOnConflict }
+func (CRDBDialect) InsertIgnoreClause() string    { return "" }
+func (CRDBDialect) SupportsCTE() bool             { return true }
+func (CRDBDialect) SupportsWindowFunctions() bool { return true }
+func (CRDBDialect) SupportsDistinctOn() bool      { return true }
+func (CRDBDialect) SupportsFullJoin() bool        { return true }
+func (CRDBDialect) SupportsForUpdate() bool       { return true }
+func (CRDBDialect) SupportsForNoKeyUpdate() bool  { return true }
+func (CRDBDialect) ForShareClause() string        { return "FOR SHARE" }
 ```
 
 ## Feature detection
