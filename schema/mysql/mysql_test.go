@@ -387,3 +387,21 @@ func TestDDL_CheckConstraint(t *testing.T) {
 		t.Errorf("missing CHECK constraint\n---\n%s\n---", ddl)
 	}
 }
+
+func TestEnum_PanicsOnEmpty(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("expected mysql.Enum() with no args to panic, but it did not")
+		}
+	}()
+	mysql.Enum()
+}
+
+func TestSet_PanicsOnEmpty(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("expected mysql.Set() with no args to panic, but it did not")
+		}
+	}()
+	mysql.Set()
+}

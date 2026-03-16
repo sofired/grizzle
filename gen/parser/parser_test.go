@@ -852,3 +852,118 @@ var T = mysql.Table("t", mysql.C("ref_id", mysql.UUID().References("other", "id"
 		t.Errorf("OnUpdate: got %v, want FKActionSetNull", c.References.OnUpdate)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// MySQL Enum/Set EvalTable validation tests
+// ---------------------------------------------------------------------------
+
+func TestEvalTable_MysqlEnum_Valid(t *testing.T) {
+	src := `package s
+import mysql "github.com/sofired/grizzle/schema/mysql"
+var T = mysql.Table("t", mysql.C("status", mysql.Enum("active", "inactive")))`
+	tables := parseSource(t, src)
+	td, err := parser.EvalTable(tables[0])
+	if err != nil {
+		t.Fatalf("EvalTable: unexpected error: %v", err)
+	}
+	want := "enum('active','inactive')"
+	if td.Def().Columns[0].SQLType != want {
+		t.Errorf("SQLType: got %q, want %q", td.Def().Columns[0].SQLType, want)
+	}
+}
+
+func TestEvalTable_MysqlSet_Valid(t *testing.T) {
+	src := `package s
+import mysql "github.com/sofired/grizzle/schema/mysql"
+var T = mysql.Table("t", mysql.C("perms", mysql.Set("read", "write")))`
+	tables := parseSource(t, src)
+	td, err := parser.EvalTable(tables[0])
+	if err != nil {
+		t.Fatalf("EvalTable: unexpected error: %v", err)
+	}
+	want := "set('read','write')"
+	if td.Def().Columns[0].SQLType != want {
+		t.Errorf("SQLType: got %q, want %q", td.Def().Columns[0].SQLType, want)
+	}
+}
+
+func TestEvalTable_MysqlEnum_EmptyArgs_ReturnsError(t *testing.T) {
+	// Simulate a parsed column with Enum but no args (e.g. from a schema snapshot).
+	pt := &parser.ParsedTable{
+		TableName: "t",
+		Columns: []parser.ParsedColumn{
+			{
+				Name: "status",
+				Chain: &parser.ChainResult{
+					BasePkg:  "mysql",
+					BaseFn:   "Enum",
+					BaseArgs: []any{},
+				},
+			},
+		},
+	}
+	_, err := parser.EvalTable(pt)
+	if err == nil {
+		t.Fatal("expected error for Enum with zero args, got nil")
+	}
+}
+
+func TestEvalTable_MysqlSet_EmptyArgs_ReturnsError(t *testing.T) {
+	pt := &parser.ParsedTable{
+		TableName: "t",
+		Columns: []parser.ParsedColumn{
+			{
+				Name: "perms",
+				Chain: &parser.ChainResult{
+					BasePkg:  "mysql",
+					BaseFn:   "Set",
+					BaseArgs: []any{},
+				},
+			},
+		},
+	}
+	_, err := parser.EvalTable(pt)
+	if err == nil {
+		t.Fatal("expected error for Set with zero args, got nil")
+	}
+}
+
+func TestEvalTable_MysqlEnum_NonStringArg_ReturnsError(t *testing.T) {
+	pt := &parser.ParsedTable{
+		TableName: "t",
+		Columns: []parser.ParsedColumn{
+			{
+				Name: "status",
+				Chain: &parser.ChainResult{
+					BasePkg:  "mysql",
+					BaseFn:   "Enum",
+					BaseArgs: []any{int64(1)},
+				},
+			},
+		},
+	}
+	_, err := parser.EvalTable(pt)
+	if err == nil {
+		t.Fatal("expected error for Enum with non-string arg, got nil")
+	}
+}
+
+func TestEvalTable_MysqlSet_NonStringArg_ReturnsError(t *testing.T) {
+	pt := &parser.ParsedTable{
+		TableName: "t",
+		Columns: []parser.ParsedColumn{
+			{
+				Name: "perms",
+				Chain: &parser.ChainResult{
+					BasePkg:  "mysql",
+					BaseFn:   "Set",
+					BaseArgs: []any{int64(42)},
+				},
+			},
+		},
+	}
+	_, err := parser.EvalTable(pt)
+	if err == nil {
+		t.Fatal("expected error for Set with non-string arg, got nil")
+	}
+}

@@ -265,6 +265,9 @@ type EnumBuilder struct {
 //
 //	mysql.C("status", mysql.Enum("active", "inactive", "pending").NotNull())
 func Enum(values ...string) *EnumBuilder {
+	if len(values) == 0 {
+		panic("mysql.Enum: values must not be empty")
+	}
 	b := &EnumBuilder{}
 	parts := make([]string, len(values))
 	for i, v := range values {
@@ -298,6 +301,9 @@ type SetBuilder struct {
 //
 //	mysql.C("tags", mysql.Set("a", "b", "c"))
 func Set(values ...string) *SetBuilder {
+	if len(values) == 0 {
+		panic("mysql.Set: values must not be empty")
+	}
 	b := &SetBuilder{}
 	parts := make([]string, len(values))
 	for i, v := range values {
