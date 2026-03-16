@@ -102,7 +102,7 @@ recent := query.Select(db.PostsT.ID, db.PostsT.AuthorID).
     From(db.PostsT).
     Where(db.PostsT.CreatedAt.GTE(cutoff))
 
-sql, args := query.Select(expr.Raw(`"recent"."id"`)).
+sql, args := query.Select(expr.ColBase{TableAlias: "recent", ColName: "id"}).
     With("recent", recent).
     From(query.CTERef("recent")).
     Build(dialect.Postgres)

@@ -108,8 +108,8 @@ func (b *SelectBuilder) For(strength LockStrength, opts ...LockOption) *SelectBu
 
 // DistinctOn adds a PostgreSQL-specific SELECT DISTINCT ON (cols) clause,
 // returning only the first row of each group defined by the given columns.
-// The SELECT list must include at least the DISTINCT ON columns, and ORDER BY
-// must start with those columns to make the "first row" deterministic.
+// The DISTINCT ON expressions do not need to appear in the SELECT list, but
+// ORDER BY must start with those columns to make the "first row" deterministic.
 //
 //	query.Select(UsersT.RealmID, UsersT.Username).
 //	    From(UsersT).
@@ -228,7 +228,7 @@ func (b *SelectBuilder) Of(tables ...TableSource) *SelectBuilder {
 //	    From(PostsT).
 //	    Where(PostsT.CreatedAt.GTE(cutoff))
 //
-//	query.Select(expr.Raw("recent.id")).
+//	query.Select(expr.ColBase{TableAlias: "recent", ColName: "id"}).
 //	    With("recent", recent).
 //	    From(query.CTERef("recent"))
 func (b *SelectBuilder) With(name string, sub *SelectBuilder) *SelectBuilder {
@@ -441,12 +441,14 @@ func (b *SelectBuilder) buildWith(ctx *expr.BuildContext) string {
 	if b.distinct {
 		if len(b.distinctOn) > 0 && ctx.Dialect().SupportsDistinctOn() {
 			// PostgreSQL DISTINCT ON: SELECT DISTINCT ON (col1, col2) ...
+			// Use distinctColSQL (not selectColSQL) to avoid emitting "AS alias"
+			// when the caller passes an AliasedCol; DISTINCT ON does not accept aliases.
 			sb.WriteString("DISTINCT ON (")
 			for i, c := range b.distinctOn {
 				if i > 0 {
 					sb.WriteString(", ")
 				}
-				sb.WriteString(selectColSQL(ctx, c))
+				sb.WriteString(distinctColSQL(ctx, c))
 			}
 			sb.WriteString(") ")
 		} else {
@@ -476,7 +478,7 @@ func (b *SelectBuilder) buildWith(ctx *expr.BuildContext) string {
 			// syntax error. Note: SELECT * returns all table columns, including
 			// any that were intentionally excluded from the original SELECT list.
 			// Callers that rely on column restriction for correctness or data
-			// access control must check dialect.SupportsWindowFunctions() before
+			// access control must check d.SupportsWindowFunctions() before
 			// building the query in this configuration.
 			sb.WriteString("*")
 		}
@@ -616,16 +618,28 @@ func (b *SelectBuilder) buildWith(ctx *expr.BuildContext) string {
 }
 
 // isWindowFunction reports whether c is a window function expression.
-// It unwraps one level of AliasedCol so that expr.ColAs(expr.RowNumber(), "rn")
+// It handles both expr.WindowExpr (value) and *expr.WindowExpr (pointer) so
+// that callers who pass a pointer satisfying SelectableColumn are also detected.
+// It also unwraps one level of AliasedCol so that expr.ColAs(expr.RowNumber(), "rn")
 // is correctly identified alongside a bare WindowExpr.
 func isWindowFunction(c expr.SelectableColumn) bool {
-	if _, ok := c.(expr.WindowExpr); ok {
+	if isWindowExprType(c) {
 		return true
 	}
 	type unwrapper interface{ Unwrap() expr.SelectableColumn }
 	if u, ok := c.(unwrapper); ok {
-		_, ok = u.Unwrap().(expr.WindowExpr)
-		return ok
+		return isWindowExprType(u.Unwrap())
+	}
+	return false
+}
+
+// isWindowExprType reports whether c is an expr.WindowExpr or *expr.WindowExpr.
+func isWindowExprType(c expr.SelectableColumn) bool {
+	if _, ok := c.(expr.WindowExpr); ok {
+		return true
+	}
+	if _, ok := c.(*expr.WindowExpr); ok {
+		return true
 	}
 	return false
 }
@@ -639,4 +653,18 @@ func selectColSQL(ctx *expr.BuildContext, c expr.SelectableColumn) string {
 		return e.ToSQL(ctx)
 	}
 	return ctx.ColRef(c.TableName(), c.ColumnName())
+}
+
+// distinctColSQL produces the SQL fragment for a column inside DISTINCT ON (...).
+// Unlike selectColSQL it never emits an "AS alias" suffix: DISTINCT ON only
+// accepts bare column references, not aliased expressions.
+// AliasedCol is unwrapped one level so that expr.ColAs(col, "alias") renders
+// as the underlying column without the SELECT-list alias.
+func distinctColSQL(ctx *expr.BuildContext, c expr.SelectableColumn) string {
+	// Unwrap one level of AliasedCol so we render the inner column, not the alias.
+	type unwrapper interface{ Unwrap() expr.SelectableColumn }
+	if u, ok := c.(unwrapper); ok {
+		c = u.Unwrap()
+	}
+	return selectColSQL(ctx, c)
 }

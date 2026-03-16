@@ -122,5 +122,5 @@ query.Select(
 ```
 
 ::: warning
-The silent-drop behaviour exists for forward compatibility with older database versions. Relying on it in production means the dropped columns will be missing from query results without an error. If window functions are required for correctness (e.g. for pagination or ranking), check `dialect.SupportsWindowFunctions()` before building the query.
+The silent-drop behaviour exists for forward compatibility with older database versions. Relying on it in production means the dropped columns will be missing from query results without an error. If window functions are required for correctness (e.g. for pagination or ranking), check `d.SupportsWindowFunctions()` before building the query.
 :::

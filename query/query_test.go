@@ -2635,7 +2635,7 @@ func TestWindowFunctions_AliasedColWrappingWindowExpr_AllDroppedFallsBackToStar(
 	}
 }
 
-func TestWindowFunctions_DistinctOnEmptyColsIsNoOp(t *testing.T) {
+func TestDistinctOn_EmptyColsIsNoOp(t *testing.T) {
 	// DistinctOn() with no arguments sets distinct=true but distinctOn stays empty.
 	// On non-supporting dialects this should degrade to SELECT DISTINCT (not panic).
 	sql, _ := query.Select(ts.UsersT.ID).
