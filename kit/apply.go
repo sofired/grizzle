@@ -17,6 +17,7 @@ type PushResult struct {
 
 // Push inspects the live database, diffs it against the provided table
 // definitions, and applies all necessary DDL changes in a single transaction.
+// It accepts tables from any dialect via the TableDefiner interface.
 //
 // Example:
 //
@@ -24,7 +25,7 @@ type PushResult struct {
 //	for _, stmt := range result.SQL {
 //	    fmt.Println(stmt)
 //	}
-func Push(ctx context.Context, pool *pgxpool.Pool, tables ...*pg.TableDef) (PushResult, error) {
+func Push(ctx context.Context, pool *pgxpool.Pool, tables ...pg.TableDefiner) (PushResult, error) {
 	// Introspect the current live schema.
 	live, err := introspect.IntrospectPostgres(ctx, pool)
 	if err != nil {
@@ -56,7 +57,8 @@ func Push(ctx context.Context, pool *pgxpool.Pool, tables ...*pg.TableDef) (Push
 
 // DryRun is like Push but does not apply changes — it only computes and
 // returns what would be run.
-func DryRun(ctx context.Context, pool *pgxpool.Pool, tables ...*pg.TableDef) (PushResult, error) {
+// It accepts tables from any dialect via the TableDefiner interface.
+func DryRun(ctx context.Context, pool *pgxpool.Pool, tables ...pg.TableDefiner) (PushResult, error) {
 	live, err := introspect.IntrospectPostgres(ctx, pool)
 	if err != nil {
 		return PushResult{}, fmt.Errorf("introspect: %w", err)

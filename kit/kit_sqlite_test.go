@@ -147,7 +147,7 @@ func TestSQLite_MigrateAndStatus(t *testing.T) {
 	db := openSQLiteMemory(t)
 	ctx := context.Background()
 
-	schema := []*pg.TableDef{
+	schema := []pg.TableDefiner{
 		pg.Table("realms",
 			pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
 			pg.C("name", pg.Varchar(255).NotNull()),
@@ -197,7 +197,7 @@ func TestSQLite_DryRun(t *testing.T) {
 	db := openSQLiteMemory(t)
 	ctx := context.Background()
 
-	schema := []*pg.TableDef{
+	schema := []pg.TableDefiner{
 		pg.Table("things",
 			pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
 			pg.C("name", pg.Varchar(255).NotNull()),
@@ -230,7 +230,7 @@ func TestSQLite_AddColumn_Migration(t *testing.T) {
 	ctx := context.Background()
 
 	// Initial schema.
-	v1 := []*pg.TableDef{
+	v1 := []pg.TableDefiner{
 		pg.Table("users",
 			pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
 			pg.C("username", pg.Varchar(255).NotNull()),
@@ -241,7 +241,7 @@ func TestSQLite_AddColumn_Migration(t *testing.T) {
 	}
 
 	// Add a column.
-	v2 := []*pg.TableDef{
+	v2 := []pg.TableDefiner{
 		pg.Table("users",
 			pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
 			pg.C("username", pg.Varchar(255).NotNull()),

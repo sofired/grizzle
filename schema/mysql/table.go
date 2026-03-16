@@ -3,13 +3,33 @@ package mysql
 import pg "github.com/sofired/grizzle/schema/pg"
 
 // ---------------------------------------------------------------------------
-// Type aliases for table construction
+// Dialect-specific TableDef
+// ---------------------------------------------------------------------------
+
+// TableDef is the complete, immutable definition of a MySQL/MariaDB table.
+// It embeds *pg.TableDef so that column, constraint, and schema fields are
+// directly accessible while carrying its own Dialect() identity.
+//
+// *TableDef implements pg.TableDefiner so it can be passed to any kit
+// function that accepts dialect-agnostic table definitions (e.g. kit.FromDefs,
+// kit.GenerateCreateSQLMySQL, kit.MigrateMySQL).
+type TableDef struct {
+	*pg.TableDef
+}
+
+// Def returns the embedded *pg.TableDef, giving kit and migration code
+// access to column and constraint data.
+func (t *TableDef) Def() *pg.TableDef { return t.TableDef }
+
+// Dialect returns "mysql" to identify this table definition's originating
+// schema package.
+func (t *TableDef) Dialect() string { return "mysql" }
+
+// ---------------------------------------------------------------------------
+// Type aliases shared with schema/pg
 // ---------------------------------------------------------------------------
 
 type (
-	// TableDef is the complete, immutable definition of a table.
-	TableDef = pg.TableDef
-
 	// NamedColumn pairs a column name with its builder (produced by C()).
 	NamedColumn = pg.NamedColumn
 
@@ -34,7 +54,27 @@ const (
 )
 
 // ---------------------------------------------------------------------------
-// Table construction helpers — identical to schema/pg
+// mysqlTableBuilder — wraps pg.TableBuilder to produce *mysql.TableDef
+// ---------------------------------------------------------------------------
+
+// mysqlTableBuilder accumulates columns and constraints for a MySQL table.
+type mysqlTableBuilder struct {
+	pgBuilder *pg.TableBuilder
+}
+
+// WithConstraints adds table-level constraints.
+// The callback receives a TableRef for column name resolution.
+func (b *mysqlTableBuilder) WithConstraints(fn func(t TableRef) []Constraint) *TableDef {
+	return &TableDef{TableDef: b.pgBuilder.WithConstraints(fn)}
+}
+
+// Build finalises the table definition without additional constraints.
+func (b *mysqlTableBuilder) Build() *TableDef {
+	return &TableDef{TableDef: b.pgBuilder.Build()}
+}
+
+// ---------------------------------------------------------------------------
+// Table construction helpers
 // ---------------------------------------------------------------------------
 
 // C binds a column name to a column builder.
@@ -43,18 +83,22 @@ const (
 //	mysql.C("username", mysql.Varchar(255).NotNull()),
 var C = pg.C
 
-// Table declares a table with the given name and columns.
+// Table declares a MySQL table with the given name and columns.
 // Returns a builder; chain .WithConstraints() or .Build() to finalise.
 //
 //	var Users = mysql.Table("users",
 //	    mysql.C("id",   mysql.UUID().PrimaryKey().DefaultRandom()),
 //	    mysql.C("name", mysql.Varchar(255).NotNull()),
 //	).Build()
-var Table = pg.Table
+func Table(name string, cols ...NamedColumn) *mysqlTableBuilder {
+	return &mysqlTableBuilder{pgBuilder: pg.NewTableBuilder(name, cols...)}
+}
 
 // SchemaTable declares a table inside a named schema namespace.
 // In MySQL, schema names correspond to database names.
-var SchemaTable = pg.SchemaTable
+func SchemaTable(schema, name string, cols ...NamedColumn) *mysqlTableBuilder {
+	return &mysqlTableBuilder{pgBuilder: pg.NewSchemaTableBuilder(schema, name, cols...)}
+}
 
 // ---------------------------------------------------------------------------
 // Constraint constructors — identical to schema/pg

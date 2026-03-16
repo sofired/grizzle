@@ -26,9 +26,11 @@ import (
 // GenerateCreateSQLSQLite returns CREATE TABLE + CREATE INDEX statements for
 // SQLite. Unlike the PostgreSQL version, schemas are ignored (SQLite has no
 // schema namespace; ATTACH DATABASE is the SQLite equivalent).
-func GenerateCreateSQLSQLite(tables ...*pg.TableDef) string {
+// It accepts tables from any dialect via the TableDefiner interface.
+func GenerateCreateSQLSQLite(tables ...pg.TableDefiner) string {
 	var stmts []string
-	for _, t := range tables {
+	for _, td := range tables {
+		t := td.Def()
 		stmts = append(stmts, createTableSQLSQLite(t))
 		for _, c := range t.Constraints {
 			if sql := indexSQLSQLite(t.Name, c); sql != "" {
