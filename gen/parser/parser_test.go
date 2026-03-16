@@ -3,6 +3,7 @@ package parser_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/sofired/grizzle/gen/parser"
@@ -657,6 +658,101 @@ var T = sqlite.SchemaTable("main", "events", sqlite.C("id", sqlite.Integer().Pri
 	}
 	if tbl.TableName != "events" {
 		t.Errorf("TableName: got %q, want events", tbl.TableName)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Error message dialect prefix tests
+// ---------------------------------------------------------------------------
+
+// parseSourceExpectError writes src to a temp file, parses it, and asserts
+// that the returned error contains the expected substring.
+func parseSourceExpectError(t *testing.T, src, wantErrContains string) {
+	t.Helper()
+	f := filepath.Join(t.TempDir(), "schema.go")
+	if err := os.WriteFile(f, []byte(src), 0644); err != nil {
+		t.Fatalf("write temp file: %v", err)
+	}
+	_, err := parser.ParseFile(f)
+	if err == nil {
+		t.Fatalf("expected error containing %q, got nil", wantErrContains)
+	}
+	if !strings.Contains(err.Error(), wantErrContains) {
+		t.Errorf("error %q does not contain %q", err.Error(), wantErrContains)
+	}
+}
+
+func TestParseFile_ErrorMsg_PgTable_NoArgs(t *testing.T) {
+	parseSourceExpectError(t, `package s
+import pg "github.com/sofired/grizzle/schema/pg"
+var T = pg.Table()`, "pg.Table:")
+}
+
+func TestParseFile_ErrorMsg_MysqlTable_NoArgs(t *testing.T) {
+	parseSourceExpectError(t, `package s
+import mysql "github.com/sofired/grizzle/schema/mysql"
+var T = mysql.Table()`, "mysql.Table:")
+}
+
+func TestParseFile_ErrorMsg_SqliteTable_NoArgs(t *testing.T) {
+	parseSourceExpectError(t, `package s
+import sqlite "github.com/sofired/grizzle/schema/sqlite"
+var T = sqlite.Table()`, "sqlite.Table:")
+}
+
+func TestParseFile_ErrorMsg_PgSchemaTable_TooFewArgs(t *testing.T) {
+	parseSourceExpectError(t, `package s
+import pg "github.com/sofired/grizzle/schema/pg"
+var T = pg.SchemaTable("only_one_arg")`, "pg.SchemaTable:")
+}
+
+func TestParseFile_ErrorMsg_MysqlSchemaTable_TooFewArgs(t *testing.T) {
+	parseSourceExpectError(t, `package s
+import mysql "github.com/sofired/grizzle/schema/mysql"
+var T = mysql.SchemaTable("only_one_arg")`, "mysql.SchemaTable:")
+}
+
+func TestParseFile_ErrorMsg_SqliteSchemaTable_TooFewArgs(t *testing.T) {
+	parseSourceExpectError(t, `package s
+import sqlite "github.com/sofired/grizzle/schema/sqlite"
+var T = sqlite.SchemaTable("only_one_arg")`, "sqlite.SchemaTable:")
+}
+
+func TestParseFile_ErrorMsg_MysqlTable_NotPg(t *testing.T) {
+	// Ensure a mysql.Table error does NOT contain "pg." to verify we're not
+	// regressing to the hardcoded prefix.
+	f := filepath.Join(t.TempDir(), "schema.go")
+	src := `package s
+import mysql "github.com/sofired/grizzle/schema/mysql"
+var T = mysql.Table()`
+	if err := os.WriteFile(f, []byte(src), 0644); err != nil {
+		t.Fatalf("write temp file: %v", err)
+	}
+	_, err := parser.ParseFile(f)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if strings.Contains(err.Error(), "pg.") {
+		t.Errorf("mysql error message should not contain pg. prefix, got: %q", err.Error())
+	}
+}
+
+func TestParseFile_ErrorMsg_SqliteTable_NotPg(t *testing.T) {
+	// Ensure a sqlite.Table error does NOT contain "pg." to verify we're not
+	// regressing to the hardcoded prefix.
+	f := filepath.Join(t.TempDir(), "schema.go")
+	src := `package s
+import sqlite "github.com/sofired/grizzle/schema/sqlite"
+var T = sqlite.Table()`
+	if err := os.WriteFile(f, []byte(src), 0644); err != nil {
+		t.Fatalf("write temp file: %v", err)
+	}
+	_, err := parser.ParseFile(f)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if strings.Contains(err.Error(), "pg.") {
+		t.Errorf("sqlite error message should not contain pg. prefix, got: %q", err.Error())
 	}
 }
 
