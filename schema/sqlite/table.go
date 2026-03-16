@@ -3,12 +3,37 @@ package sqlite
 import pg "github.com/sofired/grizzle/schema/pg"
 
 // ---------------------------------------------------------------------------
-// Type aliases for table construction
+// Dialect-specific TableDef
+// ---------------------------------------------------------------------------
+
+// TableDef is the complete, immutable definition of a SQLite table.
+// It embeds *pg.TableDef so that column, constraint, and schema fields are
+// directly accessible while carrying its own Dialect() identity.
+//
+// *TableDef implements pg.TableDefiner so it can be passed to any kit
+// function that accepts dialect-agnostic table definitions (e.g. kit.FromDefs,
+// kit.GenerateCreateSQLSQLite, kit.MigrateSQLite).
+type TableDef struct {
+	*pg.TableDef
+}
+
+// Def returns the embedded *pg.TableDef, giving kit and migration code
+// access to column and constraint data.
+func (t *TableDef) Def() *pg.TableDef { return t.TableDef }
+
+// Dialect returns "sqlite" to identify this table definition's originating
+// schema package.
+func (t *TableDef) Dialect() string { return "sqlite" }
+
+// ---------------------------------------------------------------------------
+// Type aliases shared with schema/pg
 // ---------------------------------------------------------------------------
 
 type (
-	// TableDef is the complete, immutable definition of a table.
-	TableDef = pg.TableDef
+	// TableBuilder accumulates columns and constraints during table construction.
+	// It is returned by sqlite.Table() and sqlite.SchemaTable(). Consumers that
+	// need to store or pass the builder type explicitly may use *sqlite.TableBuilder.
+	TableBuilder = pg.TableBuilder
 
 	// NamedColumn pairs a column name with its builder (produced by C()).
 	NamedColumn = pg.NamedColumn
@@ -19,7 +44,7 @@ type (
 	// Constraint describes a table-level constraint or index.
 	Constraint = pg.Constraint
 
-	// ConstraintKind identifies the SQL construct a Constraint represents.
+	// ConstraintKind identifies the SQL construct a Constraint describes.
 	ConstraintKind = pg.ConstraintKind
 )
 
@@ -34,7 +59,27 @@ const (
 )
 
 // ---------------------------------------------------------------------------
-// Table construction helpers — identical to schema/pg
+// sqliteTableBuilder — wraps pg.TableBuilder to produce *sqlite.TableDef
+// ---------------------------------------------------------------------------
+
+// sqliteTableBuilder accumulates columns and constraints for a SQLite table.
+type sqliteTableBuilder struct {
+	pgBuilder *pg.TableBuilder
+}
+
+// WithConstraints adds table-level constraints.
+// The callback receives a TableRef for column name resolution.
+func (b *sqliteTableBuilder) WithConstraints(fn func(t TableRef) []Constraint) *TableDef {
+	return &TableDef{TableDef: b.pgBuilder.WithConstraints(fn)}
+}
+
+// Build finalises the table definition without additional constraints.
+func (b *sqliteTableBuilder) Build() *TableDef {
+	return &TableDef{TableDef: b.pgBuilder.Build()}
+}
+
+// ---------------------------------------------------------------------------
+// Table construction helpers
 // ---------------------------------------------------------------------------
 
 // C binds a column name to a column builder.
@@ -43,18 +88,22 @@ const (
 //	sqlite.C("title", sqlite.Text().NotNull()),
 var C = pg.C
 
-// Table declares a table with the given name and columns.
+// Table declares a SQLite table with the given name and columns.
 // Returns a builder; chain .WithConstraints() or .Build() to finalise.
 //
 //	var Notes = sqlite.Table("notes",
 //	    sqlite.C("id",    sqlite.Integer().PrimaryKey()),
 //	    sqlite.C("title", sqlite.Text().NotNull()),
 //	).Build()
-var Table = pg.Table
+func Table(name string, cols ...NamedColumn) *sqliteTableBuilder {
+	return &sqliteTableBuilder{pgBuilder: pg.NewTableBuilder(name, cols...)}
+}
 
 // SchemaTable declares a table inside a named schema namespace.
 // In SQLite, schema names correspond to attached database aliases.
-var SchemaTable = pg.SchemaTable
+func SchemaTable(schema, name string, cols ...NamedColumn) *sqliteTableBuilder {
+	return &sqliteTableBuilder{pgBuilder: pg.NewSchemaTableBuilder(schema, name, cols...)}
+}
 
 // ---------------------------------------------------------------------------
 // Constraint constructors — identical to schema/pg

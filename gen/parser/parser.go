@@ -21,6 +21,7 @@ type ParsedTable struct {
 	VarName    string // Go variable name, e.g. "Users"
 	TableName  string // SQL table name, e.g. "users"
 	SchemaName string // SQL schema if SchemaTable used (any dialect)
+	Dialect    string // schema package that declared the table: "pg", "mysql", or "sqlite". Currently used for diagnostics and error messages; will drive dialect-specific codegen in future work.
 	Columns    []ParsedColumn
 	// RawConstraintsNode is kept for future Kit/migration work but not used in codegen.
 	HasConstraints bool
@@ -169,6 +170,7 @@ func tryExtractTable(varName string, expr ast.Expr) (*ParsedTable, error) {
 		VarName:        varName,
 		TableName:      tableName,
 		SchemaName:     schemaName,
+		Dialect:        pkg.Name,
 		Columns:        cols,
 		HasConstraints: hasConstraints,
 	}, nil
