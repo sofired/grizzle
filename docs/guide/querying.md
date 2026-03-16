@@ -227,17 +227,30 @@ users, err := pgxdb.ScanAll[db.UserSelect](
 Pass `Of(table)` to lock only specific tables in a multi-table join:
 
 ```go
+// Generated table handles always return the base table name from
+// GrizTableAlias(). To use a custom alias in the FROM/JOIN and OF clauses,
+// implement TableSource with the desired alias:
+type ordersAlias struct{}
+func (ordersAlias) GrizTableName() string  { return "orders" }
+func (ordersAlias) GrizTableAlias() string { return "o" }
+
+type itemsAlias struct{}
+func (itemsAlias) GrizTableName() string  { return "items" }
+func (itemsAlias) GrizTableAlias() string { return "i" }
+
+o, i := ordersAlias{}, itemsAlias{}
+
 // Only lock orders rows, not the joined items rows.
 sql, args := query.Select().
-    From(db.OrdersT.As("o")).
-    LeftJoin(db.ItemsT.As("i"), db.ItemsT.OrderID.EQ(db.OrdersT.ID)).
+    From(o).
+    LeftJoin(i, db.ItemsT.OrderID.EQCol(db.OrdersT.ID)).
     ForUpdate().
-    Of(db.OrdersT.As("o")).
+    Of(o).
     Build(dialect.Postgres)
-// SELECT … FOR UPDATE OF "o"
+// SELECT * FROM "orders" AS "o" LEFT JOIN "items" AS "i" ON ... FOR UPDATE OF "o"
 ```
 
-Each table passed to `Of()` is identified by its **alias** (the name used in `FROM`/`JOIN`), not the underlying table name. Using the base table name when an alias is in scope causes a PostgreSQL error.
+Each table passed to `Of()` is identified by its **alias** (the value returned by `GrizTableAlias()`), not the underlying table name. Using the base table name when an alias is in scope causes a PostgreSQL error.
 
 `Of()` and `ForUpdate()`/`ForShare()` can be called in any order.
 

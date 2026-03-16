@@ -115,15 +115,25 @@ func (b *SelectBuilder) ForKeyShare() *SelectBuilder {
 // Of restricts the locking clause to specific tables, rendering
 // OF "alias1", "alias2" after the lock mode keyword.
 //
-// Each table is rendered using its alias (the name used in the FROM or JOIN
-// clause), not the underlying table name. PostgreSQL requires the alias when
-// the table is aliased; using the base name in that case produces an error.
+// Each table is rendered using its alias (the value returned by
+// GrizTableAlias()), not the underlying table name. PostgreSQL requires the
+// alias when the table is aliased; using the base name in that case produces
+// an error.
 //
+// Generated table handles always return the base table name from
+// GrizTableAlias() — they do not carry a runtime alias. To use a custom alias,
+// construct a value that implements TableSource with the desired alias:
+//
+//	type ordersAlias struct{}
+//	func (ordersAlias) GrizTableName() string  { return "orders" }
+//	func (ordersAlias) GrizTableAlias() string { return "o" }
+//
+//	o := ordersAlias{}
 //	query.Select().
-//	    From(OrdersT.As("o")).
+//	    From(o).
 //	    ForUpdate().
-//	    Of(OrdersT.As("o"))
-//	// ... FOR UPDATE OF "o"
+//	    Of(o)
+//	// SELECT * FROM "orders" AS "o" FOR UPDATE OF "o"
 //
 // Dialect-specific behaviour:
 //   - PostgreSQL: all specified tables are emitted for both FOR UPDATE and FOR SHARE.
@@ -441,10 +451,11 @@ func (b *SelectBuilder) buildWith(ctx *expr.BuildContext) string {
 				}
 			}
 		} else if b.forShare {
-			forShareClause := ctx.Dialect().ForShareClause()
-			sb.WriteString(" " + forShareClause)
-			// OF table list: PostgreSQL FOR SHARE supports it; MySQL LOCK IN SHARE MODE does not.
-			if forShareClause == "FOR SHARE" && len(b.lockOf) > 0 {
+			sb.WriteString(" " + ctx.Dialect().ForShareClause())
+			// OF table list: only emitted when the dialect declares support for it
+			// (e.g. PostgreSQL FOR SHARE). MySQL's LOCK IN SHARE MODE does not
+			// accept an OF clause, so SupportsForShareOf() returns false there.
+			if len(b.lockOf) > 0 && ctx.Dialect().SupportsForShareOf() {
 				sb.WriteString(" OF ")
 				for i, t := range b.lockOf {
 					if i > 0 {

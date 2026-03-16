@@ -10,15 +10,16 @@ import (
 // capabilities for all feature-detection methods added in #155.
 func TestDialectFeatureMatrix(t *testing.T) {
 	type row struct {
-		name               string
-		d                  dialect.Dialect
-		supportsCTE        bool
-		supportsWindow     bool
-		supportsDistinctOn bool
-		supportsForUpdate  bool
-		supportsForNoKey   bool
-		supportsFullJoin   bool
-		forShareClause     string
+		name                string
+		d                   dialect.Dialect
+		supportsCTE         bool
+		supportsWindow      bool
+		supportsDistinctOn  bool
+		supportsForUpdate   bool
+		supportsForNoKey    bool
+		supportsFullJoin    bool
+		supportsForShareOf  bool
+		forShareClause      string
 	}
 
 	cases := []row{
@@ -31,6 +32,7 @@ func TestDialectFeatureMatrix(t *testing.T) {
 			supportsForUpdate:  true,
 			supportsForNoKey:   true,
 			supportsFullJoin:   true,
+			supportsForShareOf: true,
 			forShareClause:     "FOR SHARE",
 		},
 		{
@@ -42,6 +44,7 @@ func TestDialectFeatureMatrix(t *testing.T) {
 			supportsForUpdate:  true,
 			supportsForNoKey:   false,
 			supportsFullJoin:   false,
+			supportsForShareOf: false,
 			forShareClause:     "LOCK IN SHARE MODE",
 		},
 		{
@@ -53,6 +56,7 @@ func TestDialectFeatureMatrix(t *testing.T) {
 			supportsForUpdate:  false,
 			supportsForNoKey:   false,
 			supportsFullJoin:   false,
+			supportsForShareOf: false,
 			forShareClause:     "",
 		},
 	}
@@ -77,6 +81,7 @@ func TestDialectFeatureMatrix(t *testing.T) {
 			checkBool("SupportsForUpdate", c.d.SupportsForUpdate(), c.supportsForUpdate)
 			checkBool("SupportsForNoKeyUpdate", c.d.SupportsForNoKeyUpdate(), c.supportsForNoKey)
 			checkBool("SupportsFullJoin", c.d.SupportsFullJoin(), c.supportsFullJoin)
+			checkBool("SupportsForShareOf", c.d.SupportsForShareOf(), c.supportsForShareOf)
 			checkStr("ForShareClause", c.d.ForShareClause(), c.forShareClause)
 		})
 	}
