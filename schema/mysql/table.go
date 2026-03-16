@@ -30,6 +30,11 @@ func (t *TableDef) Dialect() string { return "mysql" }
 // ---------------------------------------------------------------------------
 
 type (
+	// TableBuilder accumulates columns and constraints during table construction.
+	// It is returned by mysql.Table() and mysql.SchemaTable(). Consumers that
+	// need to store or pass the builder type explicitly may use *mysql.TableBuilder.
+	TableBuilder = pg.TableBuilder
+
 	// NamedColumn pairs a column name with its builder (produced by C()).
 	NamedColumn = pg.NamedColumn
 

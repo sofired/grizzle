@@ -30,6 +30,11 @@ func (t *TableDef) Dialect() string { return "sqlite" }
 // ---------------------------------------------------------------------------
 
 type (
+	// TableBuilder accumulates columns and constraints during table construction.
+	// It is returned by sqlite.Table() and sqlite.SchemaTable(). Consumers that
+	// need to store or pass the builder type explicitly may use *sqlite.TableBuilder.
+	TableBuilder = pg.TableBuilder
+
 	// NamedColumn pairs a column name with its builder (produced by C()).
 	NamedColumn = pg.NamedColumn
 
@@ -39,7 +44,7 @@ type (
 	// Constraint describes a table-level constraint or index.
 	Constraint = pg.Constraint
 
-	// ConstraintKind identifies the SQL construct a Constraint represents.
+	// ConstraintKind identifies the SQL construct a Constraint describes.
 	ConstraintKind = pg.ConstraintKind
 )
 
