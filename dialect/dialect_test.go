@@ -10,16 +10,16 @@ import (
 // capabilities for all feature-detection methods added in #155.
 func TestDialectFeatureMatrix(t *testing.T) {
 	type row struct {
-		name                string
-		d                   dialect.Dialect
-		supportsCTE         bool
-		supportsWindow      bool
-		supportsDistinctOn  bool
-		supportsForUpdate   bool
-		supportsForNoKey    bool
-		supportsFullJoin    bool
-		supportsForShareOf  bool
-		forShareClause      string
+		name               string
+		d                  dialect.Dialect
+		supportsCTE        bool
+		supportsWindow     bool
+		supportsDistinctOn bool
+		supportsForUpdate  bool
+		supportsForNoKey   bool
+		supportsFullJoin   bool
+		supportsForShareOf bool
+		forShareClause     string
 	}
 
 	cases := []row{
