@@ -100,18 +100,19 @@ In Drizzle, the column name is the first argument to the type function: `uuid('i
 | `datetime(name, opts)` | DEVIATION:GAP (designed) | — |
 | `date(name)` | DEVIATION:GAP (designed) | — |
 | `time(name)` | DEVIATION:GAP (designed) | — |
-| `year(name)` | DEVIATION:GAP (not designed) — tracked as #130 | — |
+| `year(name)` | `mysql.Year()` | PARITY |
 | `float(name)` | DEVIATION:GAP (designed) | — |
 | `double(name)` | DEVIATION:GAP (designed) | — |
 | `decimal(name, opts)` | DEVIATION:GAP (designed) | — |
 | `json(name)` | DEVIATION:GAP (designed) | — |
-| `mediumint(name)` | DEVIATION:GAP (not designed) — tracked as #130 | — |
+| `mediumint(name)` | `mysql.MediumInt()` | PARITY |
 | `smallint(name)` | DEVIATION:GAP (designed) | — |
 | `tinyint(name)` | DEVIATION:GAP (designed) | — |
 | `binary(name)` | DEVIATION:GAP (not designed) | — |
 | `varbinary(name)` | DEVIATION:GAP (not designed) | — |
 | `char(name)` | DEVIATION:GAP (designed) | — |
-| `mysqlEnum(name, vals)` | DEVIATION:GAP (not designed) — tracked as #130 | — |
+| `mysqlEnum(name, vals)` | `mysql.Enum(vals...)` | PARITY |
+| `mysqlSet(name, vals)` | `mysql.Set(vals...)` | PARITY |
 
 ### SQLite
 
