@@ -338,10 +338,21 @@ func mysqlType(pgType string) string {
 		return "BIGINT"
 	case lower == "smallint" || lower == "int2":
 		return "SMALLINT"
+	case lower == "tinyint":
+		return "TINYINT"
+	case lower == "mediumint":
+		return "MEDIUMINT"
+	case lower == "year":
+		return "YEAR"
 	case lower == "real" || lower == "float4":
 		return "FLOAT"
 	case lower == "double precision" || lower == "float8":
 		return "DOUBLE"
+	case strings.HasPrefix(lower, "enum(") || strings.HasPrefix(lower, "set("):
+		// Uppercase the keyword only; preserve the value casing because MySQL
+		// stores enum members exactly as defined and matches case-insensitively.
+		lparen := strings.Index(pgType, "(")
+		return strings.ToUpper(pgType[:lparen]) + pgType[lparen:]
 	default:
 		// Unknown type — pass through and let MySQL decide.
 		return strings.ToUpper(pgType)
