@@ -22,7 +22,7 @@ Grizzle's dialect system is the Go equivalent of [Drizzle's multi-dialect suppor
 | `RETURNING` | Yes | No (silently dropped) | Yes (3.35+) |
 | Upsert | `ON CONFLICT … DO UPDATE` | `ON DUPLICATE KEY UPDATE` | `ON CONFLICT … DO UPDATE` |
 | Insert ignore | `ON CONFLICT … DO NOTHING` | `INSERT IGNORE` | `INSERT OR IGNORE` |
-| `WITH` (CTE) | Yes | Yes (8.0+) | Yes (3.35+) |
+| `WITH` (CTE) | Yes | Yes (8.0+) | Yes (3.8.3+) |
 | Window functions | Yes | Yes (8.0+) | Yes (3.25+) |
 | `DISTINCT ON` | Yes | No | No |
 | `FOR UPDATE` / `FOR SHARE` | Yes | Yes (limited) | No |
@@ -45,7 +45,7 @@ type Dialect interface {
 }
 ```
 
-**Target interface — DEVIATION:GAP (designed).** The interface needs additional feature-detection methods to prevent PostgreSQL-only clauses leaking into other dialects (see bug #110). The full target interface:
+**Dialect interface — IMPLEMENTED (PR #174 + #186).** All feature-detection methods are present and enforced at build time.
 
 ```go
 type Dialect interface {
@@ -55,13 +55,13 @@ type Dialect interface {
     SupportsReturning() bool
     UpsertStyle() UpsertStyle
     InsertIgnoreClause() string
-    // To be added:
     SupportsCTE() bool
     SupportsWindowFunctions() bool
     SupportsDistinctOn() bool
     SupportsForUpdate() bool                // FOR UPDATE / FOR SHARE
     SupportsForNoKeyUpdate() bool           // PostgreSQL-only; false for MySQL/SQLite
     SupportsFullJoin() bool
+    ForShareClause() string                 // "FOR SHARE" (Postgres) / "LOCK IN SHARE MODE" (MySQL)
 }
 ```
 
@@ -75,9 +75,9 @@ type Dialect interface {
 | `drizzle-orm/better-sqlite3` | `database/sql` + `mattn/go-sqlite3` | Partial |
 | Connection pool config | Via pgx / `database/sql` pool config | PARITY |
 
-## Known bug
+## Known bugs
 
-**#110** — `FOR NO KEY UPDATE` and `FOR KEY SHARE` are PostgreSQL-only locking clauses. They currently emit for MySQL as well, producing invalid SQL. Fix requires adding `SupportsForNoKeyUpdate()` to the `Dialect` interface and guarding the locking clause SQL generation behind it.
+**#110 — FIXED (PR #174).** `FOR NO KEY UPDATE` and `FOR KEY SHARE` were PostgreSQL-only locking clauses that previously emitted for MySQL. Fixed by adding `SupportsForNoKeyUpdate()` to the `Dialect` interface; MySQL and SQLite return `false` and the clauses are now suppressed at build time.
 
 ## PostgreSQL-specific features
 

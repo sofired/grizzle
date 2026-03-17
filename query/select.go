@@ -37,6 +37,7 @@ const (
 type SelectBuilder struct {
 	ctes         []cteClause             // optional WITH clauses (prepended as CTEs)
 	distinct     bool                    // SELECT DISTINCT
+	distinctOn   []expr.SelectableColumn // DISTINCT ON cols (PostgreSQL only)
 	cols         []expr.SelectableColumn // nil = SELECT *
 	from         TableSource
 	joins        []joinClause
@@ -102,6 +103,34 @@ func (b *SelectBuilder) For(strength LockStrength, opts ...LockOption) *SelectBu
 	cp := *b
 	cp.lockStrength = strength
 	cp.lockOpts = append([]LockOption(nil), opts...)
+	return &cp
+}
+
+// DistinctOn adds a PostgreSQL-specific SELECT DISTINCT ON (cols) clause,
+// returning only the first row of each group defined by the given columns.
+// The DISTINCT ON expressions do not need to appear in the SELECT list, but
+// ORDER BY must start with those columns to make the "first row" deterministic.
+//
+//	query.Select(UsersT.RealmID, UsersT.Username).
+//	    From(UsersT).
+//	    DistinctOn(UsersT.RealmID).
+//	    OrderBy(UsersT.RealmID.Asc(), UsersT.CreatedAt.Desc())
+//	// SELECT DISTINCT ON ("users"."realm_id") "users"."realm_id", ...
+//
+// Dialect behaviour:
+//   - PostgreSQL: rendered as DISTINCT ON (cols).
+//   - MySQL / SQLite: SupportsDistinctOn() is false; the DISTINCT ON columns
+//     are silently dropped and the query degrades to SELECT DISTINCT.
+//
+// Warning: the degraded form is semantically different. SELECT DISTINCT ON
+// deduplicates within each DISTINCT ON group (returning one row per group);
+// SELECT DISTINCT deduplicates across all selected columns. The result set
+// will differ in most real queries, so portable code should avoid DistinctOn
+// or handle the dialect difference explicitly.
+func (b *SelectBuilder) DistinctOn(cols ...expr.SelectableColumn) *SelectBuilder {
+	cp := *b
+	cp.distinct = true
+	cp.distinctOn = append(append([]expr.SelectableColumn(nil), cp.distinctOn...), cols...)
 	return &cp
 }
 
@@ -186,13 +215,20 @@ func (b *SelectBuilder) Of(tables ...TableSource) *SelectBuilder {
 // The CTE is rendered as WITH name AS (sub) before the SELECT.
 // Multiple CTEs are accumulated in order and rendered as WITH a AS (...), b AS (...).
 //
+// CTE support requires SupportsCTE() on the dialect. All built-in dialects
+// (PostgreSQL, MySQL 8.0+, SQLite 3.8.3+) return true. When building against a
+// dialect where SupportsCTE() is false, the WITH clause is omitted from the
+// output SQL. Any CTERef used in From() or Join() remains as a plain table
+// name, which will cause a runtime database error (unknown table). This is
+// intentional: failing loudly is safer than silently returning wrong results.
+//
 // Example:
 //
 //	recent := query.Select(PostsT.ID, PostsT.AuthorID).
 //	    From(PostsT).
 //	    Where(PostsT.CreatedAt.GTE(cutoff))
 //
-//	query.Select(expr.Raw("recent.id")).
+//	query.Select(expr.ColBase{TableAlias: "recent", ColName: "id"}).
 //	    With("recent", recent).
 //	    From(query.CTERef("recent"))
 func (b *SelectBuilder) With(name string, sub *SelectBuilder) *SelectBuilder {
@@ -206,6 +242,13 @@ func (b *SelectBuilder) With(name string, sub *SelectBuilder) *SelectBuilder {
 // standard SQL form for a recursive CTE that iterates until no new rows
 // are produced.
 //
+// CTE support requires SupportsCTE() on the dialect. All built-in dialects
+// (PostgreSQL, MySQL 8.0+, SQLite 3.8.3+) return true. When building against a
+// dialect where SupportsCTE() is false, the WITH RECURSIVE clause is omitted
+// from the output SQL. Any CTERef used in From() or Join() remains as a plain
+// table name, producing a runtime database error (unknown table). This is
+// intentional: failing loudly is safer than silently returning wrong results.
+//
 // Example — traverse an org-chart by manager_id:
 //
 //	anchor := query.Select(EmployeesT.ID, EmployeesT.ManagerID).
@@ -214,7 +257,7 @@ func (b *SelectBuilder) With(name string, sub *SelectBuilder) *SelectBuilder {
 //
 //	rec := query.Select(EmployeesT.ID, EmployeesT.ManagerID).
 //	    From(EmployeesT).
-//	    InnerJoin(query.CTERef("org"), EmployeesT.ManagerID.EQCol(ManagerIDCol))
+//	    InnerJoin(query.CTERef("org"), EmployeesT.ManagerID.EQ(expr.ColBase{TableAlias: "org", ColName: "id"}))
 //
 //	query.Select().
 //	    WithRecursive("org", anchor, rec).
@@ -281,6 +324,14 @@ func (b *SelectBuilder) RightJoin(t TableSource, on expr.Expression) *SelectBuil
 }
 
 // FullJoin adds a FULL JOIN clause.
+// FULL JOIN requires SupportsFullJoin() on the dialect. When building against a
+// dialect where SupportsFullJoin() is false (MySQL, SQLite), the join is
+// silently dropped from the output SQL.
+//
+// Warning: dropping a FULL JOIN is a semantic change, not just a syntax
+// difference. Rows that would have been included via the outer side of the join
+// are omitted entirely. Do not rely on the silent-drop behaviour for portable
+// code; use a dialect check or restructure the query for non-PostgreSQL targets.
 func (b *SelectBuilder) FullJoin(t TableSource, on expr.Expression) *SelectBuilder {
 	cp := *b
 	cp.joins = append(append([]joinClause(nil), cp.joins...), joinClause{kind: joinFull, table: t, on: on})
@@ -352,8 +403,8 @@ func (b *SelectBuilder) Build(d dialect.Dialect) (string, []any) {
 func (b *SelectBuilder) buildWith(ctx *expr.BuildContext) string {
 	var sb strings.Builder
 
-	// WITH [RECURSIVE] (CTEs)
-	if len(b.ctes) > 0 {
+	// WITH [RECURSIVE] (CTEs) — only emitted for dialects that support CTEs.
+	if len(b.ctes) > 0 && ctx.Dialect().SupportsCTE() {
 		hasRecursive := false
 		for _, cte := range b.ctes {
 			if cte.anchor != nil {
@@ -385,19 +436,51 @@ func (b *SelectBuilder) buildWith(ctx *expr.BuildContext) string {
 		sb.WriteString(" ")
 	}
 
-	// SELECT [DISTINCT]
+	// SELECT [DISTINCT [ON (cols)]]
 	sb.WriteString("SELECT ")
 	if b.distinct {
-		sb.WriteString("DISTINCT ")
+		if len(b.distinctOn) > 0 && ctx.Dialect().SupportsDistinctOn() {
+			// PostgreSQL DISTINCT ON: SELECT DISTINCT ON (col1, col2) ...
+			// Use distinctColSQL (not selectColSQL) to avoid emitting "AS alias"
+			// when the caller passes an AliasedCol; DISTINCT ON does not accept aliases.
+			sb.WriteString("DISTINCT ON (")
+			for i, c := range b.distinctOn {
+				if i > 0 {
+					sb.WriteString(", ")
+				}
+				sb.WriteString(distinctColSQL(ctx, c))
+			}
+			sb.WriteString(") ")
+		} else {
+			sb.WriteString("DISTINCT ")
+		}
 	}
 	if len(b.cols) == 0 {
 		sb.WriteString("*")
 	} else {
-		for i, c := range b.cols {
-			if i > 0 {
+		// Window functions are dropped for dialects that do not support them.
+		// AliasedCol is unwrapped one level (via Unwrap()) so that
+		// expr.ColAs(expr.RowNumber(), "rn") is also correctly gated.
+		written := 0
+		for _, c := range b.cols {
+			if !ctx.Dialect().SupportsWindowFunctions() && isWindowFunction(c) {
+				continue
+			}
+			if written > 0 {
 				sb.WriteString(", ")
 			}
 			sb.WriteString(selectColSQL(ctx, c))
+			written++
+		}
+		if written == 0 {
+			// All selected columns were window functions dropped by the dialect.
+			// Fall back to SELECT * to produce a runnable query rather than a
+			// syntax error. Note: SELECT * returns all table columns, including
+			// any that were intentionally excluded from the original SELECT list.
+			// Callers that rely on column restriction for correctness or data
+			// access control must check d.SupportsWindowFunctions() before
+			// building the query in this configuration.
+			sb.WriteString("*")
 		}
 	}
 
@@ -419,8 +502,11 @@ func (b *SelectBuilder) buildWith(ctx *expr.BuildContext) string {
 		}
 	}
 
-	// JOINs
+	// JOINs — FULL JOIN is silently dropped for dialects that do not support it.
 	for _, j := range b.joins {
+		if j.kind == joinFull && !ctx.Dialect().SupportsFullJoin() {
+			continue
+		}
 		sb.WriteString(" ")
 		sb.WriteString(string(j.kind))
 		sb.WriteString(" ")
@@ -531,6 +617,33 @@ func (b *SelectBuilder) buildWith(ctx *expr.BuildContext) string {
 	return sb.String()
 }
 
+// isWindowFunction reports whether c is a window function expression.
+// It handles both expr.WindowExpr (value) and *expr.WindowExpr (pointer) so
+// that callers who pass a pointer satisfying SelectableColumn are also detected.
+// It also unwraps one level of AliasedCol so that expr.ColAs(expr.RowNumber(), "rn")
+// is correctly identified alongside a bare WindowExpr.
+func isWindowFunction(c expr.SelectableColumn) bool {
+	if isWindowExprType(c) {
+		return true
+	}
+	type unwrapper interface{ Unwrap() expr.SelectableColumn }
+	if u, ok := c.(unwrapper); ok {
+		return isWindowExprType(u.Unwrap())
+	}
+	return false
+}
+
+// isWindowExprType reports whether c is an expr.WindowExpr or *expr.WindowExpr.
+func isWindowExprType(c expr.SelectableColumn) bool {
+	if _, ok := c.(expr.WindowExpr); ok {
+		return true
+	}
+	if _, ok := c.(*expr.WindowExpr); ok {
+		return true
+	}
+	return false
+}
+
 // selectColSQL produces the SQL fragment for a selectable column.
 // For aggregate expressions (COUNT, SUM, …) that implement expr.Expression,
 // ToSQL is called directly so the aggregate function syntax is preserved.
@@ -540,4 +653,18 @@ func selectColSQL(ctx *expr.BuildContext, c expr.SelectableColumn) string {
 		return e.ToSQL(ctx)
 	}
 	return ctx.ColRef(c.TableName(), c.ColumnName())
+}
+
+// distinctColSQL produces the SQL fragment for a column inside DISTINCT ON (...).
+// Unlike selectColSQL it never emits an "AS alias" suffix: DISTINCT ON only
+// accepts bare column references, not aliased expressions.
+// AliasedCol is unwrapped one level so that expr.ColAs(col, "alias") renders
+// as the underlying column without the SELECT-list alias.
+func distinctColSQL(ctx *expr.BuildContext, c expr.SelectableColumn) string {
+	// Unwrap one level of AliasedCol so we render the inner column, not the alias.
+	type unwrapper interface{ Unwrap() expr.SelectableColumn }
+	if u, ok := c.(unwrapper); ok {
+		c = u.Unwrap()
+	}
+	return selectColSQL(ctx, c)
 }
