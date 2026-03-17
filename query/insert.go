@@ -137,9 +137,15 @@ func (b *InsertBuilder) DoUpdateSetExcluded(cols ...string) *InsertBuilder {
 // DoUpdateSetStruct extracts non-nil db-tagged fields and adds them to the
 // DO UPDATE SET clause as explicit col = val assignments. Nil pointer fields
 // are skipped (same semantics as UpdateBuilder.SetStruct).
-// If row is nil or non-struct, this is a no-op (no SET assignments are added).
+//
+// Panics if row is nil, a nil pointer, or not a struct — passing an invalid
+// value here is a programming error that would produce invalid SQL with an
+// empty SET list.
 func (b *InsertBuilder) DoUpdateSetStruct(row any) *InsertBuilder {
-	cols, vals, _ := structSetsForUpdate(row)
+	cols, vals, err := structSetsForUpdate(row)
+	if err != nil {
+		panic("query.DoUpdateSetStruct: " + err.Error())
+	}
 	cp := *b
 	u := b.upsertCopy()
 	u.doNothing = false

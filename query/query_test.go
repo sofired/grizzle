@@ -448,6 +448,52 @@ func TestUpsert_DoUpdateSetStruct(t *testing.T) {
 	)
 }
 
+// TestUpsert_DoUpdateSetStruct_InvalidInput covers the upsert path for #119,
+// #120, and #122: DoUpdateSetStruct must panic (not silently emit invalid SQL)
+// when called with nil, a nil pointer, or a non-struct value.
+// These paths also directly exercise the !rv.IsValid() guard inside
+// structSetsForUpdate, which the UpdateBuilder.Build path never reaches because
+// it pre-checks b.setStruct != nil before calling the helper.
+func TestUpsert_DoUpdateSetStruct_InvalidInput(t *testing.T) {
+	realmID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	username := "alice"
+	row := ts.UserInsert{RealmID: realmID, Username: username}
+
+	mustPanic := func(t *testing.T, name string, fn func()) {
+		t.Helper()
+		t.Run(name, func(t *testing.T) {
+			defer func() {
+				if r := recover(); r == nil {
+					t.Errorf("expected panic, but did not panic")
+				}
+			}()
+			fn()
+		})
+	}
+
+	mustPanic(t, "nil interface", func() {
+		query.InsertInto(ts.UsersT).
+			Values(row).
+			OnConflict("realm_id", "username").
+			DoUpdateSetStruct(nil)
+	})
+
+	mustPanic(t, "nil pointer", func() {
+		var p *ts.UserUpdate
+		query.InsertInto(ts.UsersT).
+			Values(row).
+			OnConflict("realm_id", "username").
+			DoUpdateSetStruct(p)
+	})
+
+	mustPanic(t, "non-struct value", func() {
+		query.InsertInto(ts.UsersT).
+			Values(row).
+			OnConflict("realm_id", "username").
+			DoUpdateSetStruct(42)
+	})
+}
+
 // -------------------------------------------------------------------
 // UPDATE tests
 // -------------------------------------------------------------------
