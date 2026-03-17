@@ -96,7 +96,7 @@ db.with(sq).select().from(sq)
 
 **Grizzle target:** No equivalent yet. The target API needs to be designed. Drizzle supports non-recursive and recursive CTEs. The dialect matrix confirms CTE support in PostgreSQL, MySQL 8+, and SQLite 3.35+.
 
-### FOR UPDATE / row locking — DEVIATION:GAP (designed)
+### FOR UPDATE / row locking — PARITY
 
 **Drizzle:**
 ```typescript
@@ -105,17 +105,16 @@ db.select().from(users).for('update', { skipLocked: true })
 db.select().from(users).for('share', { noWait: true })
 ```
 
-**Grizzle target:** `.For(mode, opts...)` on `SelectBuilder`.
-
+**Grizzle:**
 ```go
 query.Select().From(db.UsersT).For(query.LockForUpdate)
 query.Select().From(db.UsersT).For(query.LockForUpdate, query.SkipLocked)
 query.Select().From(db.UsersT).For(query.LockForShare, query.NoWait)
 ```
 
-Must only emit PostgreSQL-valid clauses for the PostgreSQL dialect and MySQL-valid clauses for MySQL. `FOR NO KEY UPDATE` and `FOR KEY SHARE` are PostgreSQL-only and must not emit for other dialects — see bug #110.
+`ForUpdate()`, `ForShare()`, `ForNoKeyUpdate()`, and `ForKeyShare()` are convenience wrappers around `For()`.
 
-Tracked as enhancement candidate #141 (post-parity).
+Only PostgreSQL-valid clauses are emitted for the PostgreSQL dialect and MySQL-valid clauses for MySQL. `FOR NO KEY UPDATE` and `FOR KEY SHARE` are PostgreSQL-only and are silently dropped for other dialects. `Of()` works with all four lock modes.
 
 ### Set operations
 

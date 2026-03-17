@@ -1644,6 +1644,179 @@ func TestSelect_ForKeyShare_MySQL(t *testing.T) {
 	}
 }
 
+// aliasedTable is a minimal TableSource whose alias differs from its name,
+// used to verify that the OF clause renders the alias and not the base name.
+type aliasedTable struct{ name, alias string }
+
+func (a aliasedTable) GrizTableName() string  { return a.name }
+func (a aliasedTable) GrizTableAlias() string { return a.alias }
+
+func TestSelect_ForUpdate_Of_Alias(t *testing.T) {
+	tbl := aliasedTable{name: "orders", alias: "o"}
+	q := query.Select().From(tbl).ForUpdate().Of(tbl)
+	got, _ := q.Build(dialect.Postgres)
+	want := `SELECT * FROM "orders" AS "o" FOR UPDATE OF "o"`
+	if got != want {
+		t.Errorf("OF alias\ngot:  %s\nwant: %s", got, want)
+	}
+}
+
+func TestSelect_ForUpdate_Of_NoAlias(t *testing.T) {
+	q := query.Select().From(ts.UsersT).ForUpdate().Of(ts.UsersT)
+	assertSQL(t, "FOR UPDATE OF no-alias",
+		q,
+		`SELECT * FROM "users" FOR UPDATE OF "users"`,
+		nil,
+	)
+}
+
+func TestSelect_ForShare_Of_Postgres(t *testing.T) {
+	tbl := aliasedTable{name: "orders", alias: "o"}
+	q := query.Select().From(tbl).ForShare().Of(tbl)
+	got, _ := q.Build(dialect.Postgres)
+	want := `SELECT * FROM "orders" AS "o" FOR SHARE OF "o"`
+	if got != want {
+		t.Errorf("FOR SHARE OF\ngot:  %s\nwant: %s", got, want)
+	}
+}
+
+func TestSelect_ForShare_Of_MySQL_Dropped(t *testing.T) {
+	// MySQL LOCK IN SHARE MODE does not support OF; it must be dropped.
+	tbl := aliasedTable{name: "orders", alias: "o"}
+	q := query.Select().From(tbl).ForShare().Of(tbl)
+	got, _ := q.Build(dialect.MySQL)
+	if strings.Contains(got, " OF ") {
+		t.Errorf("MySQL LOCK IN SHARE MODE must not emit OF clause, got: %s", got)
+	}
+	if !strings.Contains(got, "LOCK IN SHARE MODE") {
+		t.Errorf("expected LOCK IN SHARE MODE in: %s", got)
+	}
+}
+
+func TestSelect_ForUpdate_Of_MySQL_MultiTable(t *testing.T) {
+	// MySQL 8.0+ FOR UPDATE supports OF with multiple tables.
+	t1 := aliasedTable{name: "orders", alias: "o"}
+	t2 := aliasedTable{name: "items", alias: "i"}
+	q := query.Select().From(t1).ForUpdate().Of(t1, t2)
+	got, _ := q.Build(dialect.MySQL)
+	if strings.Count(got, " OF ") != 1 {
+		t.Fatalf("expected exactly one OF clause in: %s", got)
+	}
+	// MySQL uses backtick quoting.
+	if !strings.Contains(got, "`o`") {
+		t.Errorf("expected first table alias `o` in OF clause: %s", got)
+	}
+	if !strings.Contains(got, "`i`") {
+		t.Errorf("expected second table alias `i` in OF clause: %s", got)
+	}
+}
+
+func TestSelect_Of_BeforeForUpdate(t *testing.T) {
+	// Of() can precede ForUpdate(); call order does not matter.
+	tbl := aliasedTable{name: "orders", alias: "o"}
+	q := query.Select().From(tbl).Of(tbl).ForUpdate()
+	got, _ := q.Build(dialect.Postgres)
+	want := `SELECT * FROM "orders" AS "o" FOR UPDATE OF "o"`
+	if got != want {
+		t.Errorf("Of before ForUpdate\ngot:  %s\nwant: %s", got, want)
+	}
+}
+
+func TestSelect_ForUpdate_Of_SQLite_Dropped(t *testing.T) {
+	// SQLite has no row-level locking; the entire clause must be dropped.
+	tbl := aliasedTable{name: "orders", alias: "o"}
+	q := query.Select().From(tbl).ForUpdate().Of(tbl)
+	got, _ := q.Build(dialect.SQLite)
+	if strings.Contains(got, "FOR UPDATE") || strings.Contains(got, " OF ") {
+		t.Errorf("SQLite must drop all locking clauses, got: %s", got)
+	}
+}
+
+// -------------------------------------------------------------------
+// For(strength, opts...) — SKIP LOCKED / NOWAIT tests
+// -------------------------------------------------------------------
+
+func TestSelect_For_SkipLocked_Postgres(t *testing.T) {
+	q := query.Select().From(ts.UsersT).For(query.LockForUpdate, query.SkipLocked)
+	got, _ := q.Build(dialect.Postgres)
+	want := `SELECT * FROM "users" FOR UPDATE SKIP LOCKED`
+	if got != want {
+		t.Errorf("got:  %s\nwant: %s", got, want)
+	}
+}
+
+func TestSelect_For_NoWait_Postgres(t *testing.T) {
+	q := query.Select().From(ts.UsersT).For(query.LockForUpdate, query.NoWait)
+	got, _ := q.Build(dialect.Postgres)
+	want := `SELECT * FROM "users" FOR UPDATE NOWAIT`
+	if got != want {
+		t.Errorf("got:  %s\nwant: %s", got, want)
+	}
+}
+
+func TestSelect_For_SkipLocked_MySQL(t *testing.T) {
+	q := query.Select().From(ts.UsersT).For(query.LockForUpdate, query.SkipLocked)
+	got, _ := q.Build(dialect.MySQL)
+	// MySQL uses backtick quoting and appends SKIP LOCKED after FOR UPDATE.
+	if !strings.Contains(got, "FOR UPDATE") {
+		t.Errorf("expected FOR UPDATE in: %s", got)
+	}
+	if !strings.Contains(got, "SKIP LOCKED") {
+		t.Errorf("expected SKIP LOCKED in: %s", got)
+	}
+}
+
+func TestSelect_For_NoWait_MySQL(t *testing.T) {
+	q := query.Select().From(ts.UsersT).For(query.LockForUpdate, query.NoWait)
+	got, _ := q.Build(dialect.MySQL)
+	if !strings.Contains(got, "FOR UPDATE") {
+		t.Errorf("expected FOR UPDATE in: %s", got)
+	}
+	if !strings.Contains(got, "NOWAIT") {
+		t.Errorf("expected NOWAIT in: %s", got)
+	}
+}
+
+func TestSelect_For_SkipLocked_SQLite_Dropped(t *testing.T) {
+	// SQLite has no row-level locking; the entire clause including opts must be dropped.
+	q := query.Select().From(ts.UsersT).For(query.LockForUpdate, query.SkipLocked)
+	got, _ := q.Build(dialect.SQLite)
+	if strings.Contains(got, "FOR UPDATE") || strings.Contains(got, "SKIP LOCKED") {
+		t.Errorf("SQLite must drop all locking clauses, got: %s", got)
+	}
+}
+
+func TestSelect_For_NoKeyUpdate_Of_Postgres(t *testing.T) {
+	tbl := aliasedTable{name: "orders", alias: "o"}
+	q := query.Select().From(tbl).For(query.LockForNoKeyUpdate).Of(tbl)
+	got, _ := q.Build(dialect.Postgres)
+	want := `SELECT * FROM "orders" AS "o" FOR NO KEY UPDATE OF "o"`
+	if got != want {
+		t.Errorf("got:  %s\nwant: %s", got, want)
+	}
+}
+
+func TestSelect_For_KeyShare_Of_Postgres(t *testing.T) {
+	tbl := aliasedTable{name: "orders", alias: "o"}
+	q := query.Select().From(tbl).For(query.LockForKeyShare).Of(tbl)
+	got, _ := q.Build(dialect.Postgres)
+	want := `SELECT * FROM "orders" AS "o" FOR KEY SHARE OF "o"`
+	if got != want {
+		t.Errorf("got:  %s\nwant: %s", got, want)
+	}
+}
+
+func TestSelect_For_WithOptsAndOf(t *testing.T) {
+	// FOR UPDATE OF "o" NOWAIT — combined Of+opts on postgres.
+	tbl := aliasedTable{name: "orders", alias: "o"}
+	q := query.Select().From(tbl).For(query.LockForUpdate, query.NoWait).Of(tbl)
+	got, _ := q.Build(dialect.Postgres)
+	want := `SELECT * FROM "orders" AS "o" FOR UPDATE OF "o" NOWAIT`
+	if got != want {
+		t.Errorf("got:  %s\nwant: %s", got, want)
+	}
+}
+
 // -------------------------------------------------------------------
 // UPDATE / DELETE LIMIT tests
 // -------------------------------------------------------------------

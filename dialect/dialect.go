@@ -96,6 +96,12 @@ type Dialect interface {
 	// Returns "" for dialects that do not support row-level locking (e.g. SQLite).
 	// A non-empty value is only returned when SupportsForUpdate() is true.
 	ForShareClause() string
+
+	// SupportsForShareOf reports whether the dialect supports an OF table list
+	// on the shared-lock clause (FOR SHARE … OF / LOCK IN SHARE MODE … OF).
+	// True for PostgreSQL (FOR SHARE OF …); false for MySQL (LOCK IN SHARE MODE
+	// does not accept an OF clause) and SQLite (no row-level locking at all).
+	SupportsForShareOf() bool
 }
 
 // -------------------------------------------------------------------
@@ -118,6 +124,7 @@ func (postgresDialect) SupportsForUpdate() bool       { return true }
 func (postgresDialect) SupportsForNoKeyUpdate() bool  { return true }
 func (postgresDialect) SupportsFullJoin() bool        { return true }
 func (postgresDialect) ForShareClause() string        { return "FOR SHARE" }
+func (postgresDialect) SupportsForShareOf() bool      { return true }
 
 func (postgresDialect) Placeholder(n int) string {
 	return fmt.Sprintf("$%d", n)
@@ -148,6 +155,7 @@ func (mysqlDialect) SupportsForUpdate() bool       { return true }
 func (mysqlDialect) SupportsForNoKeyUpdate() bool  { return false }
 func (mysqlDialect) SupportsFullJoin() bool        { return false }
 func (mysqlDialect) ForShareClause() string        { return "LOCK IN SHARE MODE" }
+func (mysqlDialect) SupportsForShareOf() bool      { return false }
 
 func (mysqlDialect) Placeholder(_ int) string { return "?" }
 
@@ -175,6 +183,7 @@ func (sqliteDialect) SupportsForUpdate() bool       { return false }
 func (sqliteDialect) SupportsForNoKeyUpdate() bool  { return false }
 func (sqliteDialect) SupportsFullJoin() bool        { return false }
 func (sqliteDialect) ForShareClause() string        { return "" }
+func (sqliteDialect) SupportsForShareOf() bool      { return false }
 
 func (sqliteDialect) Placeholder(_ int) string { return "?" }
 

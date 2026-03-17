@@ -21,6 +21,9 @@ dialect.SQLite    // SQLite 3.35+
 | `RETURNING` clause | Yes | No | Yes (3.35+) |
 | Upsert style | `ON CONFLICT … DO UPDATE` | `ON DUPLICATE KEY UPDATE` | `ON CONFLICT … DO UPDATE` |
 | Insert ignore | `ON CONFLICT … DO NOTHING` | `INSERT IGNORE` | `INSERT OR IGNORE` |
+| `FOR UPDATE OF` | All tables emitted | All tables emitted (8.0+) | Silently ignored |
+| `FOR SHARE OF` | All tables emitted | Not emitted (`LOCK IN SHARE MODE`) | Silently ignored |
+| `NOWAIT` / `SKIP LOCKED` | Supported | Supported (8.0+) | Silently ignored |
 
 ## Using a dialect
 
