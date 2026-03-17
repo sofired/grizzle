@@ -2447,8 +2447,12 @@ func TestCTE_RecursiveDroppedWhenNotSupported(t *testing.T) {
 		From(query.CTERef("tree")).
 		Build(noCTEDialect{})
 
-	if strings.Contains(sql, "WITH") {
-		t.Errorf("expected WITH RECURSIVE clause to be dropped, got: %s", sql)
+	// The CTERef FROM reference is preserved as a plain table name; at runtime
+	// the database will raise an unknown-table error — the intended fail-loud
+	// behaviour rather than silently returning wrong rows.
+	want := `SELECT "users"."id" FROM "tree"`
+	if sql != want {
+		t.Errorf("recursive CTE dropped: want %q, got %q", want, sql)
 	}
 }
 

@@ -257,7 +257,7 @@ func (b *SelectBuilder) With(name string, sub *SelectBuilder) *SelectBuilder {
 //
 //	rec := query.Select(EmployeesT.ID, EmployeesT.ManagerID).
 //	    From(EmployeesT).
-//	    InnerJoin(query.CTERef("org"), EmployeesT.ManagerID.EQCol(EmployeesT.ID))
+//	    InnerJoin(query.CTERef("org"), EmployeesT.ManagerID.EQ(expr.ColBase{TableAlias: "org", ColName: "id"}))
 //
 //	query.Select().
 //	    WithRecursive("org", anchor, rec).
