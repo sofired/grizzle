@@ -208,10 +208,11 @@ Never pass user-controlled input to `expr.Raw`. Use parameterized expressions wh
 
 ## Pessimistic locking
 
-Use `ForUpdate()` or `ForShare()` to lock rows for the duration of a transaction.
+Use `ForUpdate()` or the lower-level `For(LockForUpdate)` to lock rows for the duration of a transaction.
 
 ```go
 // Lock selected rows against concurrent updates (PostgreSQL, MySQL).
+// Convenience form:
 users, err := pgxdb.ScanAll[db.UserSelect](
     d.Query(ctx,
         query.Select().
@@ -220,11 +221,28 @@ users, err := pgxdb.ScanAll[db.UserSelect](
             ForUpdate(),
     ),
 )
+
+// Equivalent explicit form:
+query.Select().From(db.UsersT).For(query.LockForUpdate)
 ```
+
+### SKIP LOCKED / NOWAIT
+
+Pass `query.SkipLocked` or `query.NoWait` as a second argument to `For()` to control behaviour when locked rows are encountered:
+
+```go
+// Skip rows that are already locked (e.g. queue-style job dispatch).
+query.Select().From(db.JobsT).For(query.LockForUpdate, query.SkipLocked)
+
+// Fail immediately if any row cannot be locked.
+query.Select().From(db.UsersT).For(query.LockForShare, query.NoWait)
+```
+
+Both modifiers are supported by PostgreSQL and MySQL 8.0+. They are silently dropped for SQLite.
 
 ### Restricting locks with OF
 
-Pass `Of(table)` to lock only specific tables in a multi-table join:
+Pass `Of(table)` to lock only specific tables in a multi-table join. `Of()` works with all four lock modes.
 
 ```go
 // Generated table handles always return the base table name from
@@ -248,18 +266,22 @@ sql, args := query.Select().
     Of(o).
     Build(dialect.Postgres)
 // SELECT * FROM "orders" AS "o" LEFT JOIN "items" AS "i" ON ... FOR UPDATE OF "o"
+
+// Of() also works with the other lock modes (all four on PostgreSQL).
+query.Select().From(o).For(query.LockForNoKeyUpdate).Of(o)
+// SELECT * FROM "orders" AS "o" FOR NO KEY UPDATE OF "o"
 ```
 
 Each table passed to `Of()` is identified by its **alias** (the value returned by `GrizTableAlias()`), not the underlying table name. Using the base table name when an alias is in scope causes a PostgreSQL error.
 
-`Of()` and `ForUpdate()`/`ForShare()` can be called in any order.
+`Of()` and `For()`/`ForUpdate()`/`ForShare()` can be called in any order.
 
 ### Dialect behaviour
 
-| | `ForUpdate()` | `ForShare()` | `Of()` |
-|---|---|---|---|
-| **PostgreSQL** | `FOR UPDATE` | `FOR SHARE` | Emits all tables |
-| **MySQL** | `FOR UPDATE` | `LOCK IN SHARE MODE` | Emitted for `FOR UPDATE`; silently dropped for `LOCK IN SHARE MODE` |
-| **SQLite** | Silently dropped | Silently dropped | Silently dropped |
+| | `FOR UPDATE` | `FOR SHARE` | `FOR NO KEY UPDATE` | `FOR KEY SHARE` | `OF` | `NOWAIT` / `SKIP LOCKED` |
+|---|---|---|---|---|---|---|
+| **PostgreSQL** | `FOR UPDATE` | `FOR SHARE` | `FOR NO KEY UPDATE` | `FOR KEY SHARE` | Emits all tables (all modes) | Supported |
+| **MySQL** | `FOR UPDATE` | `LOCK IN SHARE MODE` | Silently dropped | Silently dropped | Emitted for `FOR UPDATE`; dropped for `LOCK IN SHARE MODE` | Supported (8.0+) |
+| **SQLite** | Silently dropped | Silently dropped | Silently dropped | Silently dropped | Silently dropped | Silently dropped |
 
 See [Dialect comparison](../reference/dialects.md) for the full feature table.

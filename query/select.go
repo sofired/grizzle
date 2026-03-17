@@ -8,26 +8,47 @@ import (
 	"github.com/sofired/grizzle/expr"
 )
 
+// LockStrength is the row-level locking mode for SELECT … FOR … statements.
+type LockStrength string
+
+const (
+	LockForUpdate      LockStrength = "FOR UPDATE"
+	LockForNoKeyUpdate LockStrength = "FOR NO KEY UPDATE"
+	LockForShare       LockStrength = "FOR SHARE"
+	LockForKeyShare    LockStrength = "FOR KEY SHARE"
+)
+
+// LockOption is a modifier for the row-level locking clause.
+type LockOption string
+
+const (
+	// NoWait causes the query to fail immediately if any selected row cannot
+	// be locked. Supported by PostgreSQL and MySQL 8.0+; silently dropped for SQLite.
+	NoWait LockOption = "NOWAIT"
+	// SkipLocked causes the query to skip rows that are already locked, returning
+	// only the rows that could be locked. Supported by PostgreSQL and MySQL 8.0+;
+	// silently dropped for SQLite.
+	SkipLocked LockOption = "SKIP LOCKED"
+)
+
 // SelectBuilder constructs a SELECT query.
 // Each method returns a modified copy, so builders can be shared and
 // extended without mutating the original.
 type SelectBuilder struct {
-	ctes           []cteClause             // optional WITH clauses (prepended as CTEs)
-	distinct       bool                    // SELECT DISTINCT
-	cols           []expr.SelectableColumn // nil = SELECT *
-	from           TableSource
-	joins          []joinClause
-	where          expr.Expression
-	orderBy        []expr.OrderExpr
-	groupBy        []expr.SelectableColumn
-	having         expr.Expression
-	limit          int           // 0 = no limit
-	offset         int           // 0 = no offset
-	forUpdate      bool          // append FOR UPDATE
-	forShare       bool          // append FOR SHARE
-	forNoKeyUpdate bool          // append FOR NO KEY UPDATE (PostgreSQL only)
-	forKeyShare    bool          // append FOR KEY SHARE (PostgreSQL only)
-	lockOf         []TableSource // OF table list for row-level locking (PostgreSQL/MySQL)
+	ctes     []cteClause             // optional WITH clauses (prepended as CTEs)
+	distinct bool                    // SELECT DISTINCT
+	cols     []expr.SelectableColumn // nil = SELECT *
+	from     TableSource
+	joins    []joinClause
+	where    expr.Expression
+	orderBy  []expr.OrderExpr
+	groupBy  []expr.SelectableColumn
+	having   expr.Expression
+	limit    int           // 0 = no limit
+	offset   int           // 0 = no offset
+	lockStrength LockStrength  // row-level lock mode (empty = no lock)
+	lockOpts     []LockOption  // NOWAIT / SKIP LOCKED modifiers
+	lockOf       []TableSource // OF table list for row-level locking (PostgreSQL/MySQL)
 }
 
 // cteClause holds a single WITH name AS (...) entry.
@@ -60,56 +81,66 @@ func (b *SelectBuilder) Distinct() *SelectBuilder {
 	return &cp
 }
 
+// For sets the row-level locking mode for the query. strength must be one of
+// LockForUpdate, LockForNoKeyUpdate, LockForShare, or LockForKeyShare.
+// Zero or more LockOption modifiers (NoWait, SkipLocked) may be appended.
+//
+// Dialect behaviour:
+//   - PostgreSQL: all four modes are emitted.
+//   - MySQL: only LockForUpdate (FOR UPDATE) and LockForShare (LOCK IN SHARE MODE)
+//     are emitted; LockForNoKeyUpdate and LockForKeyShare are silently dropped.
+//   - SQLite: the entire clause is silently dropped (SQLite has no row-level locking).
+//   - NoWait / SkipLocked are supported by PostgreSQL and MySQL 8.0+; silently
+//     dropped for SQLite.
+//
+// Example:
+//
+//	query.Select().From(db.UsersT).For(query.LockForUpdate)
+//	query.Select().From(db.UsersT).For(query.LockForUpdate, query.SkipLocked)
+//	query.Select().From(db.UsersT).For(query.LockForShare, query.NoWait)
+func (b *SelectBuilder) For(strength LockStrength, opts ...LockOption) *SelectBuilder {
+	cp := *b
+	cp.lockStrength = strength
+	cp.lockOpts = append([]LockOption(nil), opts...)
+	return &cp
+}
+
 // ForUpdate appends FOR UPDATE to the query, locking selected rows against
 // concurrent updates. Supported by PostgreSQL and MySQL; silently dropped for
 // SQLite, which uses file-level locking only.
 //
-//	query.Select().From(UsersT).Where(UsersT.ID.EQ(id)).ForUpdate()
+// ForUpdate is a convenience wrapper around For(LockForUpdate).
 func (b *SelectBuilder) ForUpdate() *SelectBuilder {
-	cp := *b
-	cp.forUpdate = true
-	cp.forShare = false
-	cp.forNoKeyUpdate = false
-	cp.forKeyShare = false
-	return &cp
+	return b.For(LockForUpdate)
 }
 
 // ForShare appends FOR SHARE (PostgreSQL) / LOCK IN SHARE MODE (MySQL) to
 // the query, locking rows for read while allowing other readers.
 // PostgreSQL and MySQL only — SQLite silently drops the clause.
+//
+// ForShare is a convenience wrapper around For(LockForShare).
 func (b *SelectBuilder) ForShare() *SelectBuilder {
-	cp := *b
-	cp.forShare = true
-	cp.forUpdate = false
-	cp.forNoKeyUpdate = false
-	cp.forKeyShare = false
-	return &cp
+	return b.For(LockForShare)
 }
 
 // ForNoKeyUpdate appends FOR NO KEY UPDATE to the query. This PostgreSQL-specific
 // lock mode is weaker than FOR UPDATE: it does not block INSERT of child rows that
 // reference this row via a foreign key. Silently dropped for dialects that do not
 // support this locking mode (e.g. MySQL, SQLite).
+//
+// ForNoKeyUpdate is a convenience wrapper around For(LockForNoKeyUpdate).
 func (b *SelectBuilder) ForNoKeyUpdate() *SelectBuilder {
-	cp := *b
-	cp.forNoKeyUpdate = true
-	cp.forUpdate = false
-	cp.forShare = false
-	cp.forKeyShare = false
-	return &cp
+	return b.For(LockForNoKeyUpdate)
 }
 
 // ForKeyShare appends FOR KEY SHARE to the query. This PostgreSQL-specific
 // lock mode is the weakest row lock: it only blocks DELETE and FOR UPDATE
 // operations that would delete or change key values. Silently dropped for
 // dialects that do not support this locking mode (e.g. MySQL, SQLite).
+//
+// ForKeyShare is a convenience wrapper around For(LockForKeyShare).
 func (b *SelectBuilder) ForKeyShare() *SelectBuilder {
-	cp := *b
-	cp.forKeyShare = true
-	cp.forUpdate = false
-	cp.forShare = false
-	cp.forNoKeyUpdate = false
-	return &cp
+	return b.For(LockForKeyShare)
 }
 
 // Of restricts the locking clause to specific tables, rendering
@@ -135,15 +166,16 @@ func (b *SelectBuilder) ForKeyShare() *SelectBuilder {
 //	    Of(o)
 //	// SELECT * FROM "orders" AS "o" FOR UPDATE OF "o"
 //
-// Dialect-specific behaviour:
-//   - PostgreSQL: all specified tables are emitted for both FOR UPDATE and FOR SHARE.
+// Of works with all four lock modes (LockForUpdate, LockForNoKeyUpdate,
+// LockForShare, LockForKeyShare). Dialect-specific behaviour:
+//   - PostgreSQL: all specified tables are emitted for all four lock modes.
 //   - MySQL: all specified tables are emitted for FOR UPDATE (MySQL 8.0+).
-//     For LOCK IN SHARE MODE (ForShare on MySQL), OF is not supported and is
-//     silently dropped.
+//     For LOCK IN SHARE MODE (LockForShare on MySQL), OF is not supported and is
+//     silently dropped. LockForNoKeyUpdate and LockForKeyShare are dropped entirely
+//     on MySQL, so OF has no effect for those modes.
 //   - SQLite: OF is silently ignored (SQLite has no row-level locking).
 //
-// If neither ForUpdate nor ForShare is active, Of has no effect.
-// The call order relative to ForUpdate/ForShare does not matter.
+// The call order relative to For/ForUpdate/ForShare does not matter.
 func (b *SelectBuilder) Of(tables ...TableSource) *SelectBuilder {
 	cp := *b
 	cp.lockOf = append(append([]TableSource(nil), cp.lockOf...), tables...)
@@ -437,10 +469,15 @@ func (b *SelectBuilder) buildWith(ctx *expr.BuildContext) string {
 	}
 
 	// Locking clauses — only emitted for dialects that support row-level locking.
-	if ctx.Dialect().SupportsForUpdate() {
-		if b.forUpdate {
-			sb.WriteString(" FOR UPDATE")
-			// OF table list: supported by PostgreSQL and MySQL 8.0+ FOR UPDATE.
+	if b.lockStrength != "" && ctx.Dialect().SupportsForUpdate() {
+		switch b.lockStrength {
+		case LockForNoKeyUpdate, LockForKeyShare:
+			// PostgreSQL-only modes: gate on SupportsForNoKeyUpdate.
+			if !ctx.Dialect().SupportsForNoKeyUpdate() {
+				break
+			}
+			sb.WriteString(" " + string(b.lockStrength))
+			// OF table list: PostgreSQL supports it for all modes.
 			if len(b.lockOf) > 0 {
 				sb.WriteString(" OF ")
 				for i, t := range b.lockOf {
@@ -450,7 +487,11 @@ func (b *SelectBuilder) buildWith(ctx *expr.BuildContext) string {
 					sb.WriteString(ctx.Quote(t.GrizTableAlias()))
 				}
 			}
-		} else if b.forShare {
+			// NOWAIT / SKIP LOCKED modifiers.
+			for _, opt := range b.lockOpts {
+				sb.WriteString(" " + string(opt))
+			}
+		case LockForShare:
 			sb.WriteString(" " + ctx.Dialect().ForShareClause())
 			// OF table list: only emitted when the dialect declares support for it
 			// (e.g. PostgreSQL FOR SHARE). MySQL's LOCK IN SHARE MODE does not
@@ -464,14 +505,26 @@ func (b *SelectBuilder) buildWith(ctx *expr.BuildContext) string {
 					sb.WriteString(ctx.Quote(t.GrizTableAlias()))
 				}
 			}
-		}
-	}
-	// FOR NO KEY UPDATE / FOR KEY SHARE are PostgreSQL-only locking modes.
-	if ctx.Dialect().SupportsForNoKeyUpdate() {
-		if b.forNoKeyUpdate {
-			sb.WriteString(" FOR NO KEY UPDATE")
-		} else if b.forKeyShare {
-			sb.WriteString(" FOR KEY SHARE")
+			// NOWAIT / SKIP LOCKED modifiers.
+			for _, opt := range b.lockOpts {
+				sb.WriteString(" " + string(opt))
+			}
+		default: // LockForUpdate (and any future modes)
+			sb.WriteString(" " + string(b.lockStrength))
+			// OF table list: supported by PostgreSQL and MySQL 8.0+ FOR UPDATE.
+			if len(b.lockOf) > 0 {
+				sb.WriteString(" OF ")
+				for i, t := range b.lockOf {
+					if i > 0 {
+						sb.WriteString(", ")
+					}
+					sb.WriteString(ctx.Quote(t.GrizTableAlias()))
+				}
+			}
+			// NOWAIT / SKIP LOCKED modifiers.
+			for _, opt := range b.lockOpts {
+				sb.WriteString(" " + string(opt))
+			}
 		}
 	}
 
