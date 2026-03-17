@@ -109,7 +109,7 @@ func (e rawExpr) ToSQL(_ *BuildContext) string { return e.sql }
 // the next bound-parameter placeholder ($1, ?, etc.) from the dialect.
 //
 // If the number of $? placeholders does not match the number of args, RawArgs
-// panics with a clear message at build time (Fix #129).
+// panics with a clear diagnostic at query build time.
 //
 // Example:
 //
