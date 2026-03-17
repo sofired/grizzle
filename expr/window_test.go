@@ -204,11 +204,11 @@ func TestRawArgs_MatchingPlaceholders(t *testing.T) {
 	}
 }
 
-func TestRawArgs_TooFewArgsPanics(t *testing.T) {
+func TestRawArgs_TooFewArgs_Panics(t *testing.T) {
 	defer func() {
 		r := recover()
 		if r == nil {
-			t.Error("expected panic for too few args")
+			t.Error("expected panic for too few args (2 placeholders, 1 arg)")
 		}
 		msg, ok := r.(string)
 		if !ok || !strings.Contains(msg, "placeholder count") {
@@ -219,11 +219,11 @@ func TestRawArgs_TooFewArgsPanics(t *testing.T) {
 	expr.RawArgs("col = $? AND other = $?", 42).ToSQL(ctx) // 2 placeholders, 1 arg
 }
 
-func TestRawArgs_TooManyArgsPanics(t *testing.T) {
+func TestRawArgs_TooManyArgs_Panics(t *testing.T) {
 	defer func() {
 		r := recover()
 		if r == nil {
-			t.Error("expected panic for too many args")
+			t.Error("expected panic for too many args (1 placeholder, 2 args)")
 		}
 		msg, ok := r.(string)
 		if !ok || !strings.Contains(msg, "placeholder count") {
