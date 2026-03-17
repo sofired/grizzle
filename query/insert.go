@@ -138,14 +138,19 @@ func (b *InsertBuilder) DoUpdateSetExcluded(cols ...string) *InsertBuilder {
 // DO UPDATE SET clause as explicit col = val assignments. Nil pointer fields
 // are skipped (same semantics as UpdateBuilder.SetStruct).
 // If row is nil, a nil pointer, or not a struct, the conflict action falls back
-// to DO NOTHING to avoid emitting an invalid empty SET list.
+// to DO NOTHING to avoid emitting an invalid empty SET list. A valid struct
+// whose pointer fields are all nil adds no new assignments but does not clear
+// any assignments already accumulated via DoUpdateSet or DoUpdateSetExcluded;
+// the defense-in-depth guard in buildOnConflict / buildOnDuplicateKey handles
+// the case where the final merged set is still empty.
 func (b *InsertBuilder) DoUpdateSetStruct(row any) *InsertBuilder {
 	cols, vals, err := structSetsForUpdate(row)
 	cp := *b
 	u := b.upsertCopy()
-	if err != nil || len(cols) == 0 {
-		// Invalid or empty input: fall back to DO NOTHING rather than
-		// emitting a syntactically invalid DO UPDATE SET with no assignments.
+	if err != nil {
+		// Invalid input (nil, nil pointer, non-struct): fall back to DO NOTHING
+		// rather than emitting a syntactically invalid DO UPDATE SET with no
+		// assignments.
 		u.doNothing = true
 		u.sets = nil
 		u.excluded = nil
