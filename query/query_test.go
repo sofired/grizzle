@@ -536,6 +536,26 @@ func TestUpsert_DoUpdateSetStruct_NilInput_MySQL(t *testing.T) {
 	}
 }
 
+// TestUpsert_DoUpdateSetStruct_AllNilFields_WithPriorSets verifies that when
+// DoUpdateSetStruct receives a valid struct with all nil pointer fields, it
+// does not clear SET assignments already accumulated via DoUpdateSet.
+func TestUpsert_DoUpdateSetStruct_AllNilFields_WithPriorSets(t *testing.T) {
+	realmID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	username := "alice"
+	enabled := true
+	row := ts.UserInsert{RealmID: realmID, Username: username}
+	upd := ts.UserUpdate{} // all pointer fields are nil
+	assertSQL(t, "prior DoUpdateSet not cleared by all-nil DoUpdateSetStruct",
+		query.InsertInto(ts.UsersT).
+			Values(row).
+			OnConflict("realm_id", "username").
+			DoUpdateSet("enabled", enabled).
+			DoUpdateSetStruct(upd),
+		`INSERT INTO "users" ("realm_id", "username") VALUES ($1, $2) ON CONFLICT ("realm_id", "username") DO UPDATE SET "enabled" = $3`,
+		[]any{realmID, username, enabled},
+	)
+}
+
 // -------------------------------------------------------------------
 // UPDATE tests
 // -------------------------------------------------------------------
