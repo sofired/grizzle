@@ -35,17 +35,17 @@ const (
 // Each method returns a modified copy, so builders can be shared and
 // extended without mutating the original.
 type SelectBuilder struct {
-	ctes     []cteClause             // optional WITH clauses (prepended as CTEs)
-	distinct bool                    // SELECT DISTINCT
-	cols     []expr.SelectableColumn // nil = SELECT *
-	from     TableSource
-	joins    []joinClause
-	where    expr.Expression
-	orderBy  []expr.OrderExpr
-	groupBy  []expr.SelectableColumn
-	having   expr.Expression
-	limit    int           // 0 = no limit
-	offset   int           // 0 = no offset
+	ctes         []cteClause             // optional WITH clauses (prepended as CTEs)
+	distinct     bool                    // SELECT DISTINCT
+	cols         []expr.SelectableColumn // nil = SELECT *
+	from         TableSource
+	joins        []joinClause
+	where        expr.Expression
+	orderBy      []expr.OrderExpr
+	groupBy      []expr.SelectableColumn
+	having       expr.Expression
+	limit        int           // 0 = no limit
+	offset       int           // 0 = no offset
 	lockStrength LockStrength  // row-level lock mode (empty = no lock)
 	lockOpts     []LockOption  // NOWAIT / SKIP LOCKED modifiers
 	lockOf       []TableSource // OF table list for row-level locking (PostgreSQL/MySQL)
