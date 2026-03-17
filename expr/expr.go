@@ -108,14 +108,10 @@ func (e rawExpr) ToSQL(_ *BuildContext) string { return e.sql }
 // argument values that fill them in order. Each $? placeholder is replaced with
 // the next bound-parameter placeholder ($1, ?, etc.) from the active dialect.
 //
-// The number of $? tokens must exactly match the number of args; any mismatch
-// (too few or too many) causes a panic at query-build time with a message that
-// identifies the template and the counts. This strict arity check prevents
-// silently invalid SQL from reaching the database.
-//
-// Extra args beyond the number of $? tokens and extra $? tokens beyond the
-// number of args are both disallowed — callers must supply exactly one arg per
-// placeholder.
+// The number of $? tokens must exactly match the number of args. Any mismatch —
+// too few args or too many args — causes a panic at query-build time with a
+// message that identifies the template and the counts. This strict arity check
+// prevents silently invalid SQL from reaching the database.
 //
 // Example:
 //
