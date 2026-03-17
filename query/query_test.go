@@ -448,50 +448,92 @@ func TestUpsert_DoUpdateSetStruct(t *testing.T) {
 	)
 }
 
-// TestUpsert_DoUpdateSetStruct_InvalidInput covers the upsert path for #119,
-// #120, and #122: DoUpdateSetStruct must panic (not silently emit invalid SQL)
-// when called with nil, a nil pointer, or a non-struct value.
-// These paths also directly exercise the !rv.IsValid() guard inside
-// structSetsForUpdate, which the UpdateBuilder.Build path never reaches because
-// it pre-checks b.setStruct != nil before calling the helper.
-func TestUpsert_DoUpdateSetStruct_InvalidInput(t *testing.T) {
+// TestUpsert_DoUpdateSetStruct_NilInput verifies that passing nil to
+// DoUpdateSetStruct falls back to DO NOTHING rather than emitting an invalid
+// empty DO UPDATE SET clause.
+func TestUpsert_DoUpdateSetStruct_NilInput(t *testing.T) {
 	realmID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 	username := "alice"
 	row := ts.UserInsert{RealmID: realmID, Username: username}
+	assertSQL(t, "upsert do update set struct nil falls back to do nothing",
+		query.InsertInto(ts.UsersT).
+			Values(row).
+			OnConflict("realm_id", "username").
+			DoUpdateSetStruct(nil),
+		`INSERT INTO "users" ("realm_id", "username") VALUES ($1, $2) ON CONFLICT ("realm_id", "username") DO NOTHING`,
+		[]any{realmID, username},
+	)
+}
 
-	mustPanic := func(t *testing.T, name string, fn func()) {
-		t.Helper()
-		t.Run(name, func(t *testing.T) {
-			defer func() {
-				if r := recover(); r == nil {
-					t.Errorf("expected panic, but did not panic")
-				}
-			}()
-			fn()
-		})
+// TestUpsert_DoUpdateSetStruct_NilPointer verifies that passing a nil pointer
+// to DoUpdateSetStruct falls back to DO NOTHING.
+func TestUpsert_DoUpdateSetStruct_NilPointer(t *testing.T) {
+	realmID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	username := "alice"
+	row := ts.UserInsert{RealmID: realmID, Username: username}
+	var upd *ts.UserUpdate // nil pointer
+	assertSQL(t, "upsert do update set struct nil pointer falls back to do nothing",
+		query.InsertInto(ts.UsersT).
+			Values(row).
+			OnConflict("realm_id", "username").
+			DoUpdateSetStruct(upd),
+		`INSERT INTO "users" ("realm_id", "username") VALUES ($1, $2) ON CONFLICT ("realm_id", "username") DO NOTHING`,
+		[]any{realmID, username},
+	)
+}
+
+// TestUpsert_DoUpdateSetStruct_NonStruct verifies that passing a non-struct
+// to DoUpdateSetStruct falls back to DO NOTHING.
+func TestUpsert_DoUpdateSetStruct_NonStruct(t *testing.T) {
+	realmID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	username := "alice"
+	row := ts.UserInsert{RealmID: realmID, Username: username}
+	assertSQL(t, "upsert do update set struct non-struct falls back to do nothing",
+		query.InsertInto(ts.UsersT).
+			Values(row).
+			OnConflict("realm_id", "username").
+			DoUpdateSetStruct("not-a-struct"),
+		`INSERT INTO "users" ("realm_id", "username") VALUES ($1, $2) ON CONFLICT ("realm_id", "username") DO NOTHING`,
+		[]any{realmID, username},
+	)
+}
+
+// TestUpsert_DoUpdateSetStruct_AllNilFields verifies that passing a struct
+// where all pointer fields are nil (producing no SET assignments) falls back
+// to DO NOTHING rather than an empty SET list.
+func TestUpsert_DoUpdateSetStruct_AllNilFields(t *testing.T) {
+	realmID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	username := "alice"
+	row := ts.UserInsert{RealmID: realmID, Username: username}
+	upd := ts.UserUpdate{} // all pointer fields are nil
+	assertSQL(t, "upsert do update set struct all nil fields falls back to do nothing",
+		query.InsertInto(ts.UsersT).
+			Values(row).
+			OnConflict("realm_id", "username").
+			DoUpdateSetStruct(upd),
+		`INSERT INTO "users" ("realm_id", "username") VALUES ($1, $2) ON CONFLICT ("realm_id", "username") DO NOTHING`,
+		[]any{realmID, username},
+	)
+}
+
+// TestUpsert_DoUpdateSetStruct_NilInput_MySQL verifies that on MySQL dialects,
+// DoUpdateSetStruct with nil input omits the ON DUPLICATE KEY UPDATE clause
+// (emitting a plain INSERT) rather than an invalid empty assignment list.
+func TestUpsert_DoUpdateSetStruct_NilInput_MySQL(t *testing.T) {
+	realmID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	username := "alice"
+	row := ts.UserInsert{RealmID: realmID, Username: username}
+	sql, _ := query.InsertInto(ts.UsersT).
+		Values(row).
+		OnConflict("realm_id", "username").
+		DoUpdateSetStruct(nil).
+		Build(dialect.MySQL)
+	if strings.Contains(sql, "ON DUPLICATE KEY UPDATE") {
+		t.Errorf("expected no ON DUPLICATE KEY UPDATE clause, got: %s", sql)
 	}
-
-	mustPanic(t, "nil interface", func() {
-		query.InsertInto(ts.UsersT).
-			Values(row).
-			OnConflict("realm_id", "username").
-			DoUpdateSetStruct(nil)
-	})
-
-	mustPanic(t, "nil pointer", func() {
-		var p *ts.UserUpdate
-		query.InsertInto(ts.UsersT).
-			Values(row).
-			OnConflict("realm_id", "username").
-			DoUpdateSetStruct(p)
-	})
-
-	mustPanic(t, "non-struct value", func() {
-		query.InsertInto(ts.UsersT).
-			Values(row).
-			OnConflict("realm_id", "username").
-			DoUpdateSetStruct(42)
-	})
+	if strings.Contains(sql, "UPDATE ") {
+		t.Errorf("expected no UPDATE clause of any kind, got: %s", sql)
+	}
 }
 
 // -------------------------------------------------------------------
