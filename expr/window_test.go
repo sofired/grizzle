@@ -234,8 +234,8 @@ func TestRawArgs_TooManyArgs_Panics(t *testing.T) {
 	expr.RawArgs("col = $?", 42, "extra").ToSQL(ctx) // 1 placeholder, 2 args
 }
 
-// TestRawArgs_MismatchPanics is kept as an alias for backward compatibility
-// with any test references that predated the split into TooFew/TooMany variants.
+// TestRawArgs_MismatchPanics is retained for backward compatibility with any
+// external references that predated the split into TooFew/TooMany variants.
 func TestRawArgs_MismatchPanics(t *testing.T) {
 	defer func() {
 		r := recover()
