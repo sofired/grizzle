@@ -173,13 +173,13 @@ func applyBaseType(def *pg.ColumnDef, baseFn string, args []any) error {
 	// MySQL-specific: ENUM('v1','v2',...) — inline enumeration.
 	case "Enum":
 		if len(args) == 0 {
-			return fmt.Errorf("Enum requires at least one value")
+			return fmt.Errorf("enum requires at least one value")
 		}
 		parts := make([]string, 0, len(args))
 		for i, a := range args {
 			s, ok := a.(string)
 			if !ok {
-				return fmt.Errorf("Enum: argument %d must be a string, got %T", i, a)
+				return fmt.Errorf("enum: argument %d must be a string, got %T", i, a)
 			}
 			parts = append(parts, "'"+strings.ReplaceAll(s, "'", "''")+"'")
 		}
@@ -189,13 +189,13 @@ func applyBaseType(def *pg.ColumnDef, baseFn string, args []any) error {
 	// MySQL-specific: SET('v1','v2',...) — multi-value set column.
 	case "Set":
 		if len(args) == 0 {
-			return fmt.Errorf("Set requires at least one value")
+			return fmt.Errorf("set requires at least one value")
 		}
 		parts := make([]string, 0, len(args))
 		for i, a := range args {
 			s, ok := a.(string)
 			if !ok {
-				return fmt.Errorf("Set: argument %d must be a string, got %T", i, a)
+				return fmt.Errorf("set: argument %d must be a string, got %T", i, a)
 			}
 			parts = append(parts, "'"+strings.ReplaceAll(s, "'", "''")+"'")
 		}
