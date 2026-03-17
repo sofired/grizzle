@@ -83,10 +83,10 @@ query.Select(db.UsersT.ID, db.UsersT.Username).From(db.UsersT)
 
 | Drizzle | Grizzle | Status |
 |---|---|---|
-| `.distinct()` | DEVIATION:GAP (designed) | — |
-| `.distinctOn(cols)` (PostgreSQL) | DEVIATION:GAP (designed) | — |
+| `.distinct()` | `.Distinct()` | PARITY |
+| `.distinctOn(cols)` (PostgreSQL) | `.DistinctOn(cols...)` | PARITY — degrades to `SELECT DISTINCT` on MySQL/SQLite |
 
-### CTEs (Common Table Expressions) — DEVIATION:GAP (not designed)
+### CTEs (Common Table Expressions) — PARITY
 
 **Drizzle:**
 ```typescript
@@ -94,7 +94,15 @@ const sq = db.$with('sq').as(db.select({ userId: users.id }).from(users).where(i
 db.with(sq).select().from(sq)
 ```
 
-**Grizzle target:** No equivalent yet. The target API needs to be designed. Drizzle supports non-recursive and recursive CTEs. The dialect matrix confirms CTE support in PostgreSQL, MySQL 8+, and SQLite 3.35+.
+**Grizzle:**
+```go
+sub := query.Select(db.UsersT.ID).From(db.UsersT).Where(db.UsersT.DeletedAt.IsNull())
+query.Select(expr.ColBase{TableAlias: "sq", ColName: "id"}).With("sq", sub).From(query.CTERef("sq"))
+```
+
+Both non-recursive (`With`) and recursive (`WithRecursive`) CTEs are implemented. Supported by all built-in dialects (PostgreSQL, MySQL 8.0+, SQLite 3.8.3+). When a custom dialect returns `SupportsCTE() = false`, the WITH clause is omitted and any CTERef becomes a dangling table name — producing a runtime database error (fail-loud by design).
+
+**Status:** PARITY
 
 ### FOR UPDATE / row locking — PARITY
 
@@ -107,9 +115,10 @@ db.select().from(users).for('share', { noWait: true })
 
 **Grizzle:**
 ```go
-query.Select().From(db.UsersT).For(query.LockForUpdate)
-query.Select().From(db.UsersT).For(query.LockForUpdate, query.SkipLocked)
-query.Select().From(db.UsersT).For(query.LockForShare, query.NoWait)
+query.Select().From(db.UsersT).ForUpdate()
+query.Select().From(db.UsersT).ForShare()
+query.Select().From(db.UsersT).ForNoKeyUpdate() // PostgreSQL only
+query.Select().From(db.UsersT).ForKeyShare()    // PostgreSQL only
 ```
 
 `ForUpdate()`, `ForShare()`, `ForNoKeyUpdate()`, and `ForKeyShare()` are convenience wrappers around `For()`.
