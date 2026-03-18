@@ -20,6 +20,7 @@ const (
 	ChangeAlterColumnNull    ChangeKind = "alter_column_nullable"
 	ChangeAlterColumnDefault ChangeKind = "alter_column_default"
 	ChangeRenameColumn       ChangeKind = "rename_column"
+	ChangeRenameTable        ChangeKind = "rename_table"
 	ChangeAddConstraint      ChangeKind = "add_constraint"
 	ChangeDropConstraint     ChangeKind = "drop_constraint"
 )
@@ -27,7 +28,11 @@ const (
 // Change represents a single schema mutation — the unit that SQL generation works from.
 type Change struct {
 	Kind      ChangeKind
-	TableName string // qualified name
+	TableName string // qualified name; for ChangeRenameTable this is the old (source) name
+
+	// RenameTarget is set only for ChangeRenameTable: it holds the new table name.
+	// For all other change kinds this field is empty.
+	RenameTarget string
 
 	// Set for column-level changes.
 	OldCol *pg.ColumnDef
@@ -58,34 +63,76 @@ func Diff(old, new Snapshot) []Change {
 	newNames := sortedTableNames(new.Tables)
 	oldNames := sortedTableNames(old.Tables)
 
-	// Phase 1: new tables not in old → CREATE TABLE.
+	// Build sets of added and dropped tables for rename detection.
+	// A table is "added" if it appears in new but not in old.
+	// A table is "dropped" if it appears in old but not in new.
+	droppedTables := make(map[string]struct{})
+	for _, name := range oldNames {
+		if _, exists := new.Tables[name]; !exists {
+			droppedTables[name] = struct{}{}
+		}
+	}
+
+	// Build a lookup: old table name → new table name, for tables renamed via PreviousName.
+	// This prevents the same dropped-table from being matched by multiple new tables.
+	renamedFrom := make(map[string]string) // old name → new name
+	for _, name := range newNames {
+		newT := new.Tables[name]
+		if _, existsInOld := old.Tables[name]; !existsInOld && newT.PreviousName != "" {
+			if _, wasDropped := droppedTables[newT.PreviousName]; wasDropped {
+				if _, alreadyClaimed := renamedFrom[newT.PreviousName]; !alreadyClaimed {
+					renamedFrom[newT.PreviousName] = name
+				}
+			}
+		}
+	}
+
+	// Build reverse lookup: new table name → old table name.
+	renamedTo := make(map[string]string) // new name → old name
+	for oldName, newName := range renamedFrom {
+		renamedTo[newName] = oldName
+	}
+
+	// Phase 1: new tables not in old.
+	// If the table has PreviousName that matches a dropped table → RENAME TABLE.
+	// Otherwise → CREATE TABLE.
 	for _, name := range newNames {
 		if _, exists := old.Tables[name]; !exists {
-			changes = append(changes, Change{
-				Kind:      ChangeCreateTable,
-				TableName: name,
-			})
-			// Individual column and constraint adds are implied by CREATE TABLE;
-			// we don't emit separate ADD COLUMN / ADD INDEX changes for new tables.
+			if oldName, isRename := renamedTo[name]; isRename {
+				changes = append(changes, Change{
+					Kind:         ChangeRenameTable,
+					TableName:    oldName,
+					RenameTarget: name,
+				})
+			} else {
+				changes = append(changes, Change{
+					Kind:      ChangeCreateTable,
+					TableName: name,
+				})
+			}
 		}
 	}
 
 	// Phase 2: tables present in both → diff columns and constraints.
+	// Also handle tables that were renamed: diff the renamed table's contents.
 	for _, name := range newNames {
-		oldT, exists := old.Tables[name]
-		if !exists {
-			continue // handled above
+		if _, exists := old.Tables[name]; exists {
+			changes = append(changes, diffTable(name, old.Tables[name], new.Tables[name])...)
+		} else if oldName, isRename := renamedTo[name]; isRename {
+			// Renamed table: diff columns and constraints under the new name.
+			changes = append(changes, diffTable(name, old.Tables[oldName], new.Tables[name])...)
 		}
-		changes = append(changes, diffTable(name, oldT, new.Tables[name])...)
 	}
 
-	// Phase 3: tables in old but not new → DROP TABLE.
+	// Phase 3: tables in old but not new → DROP TABLE (unless renamed away).
 	for _, name := range oldNames {
 		if _, exists := new.Tables[name]; !exists {
-			changes = append(changes, Change{
-				Kind:      ChangeDropTable,
-				TableName: name,
-			})
+			if _, wasRenamed := renamedFrom[name]; !wasRenamed {
+				changes = append(changes, Change{
+					Kind:      ChangeDropTable,
+					TableName: name,
+				})
+			}
 		}
 	}
 
@@ -110,31 +157,71 @@ func diffTable(tableName string, old, new *TableSnap) []Change {
 	oldCols := colMap(old.Columns)
 	newCols := colMap(new.Columns)
 
-	// Added columns (preserve new.Columns order).
+	// Build a set of old column names that are not present in new (candidates for rename).
+	droppedCols := make(map[string]struct{})
+	for _, oc := range old.Columns {
+		if _, exists := newCols[oc.Name]; !exists {
+			droppedCols[oc.Name] = struct{}{}
+		}
+	}
+
+	// Build a mapping: old col name → new col name, for columns renamed via PreviousName.
+	// Each dropped-column can only be the source of one rename.
+	colRenamedFrom := make(map[string]string) // old name → new name
+	for _, nc := range new.Columns {
+		if _, existsInOld := oldCols[nc.Name]; !existsInOld && nc.PreviousName != "" {
+			if _, wasDropped := droppedCols[nc.PreviousName]; wasDropped {
+				if _, alreadyClaimed := colRenamedFrom[nc.PreviousName]; !alreadyClaimed {
+					colRenamedFrom[nc.PreviousName] = nc.Name
+				}
+			}
+		}
+	}
+	// Reverse lookup: new col name → old col name.
+	colRenamedTo := make(map[string]string) // new name → old name
+	for oldName, newName := range colRenamedFrom {
+		colRenamedTo[newName] = oldName
+	}
+
+	// Added/renamed columns (preserve new.Columns order).
 	for _, nc := range new.Columns {
 		oc, exists := oldCols[nc.Name]
 		if !exists {
 			nc := nc // copy
-			changes = append(changes, Change{
-				Kind:      ChangeAddColumn,
-				TableName: tableName,
-				NewCol:    &nc,
-			})
+			if oldColName, isRename := colRenamedTo[nc.Name]; isRename {
+				// Emit rename: OldCol carries the old name, NewCol carries the new name.
+				oldColDef := oldCols[oldColName]
+				o, n := oldColDef, nc
+				changes = append(changes, Change{
+					Kind:      ChangeRenameColumn,
+					TableName: tableName,
+					OldCol:    &o,
+					NewCol:    &n,
+				})
+			} else {
+				changes = append(changes, Change{
+					Kind:      ChangeAddColumn,
+					TableName: tableName,
+					NewCol:    &nc,
+				})
+			}
 			continue
 		}
 		// Modified columns.
 		changes = append(changes, diffColumn(tableName, oc, nc)...)
 	}
 
-	// Dropped columns.
+	// Dropped columns (skip columns that were renamed away).
 	for _, oc := range old.Columns {
 		if _, exists := newCols[oc.Name]; !exists {
-			oc := oc // copy
-			changes = append(changes, Change{
-				Kind:      ChangeDropColumn,
-				TableName: tableName,
-				OldCol:    &oc,
-			})
+			if _, wasRenamed := colRenamedFrom[oc.Name]; !wasRenamed {
+				oc := oc // copy
+				changes = append(changes, Change{
+					Kind:      ChangeDropColumn,
+					TableName: tableName,
+					OldCol:    &oc,
+				})
+			}
 		}
 	}
 

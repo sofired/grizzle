@@ -35,6 +35,10 @@ type TableDef struct {
 	Schema      string // PostgreSQL schema namespace; empty = "public"
 	Columns     []ColumnDef
 	Constraints []Constraint
+	// PreviousName is set when this table was renamed from another table.
+	// Diff() uses it to emit ChangeRenameTable instead of drop+create.
+	// Leave empty for new tables or tables whose name has not changed.
+	PreviousName string `json:"previous_name,omitempty"`
 }
 
 // Def returns a pointer to the receiver so that *TableDef satisfies
@@ -90,6 +94,14 @@ func (b *TableBuilder) WithConstraints(fn func(t TableRef) []Constraint) *TableD
 	}
 	b.def.Constraints = fn(ref)
 	return &b.def
+}
+
+// RenamedFrom declares that this table was renamed from oldName.
+// Diff() will emit ChangeRenameTable instead of drop+create when oldName
+// matches a dropped table in the old snapshot.
+func (b *TableBuilder) RenamedFrom(oldName string) *TableBuilder {
+	b.def.PreviousName = oldName
+	return b
 }
 
 // Build finalises the table definition without additional constraints.

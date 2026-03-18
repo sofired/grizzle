@@ -79,6 +79,10 @@ type ColumnDef struct {
 	JsonbGoType  string // For JSONB columns: the Go type hint for $type<T> equivalent
 	GeneratedAs  string // For generated columns: the SQL expression
 	OnUpdateExpr string // Hint for app-layer: set this expression on every UPDATE
+	// PreviousName is set when this column was renamed from another column.
+	// Diff() uses it to emit ChangeRenameColumn instead of drop+add.
+	// Leave empty for new columns or columns whose name has not changed.
+	PreviousName string `json:"previous_name,omitempty"`
 }
 
 // -------------------------------------------------------------------
@@ -99,6 +103,7 @@ func (b *colBuilder) setPrimaryKey() {
 	b.def.NotNull = true    // PK is implicitly NOT NULL
 	b.def.HasDefault = true // PK usually has a default (serial/uuid)
 }
+func (b *colBuilder) setRenamedFrom(oldName string) { b.def.PreviousName = oldName }
 
 // build finalises the column definition, injecting the column name from the map key.
 func (b *colBuilder) build(name string) ColumnDef {
@@ -160,6 +165,13 @@ func (b *UUIDBuilder) References(table, col string, opts ...FKOption) *UUIDBuild
 	return b
 }
 
+// RenamedFrom declares that this column was renamed from oldName.
+// Diff() will emit ChangeRenameColumn instead of drop+add when oldName
+// matches a dropped column in the old snapshot.
+func (b *UUIDBuilder) RenamedFrom(oldName string) *UUIDBuilder {
+	b.setRenamedFrom(oldName)
+	return b
+}
 func (b *UUIDBuilder) Build(name string) ColumnDef { return b.build(name) }
 
 // -------------------------------------------------------------------
@@ -199,6 +211,11 @@ func (b *VarcharBuilder) References(table, col string, opts ...FKOption) *Varcha
 	b.def.References = ref
 	return b
 }
+// RenamedFrom declares that this column was renamed from oldName.
+func (b *VarcharBuilder) RenamedFrom(oldName string) *VarcharBuilder {
+	b.setRenamedFrom(oldName)
+	return b
+}
 func (b *VarcharBuilder) Build(name string) ColumnDef { return b.build(name) }
 
 // -------------------------------------------------------------------
@@ -223,6 +240,11 @@ func (b *BooleanBuilder) Default(val bool) *BooleanBuilder {
 	} else {
 		b.setDefault("false")
 	}
+	return b
+}
+// RenamedFrom declares that this column was renamed from oldName.
+func (b *BooleanBuilder) RenamedFrom(oldName string) *BooleanBuilder {
+	b.setRenamedFrom(oldName)
 	return b
 }
 func (b *BooleanBuilder) Build(name string) ColumnDef { return b.build(name) }
@@ -282,6 +304,11 @@ func (b *IntegerBuilder) References(table, col string, opts ...FKOption) *Intege
 	b.def.References = ref
 	return b
 }
+// RenamedFrom declares that this column was renamed from oldName.
+func (b *IntegerBuilder) RenamedFrom(oldName string) *IntegerBuilder {
+	b.setRenamedFrom(oldName)
+	return b
+}
 func (b *IntegerBuilder) Build(name string) ColumnDef { return b.build(name) }
 
 // -------------------------------------------------------------------
@@ -321,6 +348,11 @@ func (b *TimestampBuilder) OnUpdate() *TimestampBuilder {
 	return b
 }
 
+// RenamedFrom declares that this column was renamed from oldName.
+func (b *TimestampBuilder) RenamedFrom(oldName string) *TimestampBuilder {
+	b.setRenamedFrom(oldName)
+	return b
+}
 func (b *TimestampBuilder) Build(name string) ColumnDef { return b.build(name) }
 
 // -------------------------------------------------------------------
@@ -362,6 +394,11 @@ func (b *JSONBBuilder) DefaultEmptyArray() *JSONBBuilder {
 	b.setDefault("'[]'::jsonb")
 	return b
 }
+// RenamedFrom declares that this column was renamed from oldName.
+func (b *JSONBBuilder) RenamedFrom(oldName string) *JSONBBuilder {
+	b.setRenamedFrom(oldName)
+	return b
+}
 func (b *JSONBBuilder) Build(name string) ColumnDef { return b.build(name) }
 
 // JSON starts a json column (plain JSON, not the binary JSONB format).
@@ -392,6 +429,11 @@ func Numeric(precision, scale int) *NumericBuilder {
 func (b *NumericBuilder) NotNull() *NumericBuilder { b.setNotNull(); return b }
 func (b *NumericBuilder) Default(val string) *NumericBuilder {
 	b.setDefault(val)
+	return b
+}
+// RenamedFrom declares that this column was renamed from oldName.
+func (b *NumericBuilder) RenamedFrom(oldName string) *NumericBuilder {
+	b.setRenamedFrom(oldName)
 	return b
 }
 func (b *NumericBuilder) Build(name string) ColumnDef { return b.build(name) }
@@ -436,6 +478,11 @@ func (b *EnumColumnBuilder) Default(val string) *EnumColumnBuilder {
 	return b
 }
 
+// RenamedFrom declares that this column was renamed from oldName.
+func (b *EnumColumnBuilder) RenamedFrom(oldName string) *EnumColumnBuilder {
+	b.setRenamedFrom(oldName)
+	return b
+}
 func (b *EnumColumnBuilder) Build(name string) ColumnDef { return b.build(name) }
 
 // -------------------------------------------------------------------
