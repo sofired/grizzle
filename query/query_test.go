@@ -1230,6 +1230,18 @@ func TestSubquery_In_AliasedCol_NoASClause(t *testing.T) {
 	)
 }
 
+func TestSubquery_NotIn_AliasedCol_NoASClause(t *testing.T) {
+	// If an AliasedCol is passed as the SubqueryNotIn column reference, the AS
+	// alias must not appear in the rendered SQL (Fix #131 — NOT IN path).
+	sub := query.Select(ts.RealmsT.ID).From(ts.RealmsT).Where(ts.RealmsT.Name.EQ("banned"))
+	assertSQL(t, "AliasedCol NOT IN (subquery) strips alias",
+		query.Select(ts.UsersT.ID).From(ts.UsersT).
+			Where(query.SubqueryNotIn(expr.ColAs(ts.UsersT.RealmID, "realm"), sub)),
+		`SELECT "users"."id" FROM "users" WHERE "users"."realm_id" NOT IN (SELECT "realms"."id" FROM "realms" WHERE "realms"."name" = $1)`,
+		[]any{"banned"},
+	)
+}
+
 func TestSubquery_SharedParams(t *testing.T) {
 	// Outer query has a param, inner query also has a param — numbers must not collide.
 	sub := query.Select(ts.RealmsT.ID).From(ts.RealmsT).Where(ts.RealmsT.Name.EQ("acme"))
@@ -2207,11 +2219,14 @@ func TestSetOp_OrderByCols_SingleCol(t *testing.T) {
 
 func TestSetOp_OrderByCols_MultipleNames(t *testing.T) {
 	// Multiple names passed to OrderByCols — each rendered without a table qualifier.
-	a := query.Select(ts.UsersT.Username).From(ts.UsersT)
-	b := query.Select(ts.RealmsT.Name).From(ts.RealmsT)
+	// Both SELECT branches must project the same output columns so that the
+	// ORDER BY references are valid at runtime (PostgreSQL requires ORDER BY to
+	// reference result columns from the first SELECT in a set operation).
+	a := query.Select(ts.UsersT.Username, ts.UsersT.Email).From(ts.UsersT)
+	b := query.Select(ts.UsersT.Username, ts.UsersT.Email).From(ts.UsersT)
 	assertSQL(t, "OrderByCols multiple",
 		a.Union(b).OrderByCols("username", "email"),
-		`(SELECT "users"."username" FROM "users") UNION (SELECT "realms"."name" FROM "realms") ORDER BY "username" ASC, "email" ASC`,
+		`(SELECT "users"."username", "users"."email" FROM "users") UNION (SELECT "users"."username", "users"."email" FROM "users") ORDER BY "username" ASC, "email" ASC`,
 		nil,
 	)
 }
