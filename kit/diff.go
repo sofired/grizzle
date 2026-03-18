@@ -46,16 +46,23 @@ type Change struct {
 // the old snapshot to the new snapshot. Pass EmptySnapshot() as old
 // when targeting a fresh database.
 //
+// Rename detection: if a new table carries PreviousName matching a table that
+// was removed, Diff emits ChangeRenameTable instead of ChangeDropTable +
+// ChangeCreateTable. The same applies to columns within a table: a column with
+// PreviousName matching a removed column emits ChangeRenameColumn instead of
+// ChangeDropColumn + ChangeAddColumn. Each removed entity can be claimed by at
+// most one rename; first match (by sorted new-name order) wins.
+//
 // Ordering is deterministic:
-//  1. Create new tables (so FK references resolve).
+//  1. Rename or create new tables (renames before creates, both sorted by new name).
 //  2. Alter existing tables (columns first, then constraints).
-//  3. Drop removed constraints.
-//  4. Drop removed tables.
+//  3. Drop removed tables.
 //
 // Output is sorted for determinism: within each phase, changes are sorted by
 // table name. Within a single table, changes are emitted in slice order
-// (added/modified columns first, then dropped columns, then added/dropped
-// constraints). No secondary sort by change kind or column name is applied.
+// (renamed/added/modified columns first, then dropped columns, then
+// added/dropped constraints). No secondary sort by change kind or column name
+// is applied.
 func Diff(old, new Snapshot) []Change {
 	var changes []Change
 
