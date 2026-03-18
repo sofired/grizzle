@@ -123,11 +123,35 @@ func (b *SetOpBuilder) addPart(op string, sel *SelectBuilder) *SetOpBuilder {
 // -------------------------------------------------------------------
 
 // OrderBy sets the ORDER BY for the overall combined result.
-// Column references used here must match the column names in the first SELECT.
+// Each OrderExpr is rendered without its table qualifier — only the column
+// name is valid in UNION/INTERSECT/EXCEPT ORDER BY clauses. Column references
+// used here must match the column names produced by the first SELECT.
 func (b *SetOpBuilder) OrderBy(exprs ...expr.OrderExpr) *SetOpBuilder {
 	cp := *b
 	cp.orderBy = exprs
 	return &cp
+}
+
+// OrderByCols sets the ORDER BY for the combined result using bare column
+// names, without table qualifiers. This is the safe way to specify ORDER BY
+// in set operations (UNION/INTERSECT/EXCEPT): PostgreSQL and other databases
+// reject table-qualified column references in that position.
+//
+// Each name should match a column name from the first SELECT's output list.
+// Names are emitted in ascending order (ASC). To mix directions, use OrderBy
+// with column Asc()/Desc() expressions — those are also stripped of their
+// table qualifiers automatically.
+//
+// Example:
+//
+//	active.Union(archived).OrderByCols("username", "created_at")
+//	// ORDER BY "username", "created_at"
+func (b *SetOpBuilder) OrderByCols(names ...string) *SetOpBuilder {
+	exprs := make([]expr.OrderExpr, len(names))
+	for i, name := range names {
+		exprs[i] = expr.ColBase{ColName: name}.Asc()
+	}
+	return b.OrderBy(exprs...)
 }
 
 // Limit sets the maximum number of rows in the combined result.

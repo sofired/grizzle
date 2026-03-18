@@ -1361,6 +1361,56 @@ func TestAgg_HavingGTE(t *testing.T) {
 }
 
 // -------------------------------------------------------------------
+// Fix #131 — AliasedCol in GROUP BY must not emit AS alias
+// -------------------------------------------------------------------
+
+func TestGroupBy_AliasedCol_NoASClause(t *testing.T) {
+	// expr.ColAs wraps a column with a SELECT-list alias. When passed to
+	// GroupBy, only the underlying column reference should be rendered —
+	// GROUP BY does not accept AS clauses.
+	assertSQL(t, "GROUP BY aliased col strips AS",
+		query.Select(
+			expr.ColAs(ts.UsersT.RealmID, "realm"),
+			expr.Count().As("cnt"),
+		).
+			From(ts.UsersT).
+			GroupBy(expr.ColAs(ts.UsersT.RealmID, "realm")),
+		`SELECT "users"."realm_id" AS "realm", COUNT(*) AS "cnt" FROM "users" GROUP BY "users"."realm_id"`,
+		nil,
+	)
+}
+
+func TestGroupBy_AliasedCol_MultipleColumns(t *testing.T) {
+	// Multiple AliasedCol columns in GROUP BY — each must be rendered without
+	// its AS alias.
+	assertSQL(t, "GROUP BY multiple aliased cols",
+		query.Select(
+			expr.ColAs(ts.UsersT.RealmID, "realm"),
+			expr.ColAs(ts.UsersT.Enabled, "active"),
+			expr.Count().As("cnt"),
+		).
+			From(ts.UsersT).
+			GroupBy(
+				expr.ColAs(ts.UsersT.RealmID, "realm"),
+				expr.ColAs(ts.UsersT.Enabled, "active"),
+			),
+		`SELECT "users"."realm_id" AS "realm", "users"."enabled" AS "active", COUNT(*) AS "cnt" FROM "users" GROUP BY "users"."realm_id", "users"."enabled"`,
+		nil,
+	)
+}
+
+func TestGroupBy_PlainCol_Unchanged(t *testing.T) {
+	// Non-aliased columns in GROUP BY must continue to work unchanged.
+	assertSQL(t, "GROUP BY plain column",
+		query.Select(ts.UsersT.RealmID, expr.Count().As("cnt")).
+			From(ts.UsersT).
+			GroupBy(ts.UsersT.RealmID),
+		`SELECT "users"."realm_id", COUNT(*) AS "cnt" FROM "users" GROUP BY "users"."realm_id"`,
+		nil,
+	)
+}
+
+// -------------------------------------------------------------------
 // Window function tests
 // -------------------------------------------------------------------
 
@@ -2126,6 +2176,43 @@ func TestSetOp_EmptyOrderBy(t *testing.T) {
 	if strings.Contains(sql, "ORDER BY") {
 		t.Errorf("expected no ORDER BY in result without OrderBy() call, got: %s", sql)
 	}
+}
+
+// -------------------------------------------------------------------
+// Fix #11 — SetOpBuilder.OrderByCols renders unqualified column names
+// -------------------------------------------------------------------
+
+func TestSetOp_OrderByCols_SingleCol(t *testing.T) {
+	// OrderByCols must render bare quoted column names with no table prefix.
+	a := query.Select(ts.UsersT.Username).From(ts.UsersT)
+	b := query.Select(ts.RealmsT.Name).From(ts.RealmsT)
+	assertSQL(t, "OrderByCols single",
+		a.Union(b).OrderByCols("username"),
+		`(SELECT "users"."username" FROM "users") UNION (SELECT "realms"."name" FROM "realms") ORDER BY "username" ASC`,
+		nil,
+	)
+}
+
+func TestSetOp_OrderByCols_MultipleNames(t *testing.T) {
+	// Multiple names passed to OrderByCols — each rendered without a table qualifier.
+	a := query.Select(ts.UsersT.Username).From(ts.UsersT)
+	b := query.Select(ts.RealmsT.Name).From(ts.RealmsT)
+	assertSQL(t, "OrderByCols multiple",
+		a.Union(b).OrderByCols("username", "email"),
+		`(SELECT "users"."username" FROM "users") UNION (SELECT "realms"."name" FROM "realms") ORDER BY "username" ASC, "email" ASC`,
+		nil,
+	)
+}
+
+func TestSetOp_OrderByCols_WithLimitOffset(t *testing.T) {
+	// OrderByCols composes correctly with Limit and Offset.
+	a := query.Select(ts.UsersT.Username).From(ts.UsersT)
+	b := query.Select(ts.RealmsT.Name).From(ts.RealmsT)
+	assertSQL(t, "OrderByCols with limit and offset",
+		a.Union(b).OrderByCols("username").Limit(10).Offset(5),
+		`(SELECT "users"."username" FROM "users") UNION (SELECT "realms"."name" FROM "realms") ORDER BY "username" ASC LIMIT 10 OFFSET 5`,
+		nil,
+	)
 }
 
 func TestSetOp_LimitOffset(t *testing.T) {
