@@ -416,74 +416,61 @@ func (a AliasedCol) Desc() OrderExpr { return OrderExpr{ref: a, dir: "DESC"} }
 // Full-text search functions (PostgreSQL) — Fix #89
 // -------------------------------------------------------------------
 
-// ftsExpr is a private Expression implementation for FTS functions that
-// bind their arguments in a defined order via ctx.Add.
-type ftsExpr struct {
-	fn   string // e.g. "to_tsquery", "plainto_tsquery"
-	args []any  // ordered list of values to bind
-}
-
-func (e ftsExpr) ToSQL(ctx *BuildContext) string {
-	parts := make([]string, len(e.args))
-	for i, a := range e.args {
-		parts[i] = ctx.Add(a)
-	}
-	return e.fn + "(" + strings.Join(parts, ", ") + ")"
-}
-
-// ToTsquery returns to_tsquery(query) — converts a query string to a tsquery.
+// ToTsquery returns TO_TSQUERY(query) — converts a query string to a tsquery.
+// The result is a FuncExpr and supports As()/Asc()/Desc() and comparison
+// helpers, making it usable in SELECT lists, ORDER BY, and WHERE clauses.
 //
 //	expr.ToTsquery("fat & rat")
-func ToTsquery(query string) Expression {
-	return ftsExpr{fn: "to_tsquery", args: []any{query}}
+func ToTsquery(query string) FuncExpr {
+	return FuncExpr{fn: "TO_TSQUERY", args: []Expression{Lit(query)}}
 }
 
-// ToTsqueryWithConfig returns to_tsquery(config, query).
-// config is bound first so arg positions match the SQL argument order.
+// ToTsqueryWithConfig returns TO_TSQUERY(config, query).
+// config is passed first so arg positions match the SQL argument order.
 //
 //	expr.ToTsqueryWithConfig("english", "fat & rat")
-func ToTsqueryWithConfig(config, query string) Expression {
-	return ftsExpr{fn: "to_tsquery", args: []any{config, query}}
+func ToTsqueryWithConfig(config, query string) FuncExpr {
+	return FuncExpr{fn: "TO_TSQUERY", args: []Expression{Lit(config), Lit(query)}}
 }
 
-// PlainToTsquery returns plainto_tsquery(query).
+// PlainToTsquery returns PLAINTO_TSQUERY(query).
 //
 //	expr.PlainToTsquery("fat rat")
-func PlainToTsquery(query string) Expression {
-	return ftsExpr{fn: "plainto_tsquery", args: []any{query}}
+func PlainToTsquery(query string) FuncExpr {
+	return FuncExpr{fn: "PLAINTO_TSQUERY", args: []Expression{Lit(query)}}
 }
 
-// PlainToTsqueryWithConfig returns plainto_tsquery(config, query).
+// PlainToTsqueryWithConfig returns PLAINTO_TSQUERY(config, query).
 //
 //	expr.PlainToTsqueryWithConfig("english", "fat rat")
-func PlainToTsqueryWithConfig(config, query string) Expression {
-	return ftsExpr{fn: "plainto_tsquery", args: []any{config, query}}
+func PlainToTsqueryWithConfig(config, query string) FuncExpr {
+	return FuncExpr{fn: "PLAINTO_TSQUERY", args: []Expression{Lit(config), Lit(query)}}
 }
 
-// PhraseToTsquery returns phraseto_tsquery(query).
+// PhraseToTsquery returns PHRASETO_TSQUERY(query).
 //
 //	expr.PhraseToTsquery("fat cat")
-func PhraseToTsquery(query string) Expression {
-	return ftsExpr{fn: "phraseto_tsquery", args: []any{query}}
+func PhraseToTsquery(query string) FuncExpr {
+	return FuncExpr{fn: "PHRASETO_TSQUERY", args: []Expression{Lit(query)}}
 }
 
-// PhraseToTsqueryWithConfig returns phraseto_tsquery(config, query).
+// PhraseToTsqueryWithConfig returns PHRASETO_TSQUERY(config, query).
 //
 //	expr.PhraseToTsqueryWithConfig("english", "fat cat")
-func PhraseToTsqueryWithConfig(config, query string) Expression {
-	return ftsExpr{fn: "phraseto_tsquery", args: []any{config, query}}
+func PhraseToTsqueryWithConfig(config, query string) FuncExpr {
+	return FuncExpr{fn: "PHRASETO_TSQUERY", args: []Expression{Lit(config), Lit(query)}}
 }
 
-// WebsearchToTsquery returns websearch_to_tsquery(query).
+// WebsearchToTsquery returns WEBSEARCH_TO_TSQUERY(query).
 //
 //	expr.WebsearchToTsquery("fat cat")
-func WebsearchToTsquery(query string) Expression {
-	return ftsExpr{fn: "websearch_to_tsquery", args: []any{query}}
+func WebsearchToTsquery(query string) FuncExpr {
+	return FuncExpr{fn: "WEBSEARCH_TO_TSQUERY", args: []Expression{Lit(query)}}
 }
 
-// WebsearchToTsqueryWithConfig returns websearch_to_tsquery(config, query).
+// WebsearchToTsqueryWithConfig returns WEBSEARCH_TO_TSQUERY(config, query).
 //
 //	expr.WebsearchToTsqueryWithConfig("english", "fat cat")
-func WebsearchToTsqueryWithConfig(config, query string) Expression {
-	return ftsExpr{fn: "websearch_to_tsquery", args: []any{config, query}}
+func WebsearchToTsqueryWithConfig(config, query string) FuncExpr {
+	return FuncExpr{fn: "WEBSEARCH_TO_TSQUERY", args: []Expression{Lit(config), Lit(query)}}
 }

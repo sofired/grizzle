@@ -18,8 +18,8 @@ func TestToTsquery_ArgOrder(t *testing.T) {
 	sql := e.ToSQL(ctx)
 	args := ctx.Args()
 
-	if sql != "to_tsquery($1)" {
-		t.Errorf("ToTsquery: got SQL %q, want %q", sql, "to_tsquery($1)")
+	if sql != "TO_TSQUERY($1)" {
+		t.Errorf("ToTsquery: got SQL %q, want %q", sql, "TO_TSQUERY($1)")
 	}
 	if len(args) != 1 || args[0] != "fat & rat" {
 		t.Errorf("ToTsquery: got args %v, want [\"fat & rat\"]", args)
@@ -32,8 +32,8 @@ func TestToTsqueryWithConfig_ArgOrder(t *testing.T) {
 	sql := e.ToSQL(ctx)
 	args := ctx.Args()
 
-	if sql != "to_tsquery($1, $2)" {
-		t.Errorf("ToTsqueryWithConfig: got SQL %q, want %q", sql, "to_tsquery($1, $2)")
+	if sql != "TO_TSQUERY($1, $2)" {
+		t.Errorf("ToTsqueryWithConfig: got SQL %q, want %q", sql, "TO_TSQUERY($1, $2)")
 	}
 	if len(args) != 2 {
 		t.Fatalf("ToTsqueryWithConfig: got %d args, want 2", len(args))
@@ -52,8 +52,8 @@ func TestPlainToTsquery_ArgOrder(t *testing.T) {
 	sql := e.ToSQL(ctx)
 	args := ctx.Args()
 
-	if sql != "plainto_tsquery($1)" {
-		t.Errorf("PlainToTsquery: got SQL %q, want %q", sql, "plainto_tsquery($1)")
+	if sql != "PLAINTO_TSQUERY($1)" {
+		t.Errorf("PlainToTsquery: got SQL %q, want %q", sql, "PLAINTO_TSQUERY($1)")
 	}
 	if len(args) != 1 || args[0] != "fat rat" {
 		t.Errorf("PlainToTsquery: got args %v, want [\"fat rat\"]", args)
@@ -66,8 +66,8 @@ func TestPlainToTsqueryWithConfig_ArgOrder(t *testing.T) {
 	sql := e.ToSQL(ctx)
 	args := ctx.Args()
 
-	if sql != "plainto_tsquery($1, $2)" {
-		t.Errorf("PlainToTsqueryWithConfig: got SQL %q, want %q", sql, "plainto_tsquery($1, $2)")
+	if sql != "PLAINTO_TSQUERY($1, $2)" {
+		t.Errorf("PlainToTsqueryWithConfig: got SQL %q, want %q", sql, "PLAINTO_TSQUERY($1, $2)")
 	}
 	if len(args) != 2 {
 		t.Fatalf("PlainToTsqueryWithConfig: got %d args, want 2", len(args))
@@ -86,8 +86,8 @@ func TestPhraseToTsquery_ArgOrder(t *testing.T) {
 	sql := e.ToSQL(ctx)
 	args := ctx.Args()
 
-	if sql != "phraseto_tsquery($1)" {
-		t.Errorf("PhraseToTsquery: got SQL %q, want %q", sql, "phraseto_tsquery($1)")
+	if sql != "PHRASETO_TSQUERY($1)" {
+		t.Errorf("PhraseToTsquery: got SQL %q, want %q", sql, "PHRASETO_TSQUERY($1)")
 	}
 	if len(args) != 1 || args[0] != "fat cat" {
 		t.Errorf("PhraseToTsquery: got args %v, want [\"fat cat\"]", args)
@@ -100,8 +100,8 @@ func TestPhraseToTsqueryWithConfig_ArgOrder(t *testing.T) {
 	sql := e.ToSQL(ctx)
 	args := ctx.Args()
 
-	if sql != "phraseto_tsquery($1, $2)" {
-		t.Errorf("PhraseToTsqueryWithConfig: got SQL %q, want %q", sql, "phraseto_tsquery($1, $2)")
+	if sql != "PHRASETO_TSQUERY($1, $2)" {
+		t.Errorf("PhraseToTsqueryWithConfig: got SQL %q, want %q", sql, "PHRASETO_TSQUERY($1, $2)")
 	}
 	if len(args) != 2 {
 		t.Fatalf("PhraseToTsqueryWithConfig: got %d args, want 2", len(args))
@@ -120,8 +120,8 @@ func TestWebsearchToTsquery_ArgOrder(t *testing.T) {
 	sql := e.ToSQL(ctx)
 	args := ctx.Args()
 
-	if sql != "websearch_to_tsquery($1)" {
-		t.Errorf("WebsearchToTsquery: got SQL %q, want %q", sql, "websearch_to_tsquery($1)")
+	if sql != "WEBSEARCH_TO_TSQUERY($1)" {
+		t.Errorf("WebsearchToTsquery: got SQL %q, want %q", sql, "WEBSEARCH_TO_TSQUERY($1)")
 	}
 	if len(args) != 1 || args[0] != "fat cat" {
 		t.Errorf("WebsearchToTsquery: got args %v, want [\"fat cat\"]", args)
@@ -134,8 +134,8 @@ func TestWebsearchToTsqueryWithConfig_ArgOrder(t *testing.T) {
 	sql := e.ToSQL(ctx)
 	args := ctx.Args()
 
-	if sql != "websearch_to_tsquery($1, $2)" {
-		t.Errorf("WebsearchToTsqueryWithConfig: got SQL %q, want %q", sql, "websearch_to_tsquery($1, $2)")
+	if sql != "WEBSEARCH_TO_TSQUERY($1, $2)" {
+		t.Errorf("WebsearchToTsqueryWithConfig: got SQL %q, want %q", sql, "WEBSEARCH_TO_TSQUERY($1, $2)")
 	}
 	if len(args) != 2 {
 		t.Fatalf("WebsearchToTsqueryWithConfig: got %d args, want 2", len(args))
