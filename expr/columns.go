@@ -655,7 +655,7 @@ func (c TsvectorColumn) Matches(query string) Expression {
 //	ArticlesT.SearchVector.MatchesWithConfig("english", "grizzle & orm")
 //	// → "articles"."search_vector" @@ to_tsquery($1, $2)
 func (c TsvectorColumn) MatchesWithConfig(config, query string) Expression {
-	return ftsMatchExpr{ref: c.ColBase, tsFn: "to_tsquery", config: config, query: query}
+	return ftsMatchExpr{ref: c.ColBase, tsFn: "to_tsquery", config: config, query: query, hasConfig: true}
 }
 
 // MatchesPlain returns col @@ plainto_tsquery($1) — converts plain text to a tsquery
@@ -670,7 +670,7 @@ func (c TsvectorColumn) MatchesPlain(query string) Expression {
 // MatchesPlainWithConfig returns col @@ plainto_tsquery($1, $2).
 // config is bound as $1 and query as $2, matching the PostgreSQL call signature.
 func (c TsvectorColumn) MatchesPlainWithConfig(config, query string) Expression {
-	return ftsMatchExpr{ref: c.ColBase, tsFn: "plainto_tsquery", config: config, query: query}
+	return ftsMatchExpr{ref: c.ColBase, tsFn: "plainto_tsquery", config: config, query: query, hasConfig: true}
 }
 
 // MatchesPhrase returns col @@ phraseto_tsquery($1) — matches an exact phrase.
@@ -684,7 +684,7 @@ func (c TsvectorColumn) MatchesPhrase(query string) Expression {
 // MatchesPhraseWithConfig returns col @@ phraseto_tsquery($1, $2).
 // config is bound as $1 and query as $2, matching the PostgreSQL call signature.
 func (c TsvectorColumn) MatchesPhraseWithConfig(config, query string) Expression {
-	return ftsMatchExpr{ref: c.ColBase, tsFn: "phraseto_tsquery", config: config, query: query}
+	return ftsMatchExpr{ref: c.ColBase, tsFn: "phraseto_tsquery", config: config, query: query, hasConfig: true}
 }
 
 // MatchesWebSearch returns col @@ websearch_to_tsquery($1) — converts a web-search-style
@@ -699,5 +699,5 @@ func (c TsvectorColumn) MatchesWebSearch(query string) Expression {
 // MatchesWebSearchWithConfig returns col @@ websearch_to_tsquery($1, $2).
 // config is bound as $1 and query as $2, matching the PostgreSQL call signature.
 func (c TsvectorColumn) MatchesWebSearchWithConfig(config, query string) Expression {
-	return ftsMatchExpr{ref: c.ColBase, tsFn: "websearch_to_tsquery", config: config, query: query}
+	return ftsMatchExpr{ref: c.ColBase, tsFn: "websearch_to_tsquery", config: config, query: query, hasConfig: true}
 }

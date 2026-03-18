@@ -270,6 +270,55 @@ func TestTsRank_Desc(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------
+// *WithConfig stability: empty config must still emit the 2-arg SQL form
+// -----------------------------------------------------------------------
+
+// Copilot review: *WithConfig variants previously fell back to the 1-arg form
+// when config == "", which shifted placeholder numbering and contradicted the
+// method contract. The hasConfig bool field now gates the SQL shape so that
+// the 2-arg form is always emitted regardless of config's value.
+
+func TestMatchesWithConfig_EmptyConfigStillEmits2ArgForm(t *testing.T) {
+	got := sql(ts.ArticlesT.SearchVector.MatchesWithConfig("", "grizzle & orm"))
+	want := `"articles"."search_vector" @@ to_tsquery($1, $2)`
+	if got != want {
+		t.Errorf("MatchesWithConfig(empty config): got %q, want %q", got, want)
+	}
+}
+
+func TestToTsqueryWithConfig_EmptyConfigStillEmits2ArgForm(t *testing.T) {
+	got := sql(expr.ToTsqueryWithConfig("", "grizzle & orm"))
+	want := `to_tsquery($1, $2)`
+	if got != want {
+		t.Errorf("ToTsqueryWithConfig(empty config): got %q, want %q", got, want)
+	}
+}
+
+func TestPlainToTsqueryWithConfig_EmptyConfigStillEmits2ArgForm(t *testing.T) {
+	got := sql(expr.PlainToTsqueryWithConfig("", "grizzle orm"))
+	want := `plainto_tsquery($1, $2)`
+	if got != want {
+		t.Errorf("PlainToTsqueryWithConfig(empty config): got %q, want %q", got, want)
+	}
+}
+
+func TestPhraseToTsqueryWithConfig_EmptyConfigStillEmits2ArgForm(t *testing.T) {
+	got := sql(expr.PhraseToTsqueryWithConfig("", "fast full text search"))
+	want := `phraseto_tsquery($1, $2)`
+	if got != want {
+		t.Errorf("PhraseToTsqueryWithConfig(empty config): got %q, want %q", got, want)
+	}
+}
+
+func TestWebsearchToTsqueryWithConfig_EmptyConfigStillEmits2ArgForm(t *testing.T) {
+	got := sql(expr.WebsearchToTsqueryWithConfig("", "grizzle -orm"))
+	want := `websearch_to_tsquery($1, $2)`
+	if got != want {
+		t.Errorf("WebsearchToTsqueryWithConfig(empty config): got %q, want %q", got, want)
+	}
+}
+
+// -----------------------------------------------------------------------
 // Argument accumulation: ensure params are bound in correct order
 // -----------------------------------------------------------------------
 

@@ -363,12 +363,11 @@ func Round(col SelectableColumn, decimals ...int) FuncExpr {
 //
 //	expr.ToTsvector(ArticlesT.Body)                    // to_tsvector("articles"."body")
 //	expr.ToTsvector(ArticlesT.Body, "english")         // to_tsvector($1, "articles"."body")
-func ToTsvector(col SelectableColumn, config ...string) toTsvectorExpr {
-	cfg := ""
+func ToTsvector(col SelectableColumn, config ...string) TsvectorExpr {
 	if len(config) > 0 {
-		cfg = config[0]
+		return TsvectorExpr{config: config[0], ref: colSelAsRef{col}, hasConfig: true}
 	}
-	return toTsvectorExpr{config: cfg, ref: colSelAsRef{col}}
+	return TsvectorExpr{ref: colSelAsRef{col}}
 }
 
 // ToTsquery returns to_tsquery($1) as a standalone tsquery Expression.
@@ -384,7 +383,7 @@ func ToTsquery(query string) Expression {
 //
 //	expr.ToTsqueryWithConfig("english", "grizzle & orm") // to_tsquery($1, $2)
 func ToTsqueryWithConfig(config, query string) Expression {
-	return tsQueryFnExpr{fn: "to_tsquery", config: config, query: query}
+	return tsQueryFnExpr{fn: "to_tsquery", config: config, query: query, hasConfig: true}
 }
 
 // PlainToTsquery returns plainto_tsquery($1).
@@ -400,7 +399,7 @@ func PlainToTsquery(query string) Expression {
 //
 //	expr.PlainToTsqueryWithConfig("english", "grizzle orm") // plainto_tsquery($1, $2)
 func PlainToTsqueryWithConfig(config, query string) Expression {
-	return tsQueryFnExpr{fn: "plainto_tsquery", config: config, query: query}
+	return tsQueryFnExpr{fn: "plainto_tsquery", config: config, query: query, hasConfig: true}
 }
 
 // PhraseToTsquery returns phraseto_tsquery($1).
@@ -416,7 +415,7 @@ func PhraseToTsquery(query string) Expression {
 //
 //	expr.PhraseToTsqueryWithConfig("english", "fast full text search") // phraseto_tsquery($1, $2)
 func PhraseToTsqueryWithConfig(config, query string) Expression {
-	return tsQueryFnExpr{fn: "phraseto_tsquery", config: config, query: query}
+	return tsQueryFnExpr{fn: "phraseto_tsquery", config: config, query: query, hasConfig: true}
 }
 
 // WebsearchToTsquery returns websearch_to_tsquery($1).
@@ -432,7 +431,7 @@ func WebsearchToTsquery(query string) Expression {
 //
 //	expr.WebsearchToTsqueryWithConfig("english", "grizzle -orm") // websearch_to_tsquery($1, $2)
 func WebsearchToTsqueryWithConfig(config, query string) Expression {
-	return tsQueryFnExpr{fn: "websearch_to_tsquery", config: config, query: query}
+	return tsQueryFnExpr{fn: "websearch_to_tsquery", config: config, query: query, hasConfig: true}
 }
 
 // TsRank returns TS_RANK(col, tsquery_expr) — a relevance ranking function for FTS results.
