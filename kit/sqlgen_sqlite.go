@@ -65,10 +65,12 @@ func GenerateChangeSQLSQLite(snap Snapshot, c Change) []string {
 		if c.RenameTarget == "" {
 			return nil
 		}
+		// SQLite RENAME TO accepts only an unqualified name (no schema prefix).
+		// Strip any schema qualifier from both source and target.
 		return []string{fmt.Sprintf(
 			"ALTER TABLE %s RENAME TO %s",
-			qiSQLite(c.TableName),
-			qiSQLite(c.RenameTarget),
+			qiSQLite(unqualifiedName(c.TableName)),
+			qiSQLite(unqualifiedName(c.RenameTarget)),
 		)}
 
 	case ChangeAddColumn:

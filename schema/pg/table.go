@@ -99,6 +99,15 @@ func (b *TableBuilder) WithConstraints(fn func(t TableRef) []Constraint) *TableD
 // RenamedFrom declares that this table was renamed from oldName.
 // Diff() will emit ChangeRenameTable instead of drop+create when oldName
 // matches a dropped table in the old snapshot.
+//
+// oldName must match the qualified map key used in the old snapshot:
+//   - For tables without a schema (or schema "public"): pass the bare table
+//     name, e.g. "accounts".
+//   - For tables inside a named schema: pass the dot-separated qualified name,
+//     e.g. "auth.accounts" — matching the key that FromDefs() would have stored.
+//
+// Passing an unqualified name when the old table had a schema (or vice-versa)
+// will result in no rename being detected; Diff() will fall back to drop+create.
 func (b *TableBuilder) RenamedFrom(oldName string) *TableBuilder {
 	b.def.PreviousName = oldName
 	return b

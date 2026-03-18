@@ -50,10 +50,12 @@ func GenerateChangeSQL(snap Snapshot, c Change) []string {
 		if c.RenameTarget == "" {
 			return nil
 		}
+		// PostgreSQL RENAME TO accepts only the unqualified new name within the
+		// same schema; a schema-qualified target like "public"."users" is invalid.
 		return []string{fmt.Sprintf(
 			"ALTER TABLE %s RENAME TO %s",
 			quoteTable(c.TableName),
-			quoteTable(c.RenameTarget),
+			qi(unqualifiedName(c.RenameTarget)),
 		)}
 
 	case ChangeAddColumn:
@@ -326,6 +328,16 @@ func quoteTable(name string) string {
 		return qi(parts[0]) + "." + qi(parts[1])
 	}
 	return qi(name)
+}
+
+// unqualifiedName strips any schema prefix from a potentially qualified name.
+// "public.users" → "users", "users" → "users".
+func unqualifiedName(name string) string {
+	parts := strings.SplitN(name, ".", 2)
+	if len(parts) == 2 {
+		return parts[1]
+	}
+	return name
 }
 
 // quoteColList returns a comma-separated list of quoted column names.

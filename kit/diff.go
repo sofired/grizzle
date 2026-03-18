@@ -101,24 +101,29 @@ func Diff(old, new Snapshot) []Change {
 	}
 
 	// Phase 1: new tables not in old.
-	// If the table has PreviousName that matches a dropped table → RENAME TABLE.
-	// Otherwise → CREATE TABLE.
+	// Renames are collected and appended before creates so that FK references
+	// from a newly created table to the renamed table's new name are safe,
+	// regardless of alphabetical ordering.
+	var renames []Change
+	var creates []Change
 	for _, name := range newNames {
 		if _, exists := old.Tables[name]; !exists {
 			if oldName, isRename := renamedTo[name]; isRename {
-				changes = append(changes, Change{
+				renames = append(renames, Change{
 					Kind:         ChangeRenameTable,
 					TableName:    oldName,
 					RenameTarget: name,
 				})
 			} else {
-				changes = append(changes, Change{
+				creates = append(creates, Change{
 					Kind:      ChangeCreateTable,
 					TableName: name,
 				})
 			}
 		}
 	}
+	changes = append(changes, renames...)
+	changes = append(changes, creates...)
 
 	// Phase 2: tables present in both → diff columns and constraints.
 	// Also handle tables that were renamed: diff the renamed table's contents.
@@ -205,6 +210,15 @@ func diffTable(tableName string, old, new *TableSnap) []Change {
 					OldCol:    &o,
 					NewCol:    &n,
 				})
+				// Also diff the old vs new column definitions (targeting the new
+				// column name) so that type/nullability/default changes that
+				// co-occur with the rename are not silently dropped.
+				// We use a copy of the old column with its name updated to the new
+				// name so that the ALTER COLUMN statements reference the post-rename
+				// column name.
+				oldColRenamed := oldColDef
+				oldColRenamed.Name = nc.Name
+				changes = append(changes, diffColumn(tableName, oldColRenamed, nc)...)
 			} else {
 				changes = append(changes, Change{
 					Kind:      ChangeAddColumn,
