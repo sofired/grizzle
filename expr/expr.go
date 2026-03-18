@@ -106,10 +106,12 @@ func (e rawExpr) ToSQL(_ *BuildContext) string { return e.sql }
 
 // RawArgs wraps a SQL fragment containing $? placeholders together with the
 // argument values that fill them in order. Each $? placeholder is replaced with
-// the next bound-parameter placeholder ($1, ?, etc.) from the dialect.
+// the next bound-parameter placeholder ($1, ?, etc.) from the active dialect.
 //
-// If the number of $? placeholders does not match the number of args, RawArgs
-// panics with a clear diagnostic at query build time.
+// The number of $? tokens must exactly match the number of args. Any mismatch —
+// too few args or too many args — causes a panic at query-build time with a
+// message that identifies the template and the counts. This strict arity check
+// prevents silently invalid SQL from reaching the database.
 //
 // Example:
 //
