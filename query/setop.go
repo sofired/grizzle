@@ -145,7 +145,7 @@ func (b *SetOpBuilder) OrderBy(exprs ...expr.OrderExpr) *SetOpBuilder {
 // Example:
 //
 //	active.Union(archived).OrderByCols("username", "created_at")
-//	// ORDER BY "username", "created_at"
+//	// ORDER BY "username" ASC, "created_at" ASC
 func (b *SetOpBuilder) OrderByCols(names ...string) *SetOpBuilder {
 	exprs := make([]expr.OrderExpr, len(names))
 	for i, name := range names {

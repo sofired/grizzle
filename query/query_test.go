@@ -1218,6 +1218,18 @@ func TestSubquery_NotIn(t *testing.T) {
 	)
 }
 
+func TestSubquery_In_AliasedCol_NoASClause(t *testing.T) {
+	// If an AliasedCol is passed as the SubqueryIn column reference, the AS
+	// alias must not appear in the rendered SQL (Fix #131).
+	sub := query.Select(ts.RealmsT.ID).From(ts.RealmsT).Where(ts.RealmsT.Name.EQ("acme"))
+	assertSQL(t, "AliasedCol IN (subquery) strips alias",
+		query.Select(ts.UsersT.ID).From(ts.UsersT).
+			Where(query.SubqueryIn(expr.ColAs(ts.UsersT.RealmID, "realm"), sub)),
+		`SELECT "users"."id" FROM "users" WHERE "users"."realm_id" IN (SELECT "realms"."id" FROM "realms" WHERE "realms"."name" = $1)`,
+		[]any{"acme"},
+	)
+}
+
 func TestSubquery_SharedParams(t *testing.T) {
 	// Outer query has a param, inner query also has a param — numbers must not collide.
 	sub := query.Select(ts.RealmsT.ID).From(ts.RealmsT).Where(ts.RealmsT.Name.EQ("acme"))
