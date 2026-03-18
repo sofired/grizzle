@@ -374,7 +374,7 @@ func (b *SelectBuilder) buildWith(ctx *expr.BuildContext) string {
 			if i > 0 {
 				sb.WriteString(", ")
 			}
-			sb.WriteString(selectColSQL(ctx, c))
+			sb.WriteString(expr.ColRef(c, ctx))
 		}
 	}
 
@@ -417,10 +417,14 @@ func (b *SelectBuilder) buildWith(ctx *expr.BuildContext) string {
 	return sb.String()
 }
 
-// selectColSQL produces the SQL fragment for a selectable column.
-// For aggregate expressions (COUNT, SUM, …) that implement expr.Expression,
-// ToSQL is called directly so the aggregate function syntax is preserved.
+// selectColSQL produces the SQL fragment for a column in a SELECT list.
+// For expressions that implement expr.Expression (aggregates, aliased columns,
+// arithmetic, window functions, …) ToSQL is called so that SELECT-list syntax
+// such as "AS alias" or "COUNT(*)" is preserved.
 // For plain columns the standard quoted "table"."col" form is returned.
+//
+// Use expr.ColRef for GROUP BY, DISTINCT ON, and SubqueryIn contexts where
+// an AS alias clause must not appear.
 func selectColSQL(ctx *expr.BuildContext, c expr.SelectableColumn) string {
 	if e, ok := c.(expr.Expression); ok {
 		return e.ToSQL(ctx)

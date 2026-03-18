@@ -2216,3 +2216,53 @@ func TestWithRecursive_AndRegularCTE(t *testing.T) {
 		t.Errorf("expected WITH RECURSIVE (any recursive CTE triggers it), got: %s", sql)
 	}
 }
+
+// -------------------------------------------------------------------
+// Fix #131 — AliasedCol must not emit AS clause in non-SELECT contexts
+// -------------------------------------------------------------------
+
+func TestAliasedCol_GroupBy_NoASClause(t *testing.T) {
+	// GROUP BY must use the plain column reference, not "col AS alias".
+	aliased := expr.ColAs(ts.UsersT.RealmID, "rid")
+	assertSQL(t, "GROUP BY aliased col emits no AS clause",
+		query.Select(aliased, expr.Count().As("cnt")).
+			From(ts.UsersT).
+			GroupBy(aliased),
+		`SELECT "users"."realm_id" AS "rid", COUNT(*) AS "cnt" FROM "users" GROUP BY "users"."realm_id"`,
+		nil,
+	)
+}
+
+func TestAliasedCol_SubqueryIn_NoASClause(t *testing.T) {
+	// SubqueryIn must use the plain column reference, not "col AS alias".
+	aliased := expr.ColAs(ts.UsersT.RealmID, "rid")
+	sub := query.Select(ts.RealmsT.ID).From(ts.RealmsT).Where(ts.RealmsT.Name.EQ("acme"))
+	assertSQL(t, "SubqueryIn with aliased col emits no AS clause",
+		query.Select(ts.UsersT.ID).From(ts.UsersT).
+			Where(query.SubqueryIn(aliased, sub)),
+		`SELECT "users"."id" FROM "users" WHERE "users"."realm_id" IN (SELECT "realms"."id" FROM "realms" WHERE "realms"."name" = $1)`,
+		[]any{"acme"},
+	)
+}
+
+func TestAliasedCol_SubqueryNotIn_NoASClause(t *testing.T) {
+	// SubqueryNotIn must use the plain column reference, not "col AS alias".
+	aliased := expr.ColAs(ts.UsersT.RealmID, "rid")
+	sub := query.Select(ts.RealmsT.ID).From(ts.RealmsT).Where(ts.RealmsT.Name.EQ("banned"))
+	assertSQL(t, "SubqueryNotIn with aliased col emits no AS clause",
+		query.Select(ts.UsersT.ID).From(ts.UsersT).
+			Where(query.SubqueryNotIn(aliased, sub)),
+		`SELECT "users"."id" FROM "users" WHERE "users"."realm_id" NOT IN (SELECT "realms"."id" FROM "realms" WHERE "realms"."name" = $1)`,
+		[]any{"banned"},
+	)
+}
+
+func TestAliasedCol_SelectList_EmitsASClause(t *testing.T) {
+	// SELECT list must still include the AS alias — regression guard.
+	aliased := expr.ColAs(ts.UsersT.Email, "user_email")
+	assertSQL(t, "SELECT list with aliased col emits AS clause",
+		query.Select(ts.UsersT.ID, aliased).From(ts.UsersT),
+		`SELECT "users"."id", "users"."email" AS "user_email" FROM "users"`,
+		nil,
+	)
+}

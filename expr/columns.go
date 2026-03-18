@@ -112,6 +112,15 @@ type SelectableColumn interface {
 	TableName() string
 }
 
+// ColRef returns the bare column reference (e.g. "table"."col") for col,
+// without any SELECT-list alias. Use this in GROUP BY, DISTINCT ON,
+// SubqueryIn, and other non-SELECT positions where an AS clause is invalid.
+// For plain columns this is identical to the SELECT-list form; for AliasedCol
+// it omits the AS clause that ToSQL would include.
+func ColRef(col SelectableColumn, ctx *BuildContext) string {
+	return col.colRef(ctx)
+}
+
 // -------------------------------------------------------------------
 // UUIDColumn
 // -------------------------------------------------------------------

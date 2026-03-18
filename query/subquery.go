@@ -82,7 +82,7 @@ type subqueryInExpr struct {
 }
 
 func (e subqueryInExpr) ToSQL(ctx *expr.BuildContext) string {
-	return selectColSQL(ctx, e.col) + " IN (" + e.sub.buildWith(ctx) + ")"
+	return expr.ColRef(e.col, ctx) + " IN (" + e.sub.buildWith(ctx) + ")"
 }
 
 type subqueryNotInExpr struct {
@@ -91,5 +91,5 @@ type subqueryNotInExpr struct {
 }
 
 func (e subqueryNotInExpr) ToSQL(ctx *expr.BuildContext) string {
-	return selectColSQL(ctx, e.col) + " NOT IN (" + e.sub.buildWith(ctx) + ")"
+	return expr.ColRef(e.col, ctx) + " NOT IN (" + e.sub.buildWith(ctx) + ")"
 }
