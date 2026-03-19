@@ -69,6 +69,8 @@ query.Select(db.UsersT.ID, db.UsersT.Username).From(db.UsersT)
 
 **Status:** PARITY
 
+Note: Drizzle's TypeScript type system prevents passing an aliased column (e.g. `sql<...>.as("alias")`) to `.groupBy()` — the type only accepts `Column | SQL`. In Grizzle, `expr.ColAs` satisfies `SelectableColumn` and can be passed to `.GroupBy()`. Grizzle strips the alias before rendering so only the underlying column reference appears in the GROUP BY clause, matching the SQL Drizzle would generate. This is correct per standard SQL: `GROUP BY` does not accept `AS` aliases (fix #131).
+
 ### JOINs
 
 | Drizzle | Grizzle | Status |
@@ -135,8 +137,9 @@ Only PostgreSQL-valid clauses are emitted for the PostgreSQL dialect and MySQL-v
 | `intersectAll(q1, q2)` | `query.IntersectAll(q1, q2)` | PARITY |
 | `except(q1, q2)` | `query.Except(q1, q2)` | PARITY |
 | `exceptAll(q1, q2)` | `query.ExceptAll(q1, q2)` | PARITY |
-| `.orderBy()` on set op | `.OrderBy()` | PARITY |
+| `.orderBy()` on set op | `.OrderBy()` | PARITY — Drizzle strips table qualifiers from `PgColumn` refs automatically; Grizzle does the same via `ToSQLUnqualified` |
 | `.limit()` on set op | `.Limit()` | PARITY |
+| _(no equivalent)_ | `.OrderByCols(names ...string)` | GRIZZLE-ONLY — convenience helper that accepts bare column name strings and emits `ORDER BY "col" ASC` without requiring a column handle. Drizzle callers pass a column reference directly to `.orderBy()` and rely on automatic qualifier stripping; Grizzle callers who only have a name string use `OrderByCols` (fix #11). |
 
 ### Subqueries
 
@@ -145,6 +148,8 @@ Only PostgreSQL-valid clauses are emitted for the PostgreSQL dialect and MySQL-v
 | `db.select().from(subquery)` | `query.Select().From(subquery)` | PARITY |
 | Correlated subquery in WHERE | `query.Exists(sub)` / scalar subquery | PARITY |
 | Subquery in SELECT list | `sub.As(alias)` | PARITY |
+| `inArray(col, subquery)` — col IN (SELECT ...) | `query.SubqueryIn(col, sub)` | PARITY — when `col` is an `expr.ColAs`, the alias is stripped before rendering; the IN left-hand side is a column reference and must not carry an AS clause (fix #131) |
+| `notInArray(col, subquery)` — col NOT IN (SELECT ...) | `query.SubqueryNotIn(col, sub)` | PARITY — same alias-stripping behaviour as SubqueryIn (fix #131) |
 | Lateral join | DEVIATION:GAP (not designed) | — |
 
 ### Window functions
