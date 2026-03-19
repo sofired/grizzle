@@ -113,6 +113,81 @@ func TestDouble_ColumnDef(t *testing.T) {
 	}
 }
 
+func TestMediumInt_ColumnDef(t *testing.T) {
+	col := mysql.MediumInt().NotNull().Default(0).Build("rank")
+	if col.SQLType != "mediumint" {
+		t.Errorf("SQLType: got %q, want %q", col.SQLType, "mediumint")
+	}
+	if col.DefaultExpr != "0" {
+		t.Errorf("DefaultExpr: got %q, want %q", col.DefaultExpr, "0")
+	}
+	if col.GoType != pg.GoTypeInt {
+		t.Errorf("GoType: got %v, want %v", col.GoType, pg.GoTypeInt)
+	}
+}
+
+func TestYear_ColumnDef(t *testing.T) {
+	col := mysql.Year().NotNull().Build("birth_year")
+	if col.SQLType != "year" {
+		t.Errorf("SQLType: got %q, want %q", col.SQLType, "year")
+	}
+	if col.GoType != pg.GoTypeInt {
+		t.Errorf("GoType: got %v, want %v", col.GoType, pg.GoTypeInt)
+	}
+}
+
+func TestEnum_ColumnDef(t *testing.T) {
+	col := mysql.Enum("active", "inactive", "pending").NotNull().Build("status")
+	want := "enum('active','inactive','pending')"
+	if col.SQLType != want {
+		t.Errorf("SQLType: got %q, want %q", col.SQLType, want)
+	}
+	if col.GoType != pg.GoTypeString {
+		t.Errorf("GoType: got %v, want %v", col.GoType, pg.GoTypeString)
+	}
+}
+
+func TestSet_ColumnDef(t *testing.T) {
+	col := mysql.Set("read", "write", "admin").NotNull().Build("permissions")
+	want := "set('read','write','admin')"
+	if col.SQLType != want {
+		t.Errorf("SQLType: got %q, want %q", col.SQLType, want)
+	}
+	if col.GoType != pg.GoTypeString {
+		t.Errorf("GoType: got %v, want %v", col.GoType, pg.GoTypeString)
+	}
+}
+
+// TestBuild_Idempotent verifies that calling Build() twice on the same builder
+// returns independent ColumnDefs with the correct name each time (no mutation).
+func TestBuild_Idempotent(t *testing.T) {
+	builders := []struct {
+		name    string
+		builder mysql.ColumnBuilder
+	}{
+		{"TinyInt", mysql.TinyInt().NotNull()},
+		{"SmallInt", mysql.SmallInt().NotNull()},
+		{"Double", mysql.Double().NotNull()},
+		{"MediumInt", mysql.MediumInt().NotNull()},
+		{"Year", mysql.Year().NotNull()},
+		{"Enum", mysql.Enum("a", "b").NotNull()},
+		{"Set", mysql.Set("x", "y").NotNull()},
+	}
+	for _, tc := range builders {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			c1 := tc.builder.Build("col_a")
+			c2 := tc.builder.Build("col_b")
+			if c1.Name != "col_a" {
+				t.Errorf("first Build: got Name=%q, want %q", c1.Name, "col_a")
+			}
+			if c2.Name != "col_b" {
+				t.Errorf("second Build: got Name=%q, want %q", c2.Name, "col_b")
+			}
+		})
+	}
+}
+
 func TestUUID_References(t *testing.T) {
 	col := mysql.UUID().NotNull().References("realms", "id", mysql.OnDelete(mysql.FKActionRestrict)).Build("realm_id")
 	if col.References == nil {
@@ -215,6 +290,10 @@ func TestDDL_TypeTranslations(t *testing.T) {
 		mysql.C("flags", mysql.TinyInt().NotNull().Default(0)),
 		mysql.C("priority", mysql.SmallInt()),
 		mysql.C("lat", mysql.Double()),
+		mysql.C("rank", mysql.MediumInt()),
+		mysql.C("birth_year", mysql.Year()),
+		mysql.C("status", mysql.Enum("active", "inactive", "pending").NotNull()),
+		mysql.C("perms", mysql.Set("read", "write", "admin")),
 	).Build()
 
 	ddl := kit.GenerateCreateSQLMySQL(tbl)
@@ -236,6 +315,10 @@ func TestDDL_TypeTranslations(t *testing.T) {
 		{"tinyint passes through", "TINYINT"},
 		{"smallint passes through", "SMALLINT"},
 		{"double precision → DOUBLE", "DOUBLE"},
+		{"mediumint passes through", "MEDIUMINT"},
+		{"year passes through", "YEAR"},
+		{"enum keyword uppercased, values preserved", "ENUM('active','inactive','pending')"},
+		{"set keyword uppercased, values preserved", "SET('read','write','admin')"},
 		{"uuid default → (UUID())", "(UUID())"},
 		{"now() → CURRENT_TIMESTAMP(6)", "CURRENT_TIMESTAMP(6)"},
 		{"boolean default true → 1", "DEFAULT 1"},
@@ -303,4 +386,22 @@ func TestDDL_CheckConstraint(t *testing.T) {
 	if !strings.Contains(ddl, "CONSTRAINT `price_positive` CHECK (price > 0)") {
 		t.Errorf("missing CHECK constraint\n---\n%s\n---", ddl)
 	}
+}
+
+func TestEnum_PanicsOnEmpty(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("expected mysql.Enum() with no args to panic, but it did not")
+		}
+	}()
+	mysql.Enum()
+}
+
+func TestSet_PanicsOnEmpty(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("expected mysql.Set() with no args to panic, but it did not")
+		}
+	}()
+	mysql.Set()
 }

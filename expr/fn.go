@@ -406,6 +406,11 @@ func (a AliasedCol) ColumnName() string {
 // TableName returns the underlying column's table name.
 func (a AliasedCol) TableName() string { return a.col.TableName() }
 
+// Unwrap returns the underlying SelectableColumn that this AliasedCol wraps.
+// This allows callers to inspect the inner column type (e.g. to check whether
+// it is a WindowExpr) without depending on the unexported field.
+func (a AliasedCol) Unwrap() SelectableColumn { return a.col }
+
 // Asc returns an ascending ORDER BY on the underlying column (no alias).
 func (a AliasedCol) Asc() OrderExpr { return OrderExpr{ref: a, dir: "ASC"} }
 

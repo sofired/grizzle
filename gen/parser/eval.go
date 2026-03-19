@@ -2,20 +2,30 @@ package parser
 
 import (
 	"fmt"
+	"strings"
 
+	"github.com/sofired/grizzle/schema/mysql"
 	pg "github.com/sofired/grizzle/schema/pg"
+	"github.com/sofired/grizzle/schema/sqlite"
 )
 
-// EvalTable converts a ParsedTable (from the AST parser) into a *pg.TableDef
-// by evaluating each column's builder chain. This lets the CLI use the same
-// schema source files that the code generator reads, without importing them.
+// EvalTable converts a ParsedTable (from the AST parser) into a pg.TableDefiner
+// by evaluating each column's builder chain. The concrete type returned
+// depends on the dialect recorded in the ParsedTable:
+//
+//   - "pg"     → *pg.TableDef     (implements pg.TableDefiner, Dialect() == "postgres")
+//   - "mysql"  → *mysql.TableDef  (implements pg.TableDefiner, Dialect() == "mysql")
+//   - "sqlite" → *sqlite.TableDef (implements pg.TableDefiner, Dialect() == "sqlite")
+//
+// This ensures that parseSchemaDir in the CLI returns the correct dialect type
+// for each parsed table, resolving the cross-dialect type leak (issue #156).
 //
 // Note: Constraint expressions that reference column values at runtime (like
 // partial index WHERE clauses defined via string literals) are preserved as-is.
 // The WithConstraints callback is not re-executed here; constraints parsed from
 // pg.UniqueIndex(...).On(...).Where(...).Build() calls are reconstructed structurally.
-func EvalTable(pt *ParsedTable) (*pg.TableDef, error) {
-	def := &pg.TableDef{
+func EvalTable(pt *ParsedTable) (pg.TableDefiner, error) {
+	inner := &pg.TableDef{
 		Name:   pt.TableName,
 		Schema: pt.SchemaName,
 	}
@@ -25,10 +35,18 @@ func EvalTable(pt *ParsedTable) (*pg.TableDef, error) {
 		if err != nil {
 			return nil, fmt.Errorf("column %q: %w", pc.Name, err)
 		}
-		def.Columns = append(def.Columns, colDef)
+		inner.Columns = append(inner.Columns, colDef)
 	}
 
-	return def, nil
+	switch pt.Dialect {
+	case "mysql":
+		return &mysql.TableDef{TableDef: inner}, nil
+	case "sqlite":
+		return &sqlite.TableDef{TableDef: inner}, nil
+	default:
+		// "pg" or any unrecognised dialect falls back to the PostgreSQL type.
+		return inner, nil
+	}
 }
 
 // evalColumn evaluates a ParsedColumn's chain into a pg.ColumnDef.
@@ -141,6 +159,48 @@ func applyBaseType(def *pg.ColumnDef, baseFn string, args []any) error {
 		}
 		def.SQLType = fmt.Sprintf("numeric(%d,%d)", p, s)
 		def.GoType = pg.GoTypeFloat64
+
+	// MySQL-specific: MEDIUMINT (3-byte signed integer).
+	case "MediumInt":
+		def.SQLType = "mediumint"
+		def.GoType = pg.GoTypeInt
+
+	// MySQL-specific: YEAR (stores 1901–2155 as an integer).
+	case "Year":
+		def.SQLType = "year"
+		def.GoType = pg.GoTypeInt
+
+	// MySQL-specific: ENUM('v1','v2',...) — inline enumeration.
+	case "Enum":
+		if len(args) == 0 {
+			return fmt.Errorf("enum requires at least one value")
+		}
+		parts := make([]string, 0, len(args))
+		for i, a := range args {
+			s, ok := a.(string)
+			if !ok {
+				return fmt.Errorf("enum: argument %d must be a string, got %T", i, a)
+			}
+			parts = append(parts, "'"+strings.ReplaceAll(s, "'", "''")+"'")
+		}
+		def.SQLType = "enum(" + strings.Join(parts, ",") + ")"
+		def.GoType = pg.GoTypeString
+
+	// MySQL-specific: SET('v1','v2',...) — multi-value set column.
+	case "Set":
+		if len(args) == 0 {
+			return fmt.Errorf("set requires at least one value")
+		}
+		parts := make([]string, 0, len(args))
+		for i, a := range args {
+			s, ok := a.(string)
+			if !ok {
+				return fmt.Errorf("set: argument %d must be a string, got %T", i, a)
+			}
+			parts = append(parts, "'"+strings.ReplaceAll(s, "'", "''")+"'")
+		}
+		def.SQLType = "set(" + strings.Join(parts, ",") + ")"
+		def.GoType = pg.GoTypeString
 
 	default:
 		return fmt.Errorf("unknown column builder %q", baseFn)
@@ -256,15 +316,26 @@ func applyMethod(def *pg.ColumnDef, m MethodCall) error { //nolint:unparam
 	return nil
 }
 
-// applyFKOption interprets a ChainResult for pg.OnDelete(action) / pg.OnUpdate(action).
+// isKnownDialectPkg reports whether pkg is one of the three recognised schema
+// package identifiers ("pg", "mysql", "sqlite"). It is used as a guard before
+// interpreting FK option calls (OnDelete, OnUpdate), so that unrecognised
+// package aliases are silently skipped rather than misinterpreted. The three
+// packages are equivalent for FK options because mysql.OnDelete and
+// sqlite.OnDelete are function aliases for pg.OnDelete.
+func isKnownDialectPkg(pkg string) bool {
+	return pkg == "pg" || pkg == "mysql" || pkg == "sqlite"
+}
+
+// applyFKOption interprets a ChainResult for OnDelete(action) / OnUpdate(action)
+// from any of the three built-in schema packages (pg, mysql, sqlite).
 func applyFKOption(ref *pg.FKRef, chain *ChainResult) {
-	if chain.BasePkg != "pg" {
+	if !isKnownDialectPkg(chain.BasePkg) {
 		return
 	}
 	var action pg.FKAction
 	if len(chain.BaseArgs) > 0 {
-		// The arg may be "pg.FKActionRestrict" (as a string from the selector eval)
-		// or the constant value directly.
+		// The arg may be "pg.FKActionRestrict" / "mysql.FKActionCascade" (as a
+		// string from the selector eval) or the unqualified constant name.
 		switch v := chain.BaseArgs[0].(type) {
 		case string:
 			action = fkActionFromString(v)
@@ -278,16 +349,22 @@ func applyFKOption(ref *pg.FKRef, chain *ChainResult) {
 	}
 }
 
-// fkActionFromString maps "pg.FKActionRestrict" → pg.FKActionRestrict etc.
+// fkActionFromString maps a dialect-qualified or bare FKAction constant name to
+// its pg.FKAction value. Any dialect prefix (pg., mysql., sqlite.) is accepted.
 func fkActionFromString(s string) pg.FKAction {
+	// Strip any "pkg." prefix so that "mysql.FKActionCascade" and
+	// "pg.FKActionCascade" and plain "FKActionCascade" all resolve the same way.
+	if dot := strings.LastIndex(s, "."); dot >= 0 {
+		s = s[dot+1:]
+	}
 	switch s {
-	case "pg.FKActionRestrict", "FKActionRestrict":
+	case "FKActionRestrict":
 		return pg.FKActionRestrict
-	case "pg.FKActionCascade", "FKActionCascade":
+	case "FKActionCascade":
 		return pg.FKActionCascade
-	case "pg.FKActionSetNull", "FKActionSetNull":
+	case "FKActionSetNull":
 		return pg.FKActionSetNull
-	case "pg.FKActionSetDefault", "FKActionSetDefault":
+	case "FKActionSetDefault":
 		return pg.FKActionSetDefault
 	default:
 		return pg.FKActionNoAction

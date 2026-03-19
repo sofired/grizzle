@@ -204,11 +204,11 @@ func TestRawArgs_MatchingPlaceholders(t *testing.T) {
 	}
 }
 
-func TestRawArgs_MismatchPanics(t *testing.T) {
+func TestRawArgs_TooFewArgs_Panics(t *testing.T) {
 	defer func() {
 		r := recover()
 		if r == nil {
-			t.Error("expected panic for mismatched placeholder count")
+			t.Error("expected panic for too few args (2 placeholders, 1 arg)")
 		}
 		msg, ok := r.(string)
 		if !ok || !strings.Contains(msg, "placeholder count") {
@@ -217,6 +217,21 @@ func TestRawArgs_MismatchPanics(t *testing.T) {
 	}()
 	ctx := expr.NewBuildContext(dialect.Postgres)
 	expr.RawArgs("col = $? AND other = $?", 42).ToSQL(ctx) // 2 placeholders, 1 arg
+}
+
+func TestRawArgs_TooManyArgs_Panics(t *testing.T) {
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Error("expected panic for too many args (1 placeholder, 2 args)")
+		}
+		msg, ok := r.(string)
+		if !ok || !strings.Contains(msg, "placeholder count") {
+			t.Errorf("unexpected panic message: %v", r)
+		}
+	}()
+	ctx := expr.NewBuildContext(dialect.Postgres)
+	expr.RawArgs("col = $?", 42, "extra").ToSQL(ctx) // 1 placeholder, 2 args
 }
 
 func TestRawArgs_NoPlaceholders_NoArgs(t *testing.T) {
