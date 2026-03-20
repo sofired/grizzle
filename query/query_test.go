@@ -2202,46 +2202,6 @@ func TestSetOp_EmptyOrderBy(t *testing.T) {
 	}
 }
 
-// -------------------------------------------------------------------
-// Fix #11 — SetOpBuilder.OrderByCols renders unqualified column names
-// -------------------------------------------------------------------
-
-func TestSetOp_OrderByCols_SingleCol(t *testing.T) {
-	// OrderByCols must render bare quoted column names with no table prefix.
-	a := query.Select(ts.UsersT.Username).From(ts.UsersT)
-	b := query.Select(ts.RealmsT.Name).From(ts.RealmsT)
-	assertSQL(t, "OrderByCols single",
-		a.Union(b).OrderByCols("username"),
-		`(SELECT "users"."username" FROM "users") UNION (SELECT "realms"."name" FROM "realms") ORDER BY "username" ASC`,
-		nil,
-	)
-}
-
-func TestSetOp_OrderByCols_MultipleNames(t *testing.T) {
-	// Multiple names passed to OrderByCols — each rendered without a table qualifier.
-	// Both SELECT branches must project the same output columns so that the
-	// ORDER BY references are valid at runtime (PostgreSQL requires ORDER BY to
-	// reference result columns from the first SELECT in a set operation).
-	a := query.Select(ts.UsersT.Username, ts.UsersT.Email).From(ts.UsersT)
-	b := query.Select(ts.UsersT.Username, ts.UsersT.Email).From(ts.UsersT)
-	assertSQL(t, "OrderByCols multiple",
-		a.Union(b).OrderByCols("username", "email"),
-		`(SELECT "users"."username", "users"."email" FROM "users") UNION (SELECT "users"."username", "users"."email" FROM "users") ORDER BY "username" ASC, "email" ASC`,
-		nil,
-	)
-}
-
-func TestSetOp_OrderByCols_WithLimitOffset(t *testing.T) {
-	// OrderByCols composes correctly with Limit and Offset.
-	a := query.Select(ts.UsersT.Username).From(ts.UsersT)
-	b := query.Select(ts.RealmsT.Name).From(ts.RealmsT)
-	assertSQL(t, "OrderByCols with limit and offset",
-		a.Union(b).OrderByCols("username").Limit(10).Offset(5),
-		`(SELECT "users"."username" FROM "users") UNION (SELECT "realms"."name" FROM "realms") ORDER BY "username" ASC LIMIT 10 OFFSET 5`,
-		nil,
-	)
-}
-
 func TestSetOp_LimitOffset(t *testing.T) {
 	a := query.Select(ts.UsersT.Username).From(ts.UsersT)
 	b := query.Select(ts.RealmsT.Name).From(ts.RealmsT)

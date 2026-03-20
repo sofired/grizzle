@@ -139,7 +139,6 @@ Only PostgreSQL-valid clauses are emitted for the PostgreSQL dialect and MySQL-v
 | `exceptAll(q1, q2)` | `query.ExceptAll(q1, q2)` | PARITY |
 | `.orderBy()` on set op | `.OrderBy()` | PARITY — Drizzle strips table qualifiers from `PgColumn` refs automatically; Grizzle does the same via `ToSQLUnqualified` |
 | `.limit()` on set op | `.Limit()` | PARITY |
-| _(no equivalent)_ | `.OrderByCols(names ...string)` | GRIZZLE-ONLY — convenience helper that accepts bare column name strings and emits `ORDER BY "col" ASC` without requiring a column handle. Drizzle callers pass a column reference directly to `.orderBy()` and rely on automatic qualifier stripping; Grizzle callers who only have a name string use `OrderByCols` (fix #11). |
 
 ### Subqueries
 
