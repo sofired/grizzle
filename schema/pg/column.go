@@ -211,6 +211,7 @@ func (b *VarcharBuilder) References(table, col string, opts ...FKOption) *Varcha
 	b.def.References = ref
 	return b
 }
+
 // RenamedFrom declares that this column was renamed from oldName.
 func (b *VarcharBuilder) RenamedFrom(oldName string) *VarcharBuilder {
 	b.setRenamedFrom(oldName)
@@ -242,6 +243,7 @@ func (b *BooleanBuilder) Default(val bool) *BooleanBuilder {
 	}
 	return b
 }
+
 // RenamedFrom declares that this column was renamed from oldName.
 func (b *BooleanBuilder) RenamedFrom(oldName string) *BooleanBuilder {
 	b.setRenamedFrom(oldName)
@@ -304,6 +306,7 @@ func (b *IntegerBuilder) References(table, col string, opts ...FKOption) *Intege
 	b.def.References = ref
 	return b
 }
+
 // RenamedFrom declares that this column was renamed from oldName.
 func (b *IntegerBuilder) RenamedFrom(oldName string) *IntegerBuilder {
 	b.setRenamedFrom(oldName)
@@ -394,6 +397,7 @@ func (b *JSONBBuilder) DefaultEmptyArray() *JSONBBuilder {
 	b.setDefault("'[]'::jsonb")
 	return b
 }
+
 // RenamedFrom declares that this column was renamed from oldName.
 func (b *JSONBBuilder) RenamedFrom(oldName string) *JSONBBuilder {
 	b.setRenamedFrom(oldName)
@@ -431,6 +435,7 @@ func (b *NumericBuilder) Default(val string) *NumericBuilder {
 	b.setDefault(val)
 	return b
 }
+
 // RenamedFrom declares that this column was renamed from oldName.
 func (b *NumericBuilder) RenamedFrom(oldName string) *NumericBuilder {
 	b.setRenamedFrom(oldName)
