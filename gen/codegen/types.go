@@ -110,17 +110,49 @@ func applyBaseType(info *ColumnInfo, chain *parser.ChainResult) error {
 		info.GoType = "float64"
 		info.GoTypePtr = "*float64"
 
-	case "Timestamp", "Date", "Time":
+	case "Timestamp", "Time":
 		info.ColType = "expr.TimestampColumn"
 		info.GoType = "time.Time"
 		info.GoTypePtr = "*time.Time"
 		info.NeedsImport = "time"
 
+	case "Date":
+		info.ColType = "expr.DateColumn"
+		info.GoType = "time.Time"
+		info.GoTypePtr = "*time.Time"
+		info.NeedsImport = "time"
+
 	// SQLite-specific: Blob maps to BytesColumn (raw binary data, []byte in Go).
-	case "Blob":
+	// PostgreSQL: Bytea maps to BytesColumn (binary data).
+	case "Blob", "Bytea":
 		info.ColType = "expr.BytesColumn"
 		info.GoType = "[]byte"
 		info.GoTypePtr = "*[]byte"
+
+	case "Interval":
+		info.ColType = "expr.IntervalColumn"
+		info.GoType = "string"
+		info.GoTypePtr = "*string"
+
+	case "Enum":
+		info.ColType = "expr.EnumColumn"
+		info.GoType = "string"
+		info.GoTypePtr = "*string"
+
+	case "Inet", "Cidr", "Macaddr":
+		info.ColType = "expr.InetColumn"
+		info.GoType = "string"
+		info.GoTypePtr = "*string"
+
+	case "Tsvector", "Tsquery":
+		info.ColType = "expr.TsvectorColumn"
+		info.GoType = "string"
+		info.GoTypePtr = "*string"
+
+	case "Array":
+		info.ColType = "expr.ArrayColumn"
+		info.GoType = "any"
+		info.GoTypePtr = "*any"
 
 	case "JSONB", "JSON":
 		// Default JSONB generic type is map[string]any.
