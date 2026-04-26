@@ -1218,6 +1218,30 @@ func TestSubquery_NotIn(t *testing.T) {
 	)
 }
 
+func TestSubquery_In_AliasedCol_NoASClause(t *testing.T) {
+	// If an AliasedCol is passed as the SubqueryIn column reference, the AS
+	// alias must not appear in the rendered SQL (Fix #131).
+	sub := query.Select(ts.RealmsT.ID).From(ts.RealmsT).Where(ts.RealmsT.Name.EQ("acme"))
+	assertSQL(t, "AliasedCol IN (subquery) strips alias",
+		query.Select(ts.UsersT.ID).From(ts.UsersT).
+			Where(query.SubqueryIn(expr.ColAs(ts.UsersT.RealmID, "realm"), sub)),
+		`SELECT "users"."id" FROM "users" WHERE "users"."realm_id" IN (SELECT "realms"."id" FROM "realms" WHERE "realms"."name" = $1)`,
+		[]any{"acme"},
+	)
+}
+
+func TestSubquery_NotIn_AliasedCol_NoASClause(t *testing.T) {
+	// If an AliasedCol is passed as the SubqueryNotIn column reference, the AS
+	// alias must not appear in the rendered SQL (Fix #131 — NOT IN path).
+	sub := query.Select(ts.RealmsT.ID).From(ts.RealmsT).Where(ts.RealmsT.Name.EQ("banned"))
+	assertSQL(t, "AliasedCol NOT IN (subquery) strips alias",
+		query.Select(ts.UsersT.ID).From(ts.UsersT).
+			Where(query.SubqueryNotIn(expr.ColAs(ts.UsersT.RealmID, "realm"), sub)),
+		`SELECT "users"."id" FROM "users" WHERE "users"."realm_id" NOT IN (SELECT "realms"."id" FROM "realms" WHERE "realms"."name" = $1)`,
+		[]any{"banned"},
+	)
+}
+
 func TestSubquery_SharedParams(t *testing.T) {
 	// Outer query has a param, inner query also has a param — numbers must not collide.
 	sub := query.Select(ts.RealmsT.ID).From(ts.RealmsT).Where(ts.RealmsT.Name.EQ("acme"))
@@ -1357,6 +1381,56 @@ func TestAgg_HavingGTE(t *testing.T) {
 			Having(expr.Count().GTE(3)),
 		`SELECT "users"."realm_id" FROM "users" GROUP BY "users"."realm_id" HAVING COUNT(*) >= $1`,
 		[]any{3},
+	)
+}
+
+// -------------------------------------------------------------------
+// Fix #131 — AliasedCol in GROUP BY must not emit AS alias
+// -------------------------------------------------------------------
+
+func TestGroupBy_AliasedCol_NoASClause(t *testing.T) {
+	// expr.ColAs wraps a column with a SELECT-list alias. When passed to
+	// GroupBy, only the underlying column reference should be rendered —
+	// GROUP BY does not accept AS clauses.
+	assertSQL(t, "GROUP BY aliased col strips AS",
+		query.Select(
+			expr.ColAs(ts.UsersT.RealmID, "realm"),
+			expr.Count().As("cnt"),
+		).
+			From(ts.UsersT).
+			GroupBy(expr.ColAs(ts.UsersT.RealmID, "realm")),
+		`SELECT "users"."realm_id" AS "realm", COUNT(*) AS "cnt" FROM "users" GROUP BY "users"."realm_id"`,
+		nil,
+	)
+}
+
+func TestGroupBy_AliasedCol_MultipleColumns(t *testing.T) {
+	// Multiple AliasedCol columns in GROUP BY — each must be rendered without
+	// its AS alias.
+	assertSQL(t, "GROUP BY multiple aliased cols",
+		query.Select(
+			expr.ColAs(ts.UsersT.RealmID, "realm"),
+			expr.ColAs(ts.UsersT.Enabled, "active"),
+			expr.Count().As("cnt"),
+		).
+			From(ts.UsersT).
+			GroupBy(
+				expr.ColAs(ts.UsersT.RealmID, "realm"),
+				expr.ColAs(ts.UsersT.Enabled, "active"),
+			),
+		`SELECT "users"."realm_id" AS "realm", "users"."enabled" AS "active", COUNT(*) AS "cnt" FROM "users" GROUP BY "users"."realm_id", "users"."enabled"`,
+		nil,
+	)
+}
+
+func TestGroupBy_PlainCol_Unchanged(t *testing.T) {
+	// Non-aliased columns in GROUP BY must continue to work unchanged.
+	assertSQL(t, "GROUP BY plain column",
+		query.Select(ts.UsersT.RealmID, expr.Count().As("cnt")).
+			From(ts.UsersT).
+			GroupBy(ts.UsersT.RealmID),
+		`SELECT "users"."realm_id", COUNT(*) AS "cnt" FROM "users" GROUP BY "users"."realm_id"`,
+		nil,
 	)
 }
 
