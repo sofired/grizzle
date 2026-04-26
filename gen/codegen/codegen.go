@@ -178,18 +178,34 @@ package {{.PackageName}}
 // Each field is a typed column expression — use it to build WHERE clauses,
 // ORDER BY expressions, and SELECT lists with compile-time type checking.
 type {{.TableTypeName}} struct {
+	tableAlias string
 {{- range .Columns}}
 	{{.FieldName}} {{.ColType}}
 {{- end}}
 }
 
-func ({{.TableTypeName}}) GrizTableName() string  { return {{quote .TableName}} }
-func ({{.TableTypeName}}) GrizTableAlias() string { return {{quote .TableName}} }
+func ({{.TableTypeName}}) GrizTableName() string { return {{quote .TableName}} }
+func (t {{.TableTypeName}}) GrizTableAlias() string {
+	if t.tableAlias != "" {
+		return t.tableAlias
+	}
+	return {{quote .TableName}}
+}
+
+// As returns a renamed copy of {{.TableTypeName}} for use in self-joins and aliased queries.
+// Column references on the returned value use alias instead of {{quote .TableName}}.
+func (t {{.TableTypeName}}) As(alias string) {{.TableTypeName}} {
+	t.tableAlias = alias
+{{- range .Columns}}
+	t.{{.FieldName}} = {{.ColType}}{ColBase: expr.ColBase{TableAlias: alias, ColName: {{quote .ColName}}}}
+{{- end}}
+	return t
+}
 
 // {{.SingletonName}} is the singleton handle for the {{.TableName}} table.
 var {{.SingletonName}} = {{.TableTypeName}}{
 {{- range .Columns}}
-	{{.FieldName}}: {{.ColType}}{ ColBase: expr.ColBase{TableAlias: {{quote $.TableName}}, ColName: {{quote .ColName}}}},
+	{{.FieldName}}: {{.ColType}}{ColBase: expr.ColBase{TableAlias: {{quote $.TableName}}, ColName: {{quote .ColName}}}},
 {{- end}}
 }
 

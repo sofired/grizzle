@@ -68,6 +68,7 @@ var Users = pg.Table("users",
 
 // RealmsTable is what the code generator would produce for the realms table.
 type RealmsTable struct {
+	tableAlias  string
 	ID          expr.UUIDColumn
 	Name        expr.StringColumn
 	DisplayName expr.StringColumn
@@ -77,22 +78,26 @@ type RealmsTable struct {
 	UpdatedAt   expr.TimestampColumn
 }
 
-func (t RealmsTable) GrizTableName() string  { return "realms" }
-func (t RealmsTable) GrizTableAlias() string { return t.ID.TableAlias }
-
-// As returns a renamed copy of RealmsTable where every column's TableAlias
-// is set to alias. The underlying table name ("realms") is preserved so the
-// SQL renderer can emit  "realms" AS "alias".
-func (t RealmsTable) As(alias string) RealmsTable {
-	return RealmsTable{
-		ID:          expr.UUIDColumn{ColBase: expr.ColBase{TableAlias: alias, ColName: t.ID.ColName}},
-		Name:        expr.StringColumn{ColBase: expr.ColBase{TableAlias: alias, ColName: t.Name.ColName}},
-		DisplayName: expr.StringColumn{ColBase: expr.ColBase{TableAlias: alias, ColName: t.DisplayName.ColName}},
-		Enabled:     expr.BoolColumn{ColBase: expr.ColBase{TableAlias: alias, ColName: t.Enabled.ColName}},
-		Settings:    expr.JSONBColumn[map[string]any]{ColBase: expr.ColBase{TableAlias: alias, ColName: t.Settings.ColName}},
-		CreatedAt:   expr.TimestampColumn{ColBase: expr.ColBase{TableAlias: alias, ColName: t.CreatedAt.ColName}},
-		UpdatedAt:   expr.TimestampColumn{ColBase: expr.ColBase{TableAlias: alias, ColName: t.UpdatedAt.ColName}},
+func (RealmsTable) GrizTableName() string { return "realms" }
+func (t RealmsTable) GrizTableAlias() string {
+	if t.tableAlias != "" {
+		return t.tableAlias
 	}
+	return "realms"
+}
+
+// As returns a renamed copy of RealmsTable for use in self-joins and aliased queries.
+// Column references on the returned value use alias instead of "realms".
+func (t RealmsTable) As(alias string) RealmsTable {
+	t.tableAlias = alias
+	t.ID = expr.UUIDColumn{ColBase: expr.ColBase{TableAlias: alias, ColName: "id"}}
+	t.Name = expr.StringColumn{ColBase: expr.ColBase{TableAlias: alias, ColName: "name"}}
+	t.DisplayName = expr.StringColumn{ColBase: expr.ColBase{TableAlias: alias, ColName: "display_name"}}
+	t.Enabled = expr.BoolColumn{ColBase: expr.ColBase{TableAlias: alias, ColName: "enabled"}}
+	t.Settings = expr.JSONBColumn[map[string]any]{ColBase: expr.ColBase{TableAlias: alias, ColName: "settings"}}
+	t.CreatedAt = expr.TimestampColumn{ColBase: expr.ColBase{TableAlias: alias, ColName: "created_at"}}
+	t.UpdatedAt = expr.TimestampColumn{ColBase: expr.ColBase{TableAlias: alias, ColName: "updated_at"}}
+	return t
 }
 
 // RealmsT is the singleton table handle used in queries.
@@ -108,6 +113,7 @@ var RealmsT = RealmsTable{
 
 // UsersTable is what the code generator would produce for the users table.
 type UsersTable struct {
+	tableAlias    string
 	ID            expr.UUIDColumn
 	RealmID       expr.UUIDColumn
 	Username      expr.StringColumn
@@ -121,8 +127,31 @@ type UsersTable struct {
 	PurgedAt      expr.TimestampColumn
 }
 
-func (UsersTable) GrizTableName() string  { return "users" }
-func (UsersTable) GrizTableAlias() string { return "users" }
+func (UsersTable) GrizTableName() string { return "users" }
+func (t UsersTable) GrizTableAlias() string {
+	if t.tableAlias != "" {
+		return t.tableAlias
+	}
+	return "users"
+}
+
+// As returns a renamed copy of UsersTable for use in self-joins and aliased queries.
+// Column references on the returned value use alias instead of "users".
+func (t UsersTable) As(alias string) UsersTable {
+	t.tableAlias = alias
+	t.ID = expr.UUIDColumn{ColBase: expr.ColBase{TableAlias: alias, ColName: "id"}}
+	t.RealmID = expr.UUIDColumn{ColBase: expr.ColBase{TableAlias: alias, ColName: "realm_id"}}
+	t.Username = expr.StringColumn{ColBase: expr.ColBase{TableAlias: alias, ColName: "username"}}
+	t.Email = expr.StringColumn{ColBase: expr.ColBase{TableAlias: alias, ColName: "email"}}
+	t.EmailVerified = expr.BoolColumn{ColBase: expr.ColBase{TableAlias: alias, ColName: "email_verified"}}
+	t.Enabled = expr.BoolColumn{ColBase: expr.ColBase{TableAlias: alias, ColName: "enabled"}}
+	t.Attributes = expr.JSONBColumn[map[string]any]{ColBase: expr.ColBase{TableAlias: alias, ColName: "attributes"}}
+	t.CreatedAt = expr.TimestampColumn{ColBase: expr.ColBase{TableAlias: alias, ColName: "created_at"}}
+	t.UpdatedAt = expr.TimestampColumn{ColBase: expr.ColBase{TableAlias: alias, ColName: "updated_at"}}
+	t.DeletedAt = expr.TimestampColumn{ColBase: expr.ColBase{TableAlias: alias, ColName: "deleted_at"}}
+	t.PurgedAt = expr.TimestampColumn{ColBase: expr.ColBase{TableAlias: alias, ColName: "purged_at"}}
+	return t
+}
 
 var UsersT = UsersTable{
 	ID:            expr.UUIDColumn{ColBase: expr.ColBase{TableAlias: "users", ColName: "id"}},
@@ -206,23 +235,28 @@ type UserUpdate struct {
 // It mirrors the pattern a code generator would produce for a table that
 // supports table aliasing via As().
 type EmployeesTable struct {
-	ID        expr.UUIDColumn
-	Name      expr.StringColumn
-	ManagerID expr.UUIDColumn
+	tableAlias string
+	ID         expr.UUIDColumn
+	Name       expr.StringColumn
+	ManagerID  expr.UUIDColumn
 }
 
-func (t EmployeesTable) GrizTableName() string  { return "employees" }
-func (t EmployeesTable) GrizTableAlias() string { return t.ID.TableAlias }
-
-// As returns a renamed copy of EmployeesTable where every column's TableAlias
-// is set to alias. The underlying table name ("employees") is preserved so the
-// SQL renderer can emit  "employees" AS "alias".
-func (t EmployeesTable) As(alias string) EmployeesTable {
-	return EmployeesTable{
-		ID:        expr.UUIDColumn{ColBase: expr.ColBase{TableAlias: alias, ColName: t.ID.ColName}},
-		Name:      expr.StringColumn{ColBase: expr.ColBase{TableAlias: alias, ColName: t.Name.ColName}},
-		ManagerID: expr.UUIDColumn{ColBase: expr.ColBase{TableAlias: alias, ColName: t.ManagerID.ColName}},
+func (EmployeesTable) GrizTableName() string { return "employees" }
+func (t EmployeesTable) GrizTableAlias() string {
+	if t.tableAlias != "" {
+		return t.tableAlias
 	}
+	return "employees"
+}
+
+// As returns a renamed copy of EmployeesTable for use in self-joins and aliased queries.
+// Column references on the returned value use alias instead of "employees".
+func (t EmployeesTable) As(alias string) EmployeesTable {
+	t.tableAlias = alias
+	t.ID = expr.UUIDColumn{ColBase: expr.ColBase{TableAlias: alias, ColName: "id"}}
+	t.Name = expr.StringColumn{ColBase: expr.ColBase{TableAlias: alias, ColName: "name"}}
+	t.ManagerID = expr.UUIDColumn{ColBase: expr.ColBase{TableAlias: alias, ColName: "manager_id"}}
+	return t
 }
 
 // EmployeesT is the singleton table handle used in queries.
