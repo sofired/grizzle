@@ -593,6 +593,197 @@ func TestDiff_FK_OnDeleteChange_DetectedAsChange(t *testing.T) {
 	}
 }
 
+// -------------------------------------------------------------------
+// Fix #36 — FK introspection: create ordering and round-trip diff
+// -------------------------------------------------------------------
+
+func TestDiff_FK_CreateOrder_ReferencedTableFirst(t *testing.T) {
+	// posts.user_id → users.id: users must be created before posts
+	// even though "posts" comes before "users" alphabetically.
+	usersTable := pg.Table("users",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+	).Build()
+
+	postsTable := pg.Table("posts",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("user_id", pg.UUID().NotNull()),
+	).WithConstraints(func(t pg.TableRef) []pg.Constraint {
+		return []pg.Constraint{
+			pg.ForeignKey("posts_user_fk").
+				From(t.Col("user_id")).
+				References("users", "id").
+				Build(),
+		}
+	})
+
+	old := kit.EmptySnapshot()
+	new := kit.FromDefs(postsTable, usersTable)
+	changes := kit.Diff(old, new)
+
+	usersIdx, postsIdx := -1, -1
+	for i, c := range changes {
+		if c.Kind == kit.ChangeCreateTable {
+			switch c.TableName {
+			case "users":
+				usersIdx = i
+			case "posts":
+				postsIdx = i
+			}
+		}
+	}
+	if usersIdx == -1 || postsIdx == -1 {
+		t.Fatalf("expected CreateTable for both users and posts, got: %v", changes)
+	}
+	if usersIdx > postsIdx {
+		t.Errorf("users (idx %d) must come before posts (idx %d) due to FK dependency", usersIdx, postsIdx)
+	}
+}
+
+func TestDiff_FK_CreateOrder_ColumnRefReferencedTableFirst(t *testing.T) {
+	// Same as above but FK is expressed as an inline column reference.
+	usersTable := pg.Table("users",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+	).Build()
+
+	postsTable := pg.Table("posts",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("user_id", pg.UUID().NotNull().References("users", "id")),
+	).Build()
+
+	old := kit.EmptySnapshot()
+	new := kit.FromDefs(postsTable, usersTable)
+	changes := kit.Diff(old, new)
+
+	usersIdx, postsIdx := -1, -1
+	for i, c := range changes {
+		if c.Kind == kit.ChangeCreateTable {
+			switch c.TableName {
+			case "users":
+				usersIdx = i
+			case "posts":
+				postsIdx = i
+			}
+		}
+	}
+	if usersIdx == -1 || postsIdx == -1 {
+		t.Fatalf("expected CreateTable for both tables, got: %v", changes)
+	}
+	if usersIdx > postsIdx {
+		t.Errorf("users (idx %d) must come before posts (idx %d) due to inline FK", usersIdx, postsIdx)
+	}
+}
+
+func TestDiff_FK_RoundTrip_NoChanges(t *testing.T) {
+	// Simulate the introspect→diff round-trip: build a live snapshot that
+	// mirrors what IntrospectPostgres would return (FK with "NO ACTION"
+	// stored as pg.FKActionNoAction), diff it against target defs that use
+	// the default zero value for FKOnDelete/FKOnUpdate. Expect no changes.
+	liveFKConstraint := pg.Constraint{
+		Kind:      pg.KindForeignKey,
+		Name:      "posts_user_fk",
+		Columns:   []string{"user_id"},
+		FKTable:   "users",
+		FKColumns: []string{"id"},
+		// Introspected FK has FKActionNoAction (PostgreSQL's default).
+		FKOnDelete: pg.FKActionNoAction,
+		FKOnUpdate: pg.FKActionNoAction,
+	}
+
+	live := kit.Snapshot{
+		Version: "1",
+		Tables: map[string]*kit.TableSnap{
+			"users": {
+				Name: "users",
+				Columns: []pg.ColumnDef{
+					{Name: "id", SQLType: "uuid", NotNull: true, PrimaryKey: true, HasDefault: true, DefaultExpr: "gen_random_uuid()"},
+				},
+			},
+			"posts": {
+				Name: "posts",
+				Columns: []pg.ColumnDef{
+					{Name: "id", SQLType: "uuid", NotNull: true, PrimaryKey: true, HasDefault: true, DefaultExpr: "gen_random_uuid()"},
+					{Name: "user_id", SQLType: "uuid", NotNull: true},
+				},
+				Constraints: []pg.Constraint{liveFKConstraint},
+			},
+		},
+	}
+
+	// Schema defined without explicit OnDelete/OnUpdate (zero value "").
+	usersDef := pg.Table("users",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+	).Build()
+	postsDef := pg.Table("posts",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("user_id", pg.UUID().NotNull()),
+	).WithConstraints(func(t pg.TableRef) []pg.Constraint {
+		return []pg.Constraint{
+			pg.ForeignKey("posts_user_fk").
+				From(t.Col("user_id")).
+				References("users", "id").
+				Build(), // FKOnDelete and FKOnUpdate left as "" (zero value)
+		}
+	})
+
+	target := kit.FromDefs(usersDef, postsDef)
+	changes := kit.Diff(live, target)
+	if len(changes) != 0 {
+		t.Errorf("expected 0 changes for FK round-trip, got %d: %v", len(changes), changes)
+	}
+}
+
+func TestDiff_FK_DetectsRemovedFK(t *testing.T) {
+	// When a FK exists in the live snapshot but is removed from the target,
+	// the diff must emit a ChangeDropConstraint for it.
+	liveFKConstraint := pg.Constraint{
+		Kind:       pg.KindForeignKey,
+		Name:       "posts_user_fk",
+		Columns:    []string{"user_id"},
+		FKTable:    "users",
+		FKColumns:  []string{"id"},
+		FKOnDelete: pg.FKActionNoAction,
+		FKOnUpdate: pg.FKActionNoAction,
+	}
+
+	live := kit.Snapshot{
+		Version: "1",
+		Tables: map[string]*kit.TableSnap{
+			"posts": {
+				Name: "posts",
+				Columns: []pg.ColumnDef{
+					{Name: "id", SQLType: "uuid", NotNull: true, PrimaryKey: true},
+					{Name: "user_id", SQLType: "uuid", NotNull: true},
+				},
+				Constraints: []pg.Constraint{liveFKConstraint},
+			},
+		},
+	}
+
+	// Target has posts but the FK constraint was removed.
+	postsDef := pg.Table("posts",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("user_id", pg.UUID().NotNull()),
+	).Build()
+	target := kit.FromDefs(postsDef)
+
+	changes := kit.Diff(live, target)
+	drops := countKind(changes, kit.ChangeDropConstraint)
+	if drops != 1 {
+		t.Fatalf("expected 1 ChangeDropConstraint for removed FK, got %d: %v", drops, changes)
+	}
+	var dropChange *kit.Change
+	for i := range changes {
+		if changes[i].Kind == kit.ChangeDropConstraint {
+			c := changes[i]
+			dropChange = &c
+			break
+		}
+	}
+	if dropChange == nil || dropChange.Constraint == nil || dropChange.Constraint.Name != "posts_user_fk" {
+		t.Errorf("expected DropConstraint for posts_user_fk, got: %+v", dropChange)
+	}
+}
+
 func TestDiff_FK_RefTableChange_DetectedAsChange(t *testing.T) {
 	oldDef := pg.Table("posts",
 		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
