@@ -6,6 +6,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/sofired/grizzle/dialect"
 	"github.com/sofired/grizzle/query"
@@ -23,6 +24,15 @@ type poolExecer interface {
 	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
 }
 
+// Compile-time interface satisfaction checks. These fail at build time if a
+// pgx major-version upgrade changes the method signatures, catching the
+// mismatch before it becomes a runtime error.
+var (
+	_ poolQuerier = (*pgxpool.Pool)(nil)
+	_ poolExecer  = (*pgxpool.Pool)(nil)
+	_ poolExecer  = (pgx.Tx)(nil)
+)
+
 // PreparedSelect is a SELECT query whose SQL has been pre-built and validated
 // against the database at initialization time. Use it for static queries —
 // those where the table, columns, and WHERE conditions do not change between
@@ -33,10 +43,11 @@ type poolExecer interface {
 //
 // The name is a human-readable label available via Name() for callers to use
 // in their own logging and diagnostics.
-// At execution time, queries run by SQL so that pgx v5's per-connection
-// statement cache (QueryExecModeCacheStatement) automatically prepares and
-// reuses the plan on each pool connection — avoiding the cross-connection
-// named-statement mismatch that arises when using pgxpool.
+// At execution time, queries are executed using the SQL string so that pgx v5's
+// per-connection statement cache (QueryExecModeCacheStatement, the default mode)
+// prepares and reuses the plan on each pool connection independently — avoiding
+// the cross-connection named-statement mismatch that occurs when a named statement
+// prepared on one connection is referenced by name on a different pool connection.
 //
 // Example (static active-users list):
 //

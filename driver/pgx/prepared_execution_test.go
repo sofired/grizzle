@@ -32,13 +32,15 @@ func (s *stubQuerier) Query(_ context.Context, sql string, _ ...any) (pgx.Rows, 
 	return nil, pgx.ErrNoRows
 }
 
-// stubExecer is a poolExecer stub that records the SQL string passed to Exec.
+// stubExecer is a poolExecer stub that records the SQL string and args passed to Exec.
 type stubExecer struct {
-	gotSQL string
+	gotSQL  string
+	gotArgs []any
 }
 
-func (s *stubExecer) Exec(_ context.Context, sql string, _ ...any) (pgconn.CommandTag, error) {
+func (s *stubExecer) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
 	s.gotSQL = sql
+	s.gotArgs = args
 	return pgconn.NewCommandTag("UPDATE 1"), nil
 }
 
@@ -96,7 +98,8 @@ func TestPreparedSelect_QueryOptUsesSQLNotName(t *testing.T) {
 }
 
 // TestPreparedExec_ExecUsesSQLNotName calls execWith with a stub and asserts
-// that the SQL string — not the statement name — is submitted.
+// that the SQL string — not the statement name — is submitted, and that args
+// pass through unchanged.
 func TestPreparedExec_ExecUsesSQLNotName(t *testing.T) {
 	b := query.Update(testschema.UsersT).
 		Set("enabled", false).
@@ -116,5 +119,63 @@ func TestPreparedExec_ExecUsesSQLNotName(t *testing.T) {
 	}
 	if stub.gotSQL == stmt.name {
 		t.Errorf("Exec submitted the statement name %q instead of the SQL string", stub.gotSQL)
+	}
+	if len(stub.gotArgs) != len(stmt.args) {
+		t.Errorf("Exec submitted %d args, want %d", len(stub.gotArgs), len(stmt.args))
+	}
+}
+
+// fakePgxTx is a minimal pgx.Tx implementation used only in tests. Only Exec
+// is implemented; all other methods panic so any unexpected call is obvious.
+type fakePgxTx struct {
+	gotSQL  string
+	gotArgs []any
+}
+
+func (f *fakePgxTx) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	f.gotSQL = sql
+	f.gotArgs = args
+	return pgconn.NewCommandTag("UPDATE 1"), nil
+}
+func (f *fakePgxTx) Begin(_ context.Context) (pgx.Tx, error)       { panic("unexpected") }
+func (f *fakePgxTx) Commit(_ context.Context) error                  { panic("unexpected") }
+func (f *fakePgxTx) Rollback(_ context.Context) error                { panic("unexpected") }
+func (f *fakePgxTx) CopyFrom(_ context.Context, _ pgx.Identifier, _ []string, _ pgx.CopyFromSource) (int64, error) {
+	panic("unexpected")
+}
+func (f *fakePgxTx) SendBatch(_ context.Context, _ *pgx.Batch) pgx.BatchResults { panic("unexpected") }
+func (f *fakePgxTx) LargeObjects() pgx.LargeObjects                             { panic("unexpected") }
+func (f *fakePgxTx) Prepare(_ context.Context, _, _ string) (*pgconn.StatementDescription, error) {
+	panic("unexpected")
+}
+func (f *fakePgxTx) Query(_ context.Context, _ string, _ ...any) (pgx.Rows, error) {
+	panic("unexpected")
+}
+func (f *fakePgxTx) QueryRow(_ context.Context, _ string, _ ...any) pgx.Row { panic("unexpected") }
+func (f *fakePgxTx) Conn() *pgx.Conn                                         { panic("unexpected") }
+
+// TestPreparedExec_ExecTxUsesSQLNotName guards the ExecTx public entry point.
+// ExecTx calls execWith(ctx, tx.tx) — this test constructs a Tx with a fake
+// pgx.Tx to confirm the delegation cannot accidentally be reverted to pass p.name.
+func TestPreparedExec_ExecTxUsesSQLNotName(t *testing.T) {
+	b := query.Update(testschema.UsersT).
+		Set("enabled", false).
+		Where(testschema.UsersT.DeletedAt.IsNull())
+
+	reg := NewRegistry(nil)
+	stmt := RegisterExec(reg, "disable_users", b)
+
+	fake := &fakePgxTx{}
+	tx := &Tx{tx: fake}
+	_, err := stmt.ExecTx(context.Background(), tx)
+	if err != nil {
+		t.Fatalf("ExecTx returned unexpected error: %v", err)
+	}
+
+	if fake.gotSQL != stmt.sql {
+		t.Errorf("ExecTx submitted %q to pool, want SQL %q", fake.gotSQL, stmt.sql)
+	}
+	if fake.gotSQL == stmt.name {
+		t.Errorf("ExecTx submitted the statement name %q instead of the SQL string", fake.gotSQL)
 	}
 }

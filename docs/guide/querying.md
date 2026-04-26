@@ -192,6 +192,71 @@ rows, err := d.Query(ctx, query.Select().From(db.UsersT))
 users, err := pgxdb.ScanAll[db.UserSelect](rows, err)
 ```
 
+## Prepared queries
+
+For static queries that run repeatedly on the same shape of data, use
+`PreparedSelect` and `PreparedExec`. The SQL is validated against the live
+database at startup — wrong column names, type mismatches, and syntax errors
+are surfaced before any traffic reaches the handler.
+
+```go
+import pgxdb "github.com/sofired/grizzle/driver/pgx"
+
+// Declare at package level or inside an init function.
+var activeUsers *pgxdb.PreparedSelect[db.UserSelect]
+
+func initQueries(ctx context.Context, d *pgxdb.DB) error {
+    var err error
+    activeUsers, err = pgxdb.PrepareSelect[db.UserSelect](ctx, d, "active_users",
+        query.Select(db.UsersT.ID, db.UsersT.Username, db.UsersT.Email).
+            From(db.UsersT).
+            Where(expr.And(db.UsersT.Enabled.IsTrue(), db.UsersT.DeletedAt.IsNull())).
+            OrderBy(db.UsersT.CreatedAt.Desc()),
+    )
+    return err
+}
+
+// At query time — no SQL construction overhead.
+users, err := activeUsers.QueryAll(ctx, db)
+```
+
+For multiple statements, use a `Registry` to validate them all in one shot:
+
+```go
+reg := pgxdb.NewRegistry(d)
+activeUsers := pgxdb.RegisterSelect[db.UserSelect](reg, "active_users", activeUsersQuery)
+softDelete  := pgxdb.RegisterExec(reg, "soft_delete_user", softDeleteQuery)
+
+if err := reg.PrepareAll(ctx); err != nil {
+    log.Fatal("query validation failed:", err)
+}
+```
+
+The `name` you supply is a human-readable label for logging and diagnostics.
+At execution time, Grizzle passes the SQL string to pgx so that pgx v5's
+per-connection statement cache (`QueryExecModeCacheStatement`) handles
+preparation on every pool connection automatically — no cross-connection
+named-statement issues.
+
+Use `PreparedExec` for mutations:
+
+```go
+var softDelete *pgxdb.PreparedExec
+
+func initMutations(ctx context.Context, d *pgxdb.DB) error {
+    var err error
+    softDelete, err = pgxdb.PrepareExec(ctx, d, "soft_delete_user",
+        query.Update(db.UsersT).
+            Set("deleted_at", time.Now()).
+            Where(db.UsersT.ID.EQ(uuid.Nil)), // placeholder arg
+    )
+    return err
+}
+
+// Inside a transaction:
+_, err = softDelete.ExecTx(ctx, tx)
+```
+
 ## Raw SQL escape hatch
 
 For expressions not covered by the builder, use `expr.Raw`:
