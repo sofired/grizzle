@@ -107,9 +107,11 @@ func (b *SelectBuilder) With(name string, sub *SelectBuilder) *SelectBuilder {
 //	    From(EmployeesT).
 //	    Where(EmployeesT.ID.EQ(rootID))
 //
+//	// orgID is a typed reference to the "id" column of the "org" CTE:
+//	orgID := expr.UUIDColumn{ColBase: expr.ColBase{TableAlias: "org", ColName: "id"}}
 //	rec := query.Select(EmployeesT.ID, EmployeesT.ManagerID).
 //	    From(EmployeesT).
-//	    InnerJoin(query.CTERef("org"), EmployeesT.ManagerID.EQCol(ManagerIDCol))
+//	    InnerJoin(query.CTERef("org"), EmployeesT.ManagerID.EQCol(orgID))
 //
 //	query.Select().
 //	    WithRecursive("org", anchor, rec).
@@ -344,14 +346,15 @@ func (b *SelectBuilder) buildWith(ctx *expr.BuildContext) string {
 	// WHERE
 	sb.WriteString(buildWhere(ctx, b.where))
 
-	// GROUP BY
+	// GROUP BY — use distinctColSQL to strip any AS alias from AliasedCol values;
+	// GROUP BY does not accept AS clauses.
 	if len(b.groupBy) > 0 {
 		sb.WriteString(" GROUP BY ")
 		for i, c := range b.groupBy {
 			if i > 0 {
 				sb.WriteString(", ")
 			}
-			sb.WriteString(selectColSQL(ctx, c))
+			sb.WriteString(distinctColSQL(ctx, c))
 		}
 	}
 
@@ -397,4 +400,16 @@ func selectColSQL(ctx *expr.BuildContext, c expr.SelectableColumn) string {
 		return e.ToSQL(ctx)
 	}
 	return ctx.ColRef(c.TableName(), c.ColumnName())
+}
+
+// distinctColSQL produces the SQL fragment for a column in non-SELECT positions
+// such as GROUP BY and DISTINCT ON where an AS alias clause is invalid.
+// AliasedCol values are unwrapped one level so only the bare column reference
+// is emitted; all other expression types are rendered via ToSQL as usual.
+func distinctColSQL(ctx *expr.BuildContext, c expr.SelectableColumn) string {
+	type unwrapper interface{ Unwrap() expr.SelectableColumn }
+	if u, ok := c.(unwrapper); ok {
+		c = u.Unwrap()
+	}
+	return selectColSQL(ctx, c)
 }

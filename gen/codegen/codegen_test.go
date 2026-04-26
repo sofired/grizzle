@@ -63,6 +63,8 @@ func TestGenerateTable_Smoke(t *testing.T) {
 		"func (UsersTable) GrizTableName() string",
 		"func (t UsersTable) GrizTableAlias() string",
 		"func (t UsersTable) As(alias string) UsersTable",
+		// As() method body must reassign column handles with the new alias.
+		`ColBase: expr.ColBase{TableAlias: alias`,
 		"var UsersT = UsersTable{",
 		"type UserSelect struct",
 		"type UserInsert struct",

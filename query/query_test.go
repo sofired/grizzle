@@ -2189,3 +2189,54 @@ func TestSelfJoin_CrossJoin(t *testing.T) {
 		nil,
 	)
 }
+
+func TestTableAlias_InFromClause(t *testing.T) {
+	// An aliased table passed to From() should render "table" AS "alias".
+	e := ts.EmployeesT.As("e")
+	assertSQL(t, "aliased table in FROM",
+		query.Select(e.Name).From(e),
+		`SELECT "e"."name" FROM "employees" AS "e"`,
+		nil,
+	)
+}
+
+func TestTableAlias_ChainedAs(t *testing.T) {
+	// Calling As() twice should use the second alias, not the first.
+	a := ts.EmployeesT.As("first")
+	b := a.As("second")
+	if b.GrizTableAlias() != "second" {
+		t.Errorf("chained As: GrizTableAlias got %q, want %q", b.GrizTableAlias(), "second")
+	}
+	// The intermediate value must be independent.
+	if a.GrizTableAlias() != "first" {
+		t.Errorf("chained As mutated intermediate: GrizTableAlias got %q, want %q", a.GrizTableAlias(), "first")
+	}
+	ctx := expr.NewBuildContext(dialect.Postgres)
+	got := b.Name.EQ("Bob").ToSQL(ctx)
+	want := `"second"."name" = $1`
+	if got != want {
+		t.Errorf("chained As column ref: got %q, want %q", got, want)
+	}
+}
+
+func TestTableAlias_OriginalColumnHandlesUnchanged(t *testing.T) {
+	// Calling As() must not mutate the original singleton's column handles.
+	_ = ts.EmployeesT.As("manager")
+	if ts.EmployeesT.ID.TableName() != "employees" {
+		t.Errorf("As() mutated EmployeesT.ID.TableName: got %q", ts.EmployeesT.ID.TableName())
+	}
+	if ts.EmployeesT.ManagerID.TableName() != "employees" {
+		t.Errorf("As() mutated EmployeesT.ManagerID.TableName: got %q", ts.EmployeesT.ManagerID.TableName())
+	}
+}
+
+func TestAliasedCol_GroupBy_StripsAlias(t *testing.T) {
+	// Passing an AliasedCol to GroupBy must not emit the AS clause.
+	assertSQL(t, "AliasedCol in GROUP BY strips alias",
+		query.Select(ts.UsersT.RealmID, ts.UsersT.Email.As("e")).
+			From(ts.UsersT).
+			GroupBy(ts.UsersT.Email.As("e")),
+		`SELECT "users"."realm_id", "users"."email" AS "e" FROM "users" GROUP BY "users"."email"`,
+		nil,
+	)
+}

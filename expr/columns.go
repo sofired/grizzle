@@ -48,7 +48,10 @@ func (c ColBase) Desc() OrderExpr { return OrderExpr{ref: c, dir: "DESC"} }
 // It implements both SelectableColumn and Expression so it can appear in
 // SELECT lists and produce "table"."col" AS "alias" SQL.
 //
-// Obtain one via ColBase.As or any typed column's As method, e.g.:
+// AliasedCol is only valid in a SELECT list. Do not pass it to GroupBy,
+// Having, or OrderBy — use the original unaliased column in those positions.
+//
+// Obtain one via ColBase.As or any typed column's promoted As method, e.g.:
 //
 //	mgr.Name.As("manager_name")
 type AliasedCol struct {
@@ -57,7 +60,8 @@ type AliasedCol struct {
 }
 
 // ToSQL implements Expression. Renders: "table"."col" AS "alias".
-// If alias is empty, only the column reference is rendered (no AS clause).
+// alias must be non-empty; an empty alias produces a bare column reference
+// with an empty ColumnName, which may produce unexpected results downstream.
 func (a AliasedCol) ToSQL(ctx *BuildContext) string {
 	ref := ctx.ColRef(a.base.TableAlias, a.base.ColName)
 	if a.alias == "" {
@@ -71,11 +75,18 @@ func (a AliasedCol) colRef(ctx *BuildContext) string {
 	return ctx.ColRef(a.base.TableAlias, a.base.ColName)
 }
 
-// ColumnName implements SelectableColumn.
+// ColumnName implements SelectableColumn. Returns the alias, not the
+// underlying column name. This is used to name the output column in a
+// result set; use Unwrap().ColumnName() to get the raw column name.
 func (a AliasedCol) ColumnName() string { return a.alias }
 
 // TableName implements SelectableColumn.
 func (a AliasedCol) TableName() string { return a.base.TableAlias }
+
+// Unwrap returns the underlying unaliased column. Use this when a bare
+// column reference is needed (e.g. GROUP BY, DISTINCT ON) where the AS
+// clause produced by ToSQL would be invalid.
+func (a AliasedCol) Unwrap() SelectableColumn { return a.base }
 
 // -------------------------------------------------------------------
 // As method on ColBase — returns an AliasedCol for SELECT aliases

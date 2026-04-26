@@ -231,9 +231,10 @@ type UserUpdate struct {
 	UpdatedAt *time.Time `db:"updated_at"`
 }
 
-// EmployeesTable is a table type used in self-join and CROSS JOIN tests.
-// It mirrors the pattern a code generator would produce for a table that
-// supports table aliasing via As().
+// EmployeesTable is a minimal hand-written table type used in self-join and
+// CROSS JOIN tests. Its ManagerID column (a UUID FK back to the same table)
+// exercises the self-join pattern: EmployeesT.As("manager").
+// This type follows the same structure that grizzle gen produces.
 type EmployeesTable struct {
 	tableAlias string
 	ID         expr.UUIDColumn
