@@ -499,6 +499,72 @@ func TestRenameColumn_NilGuard(t *testing.T) {
 	}
 }
 
+// TestRenameColumn_SQLGen_Postgres verifies that GenerateChangeSQL emits the
+// correct PostgreSQL RENAME COLUMN DDL for a ChangeRenameColumn change.
+func TestRenameColumn_SQLGen_Postgres(t *testing.T) {
+	snap := kit.FromDefs(usersDef)
+	old := pg.ColumnDef{Name: "username", SQLType: "varchar(255)", NotNull: true}
+	newCol := pg.ColumnDef{Name: "handle", SQLType: "varchar(255)", NotNull: true}
+	change := kit.Change{
+		Kind:      kit.ChangeRenameColumn,
+		TableName: "users",
+		OldCol:    &old,
+		NewCol:    &newCol,
+	}
+	stmts := kit.GenerateChangeSQL(snap, change)
+	if len(stmts) != 1 {
+		t.Fatalf("expected 1 statement, got %d: %v", len(stmts), stmts)
+	}
+	want := `ALTER TABLE "users" RENAME COLUMN "username" TO "handle"`
+	if stmts[0] != want {
+		t.Errorf("got:  %s\nwant: %s", stmts[0], want)
+	}
+}
+
+// TestRenameColumn_SQLGen_MySQL verifies that GenerateChangeSQLMySQL emits the
+// correct MySQL RENAME COLUMN DDL for a ChangeRenameColumn change.
+func TestRenameColumn_SQLGen_MySQL(t *testing.T) {
+	snap := kit.FromDefs(usersDef)
+	old := pg.ColumnDef{Name: "username", SQLType: "varchar(255)", NotNull: true}
+	newCol := pg.ColumnDef{Name: "handle", SQLType: "varchar(255)", NotNull: true}
+	change := kit.Change{
+		Kind:      kit.ChangeRenameColumn,
+		TableName: "users",
+		OldCol:    &old,
+		NewCol:    &newCol,
+	}
+	stmts := kit.GenerateChangeSQLMySQL(snap, change)
+	if len(stmts) != 1 {
+		t.Fatalf("expected 1 statement, got %d: %v", len(stmts), stmts)
+	}
+	want := "ALTER TABLE `users` RENAME COLUMN `username` TO `handle`"
+	if stmts[0] != want {
+		t.Errorf("got:  %s\nwant: %s", stmts[0], want)
+	}
+}
+
+// TestRenameColumn_SQLGen_SQLite verifies that GenerateChangeSQLSQLite emits
+// the correct SQLite RENAME COLUMN DDL for a ChangeRenameColumn change.
+func TestRenameColumn_SQLGen_SQLite(t *testing.T) {
+	snap := kit.FromDefs(usersDef)
+	old := pg.ColumnDef{Name: "username", SQLType: "varchar(255)", NotNull: true}
+	newCol := pg.ColumnDef{Name: "handle", SQLType: "varchar(255)", NotNull: true}
+	change := kit.Change{
+		Kind:      kit.ChangeRenameColumn,
+		TableName: "users",
+		OldCol:    &old,
+		NewCol:    &newCol,
+	}
+	stmts := kit.GenerateChangeSQLSQLite(snap, change)
+	if len(stmts) != 1 {
+		t.Fatalf("expected 1 statement, got %d: %v", len(stmts), stmts)
+	}
+	want := `ALTER TABLE "users" RENAME COLUMN "username" TO "handle"`
+	if stmts[0] != want {
+		t.Errorf("got:  %s\nwant: %s", stmts[0], want)
+	}
+}
+
 // -------------------------------------------------------------------
 // Fix #8 — Diff() deterministic output
 // -------------------------------------------------------------------
@@ -953,6 +1019,27 @@ func TestRenameTable_SQLGen_SchemaQualified_Postgres(t *testing.T) {
 	}
 	// RENAME TO must carry only the unqualified target name.
 	want := `ALTER TABLE "public"."accounts" RENAME TO "users"`
+	if stmts[0] != want {
+		t.Errorf("got:  %s\nwant: %s", stmts[0], want)
+	}
+}
+
+// TestRenameTable_SQLGen_SchemaQualified_MySQL verifies that MySQL RENAME TABLE
+// preserves the schema qualifier on both sides when the TableName and
+// RenameTarget are schema-qualified.
+func TestRenameTable_SQLGen_SchemaQualified_MySQL(t *testing.T) {
+	snap := kit.EmptySnapshot()
+	change := kit.Change{
+		Kind:         kit.ChangeRenameTable,
+		TableName:    "public.accounts",
+		RenameTarget: "public.users",
+	}
+	stmts := kit.GenerateChangeSQLMySQL(snap, change)
+	if len(stmts) != 1 {
+		t.Fatalf("expected 1 statement, got %d: %v", len(stmts), stmts)
+	}
+	// MySQL RENAME TABLE preserves the schema on both source and target.
+	want := "RENAME TABLE `public`.`accounts` TO `public`.`users`"
 	if stmts[0] != want {
 		t.Errorf("got:  %s\nwant: %s", stmts[0], want)
 	}

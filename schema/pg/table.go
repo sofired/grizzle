@@ -35,10 +35,12 @@ type TableDef struct {
 	Schema      string // PostgreSQL schema namespace; empty = "public"
 	Columns     []ColumnDef
 	Constraints []Constraint
-	// PreviousName is set when this table was renamed from another table.
-	// Diff() uses it to emit ChangeRenameTable instead of drop+create.
-	// Leave empty for new tables or tables whose name has not changed.
-	PreviousName string `json:"previous_name,omitempty"`
+	// PreviousName is intentionally excluded from JSON snapshots — it is only
+	// meaningful as a schema definition annotation for the current migration step
+	// and must not persist across snapshot saves. If it were persisted, a future
+	// table that happens to share the old name would trigger a spurious RENAME
+	// instead of a CREATE.
+	PreviousName string `json:"-"`
 }
 
 // Def returns a pointer to the receiver so that *TableDef satisfies
@@ -98,7 +100,8 @@ func (b *TableBuilder) WithConstraints(fn func(t TableRef) []Constraint) *TableD
 
 // RenamedFrom declares that this table was renamed from oldName.
 // Diff() will emit ChangeRenameTable instead of drop+create when oldName
-// matches a dropped table in the old snapshot.
+// matches a dropped table in the old snapshot. Leave empty for new tables
+// or tables whose name has not changed.
 //
 // oldName must match the qualified map key used in the old snapshot:
 //   - For tables without a schema (or schema "public"): pass the bare table
@@ -108,6 +111,7 @@ func (b *TableBuilder) WithConstraints(fn func(t TableRef) []Constraint) *TableD
 //
 // Passing an unqualified name when the old table had a schema (or vice-versa)
 // will result in no rename being detected; Diff() will fall back to drop+create.
+// Remove this call from your schema definition once the migration has been applied.
 func (b *TableBuilder) RenamedFrom(oldName string) *TableBuilder {
 	b.def.PreviousName = oldName
 	return b
