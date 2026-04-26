@@ -110,7 +110,7 @@ The diff engine detects and generates SQL for:
 | New index | `CREATE [UNIQUE] INDEX …` |
 | Dropped index | `DROP INDEX …` |
 
-To rename a table or column without data loss, use `RenamedFrom()` on the table or column builder. `Diff()` will emit `ChangeRenameTable` or `ChangeRenameColumn` instead of a destructive drop-and-recreate. **Remove the `RenamedFrom()` call from your schema definition once the migration has been applied** — it is a one-time migration annotation. Type changes still require a manual migration.
+To rename a table or column without data loss, use `RenamedFrom()` on the table or column builder. `Diff()` will emit `ChangeRenameTable` or `ChangeRenameColumn` instead of a destructive drop-and-recreate. **Remove the `RenamedFrom()` call from your schema definition once the migration has been applied** — it is a one-time migration annotation. Column type, nullability, and default changes can be generated for PostgreSQL and MySQL; SQLite may still require a manual table rebuild for those changes.
 
 ## `grizzle gen` — code generation
 

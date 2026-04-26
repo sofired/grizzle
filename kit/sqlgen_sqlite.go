@@ -59,7 +59,7 @@ func GenerateChangeSQLSQLite(snap Snapshot, c Change) []string {
 		return stmts
 
 	case ChangeDropTable:
-		return []string{fmt.Sprintf("DROP TABLE IF EXISTS %s", qiSQLite(c.TableName))}
+		return []string{fmt.Sprintf("DROP TABLE IF EXISTS %s", quoteTableSQLite(c.TableName))}
 
 	case ChangeRenameTable:
 		if c.RenameTarget == "" {
@@ -69,7 +69,7 @@ func GenerateChangeSQLSQLite(snap Snapshot, c Change) []string {
 		// Strip any schema qualifier from both source and target.
 		return []string{fmt.Sprintf(
 			"ALTER TABLE %s RENAME TO %s",
-			qiSQLite(unqualifiedName(c.TableName)),
+			quoteTableSQLite(c.TableName),
 			qiSQLite(unqualifiedName(c.RenameTarget)),
 		)}
 
@@ -79,7 +79,7 @@ func GenerateChangeSQLSQLite(snap Snapshot, c Change) []string {
 		}
 		return []string{fmt.Sprintf(
 			"ALTER TABLE %s ADD COLUMN %s",
-			qiSQLite(c.TableName),
+			quoteTableSQLite(c.TableName),
 			columnDefSQLSQLite(*c.NewCol),
 		)}
 
@@ -90,7 +90,7 @@ func GenerateChangeSQLSQLite(snap Snapshot, c Change) []string {
 		// Supported since SQLite 3.35.0.
 		return []string{fmt.Sprintf(
 			"ALTER TABLE %s DROP COLUMN %s",
-			qiSQLite(c.TableName),
+			quoteTableSQLite(c.TableName),
 			qiSQLite(c.OldCol.Name),
 		)}
 
@@ -101,7 +101,7 @@ func GenerateChangeSQLSQLite(snap Snapshot, c Change) []string {
 		// Supported since SQLite 3.25.0.
 		return []string{fmt.Sprintf(
 			"ALTER TABLE %s RENAME COLUMN %s TO %s",
-			qiSQLite(c.TableName),
+			quoteTableSQLite(c.TableName),
 			qiSQLite(c.OldCol.Name),
 			qiSQLite(c.NewCol.Name),
 		)}
@@ -271,7 +271,7 @@ func indexSQLSQLite(tableName string, c pg.Constraint) string {
 		sb.WriteString(qiSQLite(c.Name) + " ")
 	}
 	sb.WriteString("ON ")
-	sb.WriteString(qiSQLite(tableName))
+	sb.WriteString(quoteTableSQLite(tableName))
 	sb.WriteString(" (")
 	sb.WriteString(quoteColListSQLite(c.Columns))
 	sb.WriteString(")")
@@ -401,6 +401,12 @@ func sqliteDefaultExpr(pgDefault string) string {
 // qiSQLite quotes a single SQLite identifier with double-quotes.
 func qiSQLite(name string) string {
 	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
+}
+
+// quoteTableSQLite quotes a table name for use in SQLite DDL. SQLite has no
+// schema namespace, so any schema prefix is stripped before quoting.
+func quoteTableSQLite(name string) string {
+	return qiSQLite(unqualifiedName(name))
 }
 
 // quoteColListSQLite returns a comma-separated list of double-quoted column names.

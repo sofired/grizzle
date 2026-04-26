@@ -104,10 +104,11 @@ func (b *TableBuilder) WithConstraints(fn func(t TableRef) []Constraint) *TableD
 // or tables whose name has not changed.
 //
 // oldName must match the qualified map key used in the old snapshot:
-//   - For tables without a schema (or schema "public"): pass the bare table
-//     name, e.g. "accounts".
-//   - For tables inside a named schema: pass the dot-separated qualified name,
-//     e.g. "auth.accounts" — matching the key that FromDefs() would have stored.
+//   - For tables without a schema (Schema == ""): pass the bare table name,
+//     e.g. "accounts".
+//   - For tables with a schema set: pass the dot-separated qualified name,
+//     e.g. "auth.accounts" or "public.accounts" — matching the key that
+//     FromDefs() / QualifiedName() would have stored.
 //
 // Passing an unqualified name when the old table had a schema (or vice-versa)
 // will result in no rename being detected; Diff() will fall back to drop+create.

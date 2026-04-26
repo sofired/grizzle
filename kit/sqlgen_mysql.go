@@ -58,7 +58,7 @@ func GenerateChangeSQLMySQL(snap Snapshot, c Change) []string {
 		return stmts
 
 	case ChangeDropTable:
-		return []string{fmt.Sprintf("DROP TABLE IF EXISTS %s", qiMySQL(c.TableName))}
+		return []string{fmt.Sprintf("DROP TABLE IF EXISTS %s", quoteTableMySQL(c.TableName))}
 
 	case ChangeRenameTable:
 		if c.RenameTarget == "" {
@@ -76,7 +76,7 @@ func GenerateChangeSQLMySQL(snap Snapshot, c Change) []string {
 		}
 		return []string{fmt.Sprintf(
 			"ALTER TABLE %s ADD COLUMN %s",
-			qiMySQL(c.TableName),
+			quoteTableMySQL(c.TableName),
 			columnDefSQLMySQL(*c.NewCol),
 		)}
 
@@ -86,7 +86,7 @@ func GenerateChangeSQLMySQL(snap Snapshot, c Change) []string {
 		}
 		return []string{fmt.Sprintf(
 			"ALTER TABLE %s DROP COLUMN %s",
-			qiMySQL(c.TableName),
+			quoteTableMySQL(c.TableName),
 			qiMySQL(c.OldCol.Name),
 		)}
 
@@ -97,7 +97,7 @@ func GenerateChangeSQLMySQL(snap Snapshot, c Change) []string {
 		// MySQL uses MODIFY COLUMN — must repeat the full column definition.
 		return []string{fmt.Sprintf(
 			"ALTER TABLE %s MODIFY COLUMN %s",
-			qiMySQL(c.TableName),
+			quoteTableMySQL(c.TableName),
 			columnDefSQLMySQL(*c.NewCol),
 		)}
 
@@ -108,7 +108,7 @@ func GenerateChangeSQLMySQL(snap Snapshot, c Change) []string {
 		// MODIFY COLUMN with the full definition (MySQL requires it).
 		return []string{fmt.Sprintf(
 			"ALTER TABLE %s MODIFY COLUMN %s",
-			qiMySQL(c.TableName),
+			quoteTableMySQL(c.TableName),
 			columnDefSQLMySQL(*c.NewCol),
 		)}
 
@@ -119,12 +119,12 @@ func GenerateChangeSQLMySQL(snap Snapshot, c Change) []string {
 		if !c.NewCol.HasDefault {
 			return []string{fmt.Sprintf(
 				"ALTER TABLE %s ALTER COLUMN %s DROP DEFAULT",
-				qiMySQL(c.TableName), qiMySQL(c.NewCol.Name),
+				quoteTableMySQL(c.TableName), qiMySQL(c.NewCol.Name),
 			)}
 		}
 		return []string{fmt.Sprintf(
 			"ALTER TABLE %s ALTER COLUMN %s SET DEFAULT %s",
-			qiMySQL(c.TableName), qiMySQL(c.NewCol.Name),
+			quoteTableMySQL(c.TableName), qiMySQL(c.NewCol.Name),
 			mysqlDefaultExpr(c.NewCol.DefaultExpr),
 		)}
 
