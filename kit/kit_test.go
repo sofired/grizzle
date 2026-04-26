@@ -732,9 +732,147 @@ func TestDiff_FK_RoundTrip_NoChanges(t *testing.T) {
 	}
 }
 
+func TestDiff_FK_RoundTrip_ExplicitOnUpdate_NoChanges(t *testing.T) {
+	// Variant of the round-trip test where FKOnUpdate is explicitly set to a
+	// non-default value on both sides, confirming the FKOnUpdate comparison
+	// path in constraintsEqual is exercised (not just FKOnDelete).
+	liveFKConstraint := pg.Constraint{
+		Kind:       pg.KindForeignKey,
+		Name:       "posts_user_fk",
+		Columns:    []string{"user_id"},
+		FKTable:    "users",
+		FKColumns:  []string{"id"},
+		FKOnDelete: pg.FKActionCascade,
+		FKOnUpdate: pg.FKActionCascade,
+	}
+
+	live := kit.Snapshot{
+		Version: "1",
+		Tables: map[string]*kit.TableSnap{
+			"users": {
+				Name:    "users",
+				Columns: []pg.ColumnDef{{Name: "id", SQLType: "uuid", NotNull: true, HasDefault: true, DefaultExpr: "gen_random_uuid()"}},
+			},
+			"posts": {
+				Name:        "posts",
+				Columns:     []pg.ColumnDef{{Name: "id", SQLType: "uuid", NotNull: true, HasDefault: true, DefaultExpr: "gen_random_uuid()"}, {Name: "user_id", SQLType: "uuid", NotNull: true}},
+				Constraints: []pg.Constraint{liveFKConstraint},
+			},
+		},
+	}
+
+	usersDef := pg.Table("users", pg.C("id", pg.UUID().PrimaryKey().DefaultRandom())).Build()
+	postsDef := pg.Table("posts",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("user_id", pg.UUID().NotNull()),
+	).WithConstraints(func(t pg.TableRef) []pg.Constraint {
+		return []pg.Constraint{
+			pg.ForeignKey("posts_user_fk").
+				From(t.Col("user_id")).
+				References("users", "id").
+				OnDelete(pg.FKActionCascade).
+				OnUpdate(pg.FKActionCascade).
+				Build(),
+		}
+	})
+
+	target := kit.FromDefs(usersDef, postsDef)
+	changes := kit.Diff(live, target)
+	if len(changes) != 0 {
+		t.Errorf("expected 0 changes for FK round-trip with explicit OnUpdate, got %d: %v", len(changes), changes)
+	}
+}
+
+func TestDiff_FK_CreateOrder_ThreeTableChain(t *testing.T) {
+	// A 3-table chain (c → b → a): Kahn's algorithm must traverse
+	// two depth levels to produce the correct order a, b, c.
+	aDef := pg.Table("a", pg.C("id", pg.UUID().PrimaryKey().DefaultRandom())).Build()
+	bDef := pg.Table("b",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("a_id", pg.UUID().NotNull()),
+	).WithConstraints(func(t pg.TableRef) []pg.Constraint {
+		return []pg.Constraint{
+			pg.ForeignKey("b_a_fk").From(t.Col("a_id")).References("a", "id").Build(),
+		}
+	})
+	cDef := pg.Table("c",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("b_id", pg.UUID().NotNull()),
+	).WithConstraints(func(t pg.TableRef) []pg.Constraint {
+		return []pg.Constraint{
+			pg.ForeignKey("c_b_fk").From(t.Col("b_id")).References("b", "id").Build(),
+		}
+	})
+
+	old := kit.EmptySnapshot()
+	// Pass in reverse alphabetical order to ensure it is NOT sorted naively.
+	new := kit.FromDefs(cDef, bDef, aDef)
+	changes := kit.Diff(old, new)
+
+	tableOrder := make(map[string]int)
+	for i, c := range changes {
+		if c.Kind == kit.ChangeCreateTable {
+			tableOrder[c.TableName] = i
+		}
+	}
+
+	for _, pair := range [][2]string{{"a", "b"}, {"b", "c"}} {
+		before, after := pair[0], pair[1]
+		idxBefore, ok1 := tableOrder[before]
+		idxAfter, ok2 := tableOrder[after]
+		if !ok1 || !ok2 {
+			t.Fatalf("missing CreateTable for %q or %q: %v", before, after, changes)
+		}
+		if idxBefore > idxAfter {
+			t.Errorf("%q (idx %d) must be created before %q (idx %d)", before, idxBefore, after, idxAfter)
+		}
+	}
+}
+
+func TestDiff_FK_CreateOrder_CycleFallback(t *testing.T) {
+	// Tables with a circular FK reference (a → b, b → a) cannot be ordered
+	// topologically. The fallback must include all tables without panicking
+	// and preserve deterministic output.
+	aDef := pg.Table("a",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("b_id", pg.UUID()),
+	).WithConstraints(func(t pg.TableRef) []pg.Constraint {
+		return []pg.Constraint{
+			pg.ForeignKey("a_b_fk").From(t.Col("b_id")).References("b", "id").Build(),
+		}
+	})
+	bDef := pg.Table("b",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("a_id", pg.UUID()),
+	).WithConstraints(func(t pg.TableRef) []pg.Constraint {
+		return []pg.Constraint{
+			pg.ForeignKey("b_a_fk").From(t.Col("a_id")).References("a", "id").Build(),
+		}
+	})
+
+	old := kit.EmptySnapshot()
+	new := kit.FromDefs(aDef, bDef)
+	// Must not panic.
+	changes := kit.Diff(old, new)
+
+	creates := countKind(changes, kit.ChangeCreateTable)
+	if creates != 2 {
+		t.Errorf("expected 2 CreateTable changes for cyclic FKs, got %d: %v", creates, changes)
+	}
+	// Run a second time to verify determinism of fallback ordering.
+	changes2 := kit.Diff(old, new)
+	for i := range changes {
+		if changes[i].TableName != changes2[i].TableName {
+			t.Errorf("non-deterministic cycle fallback at index %d: %q vs %q", i, changes[i].TableName, changes2[i].TableName)
+		}
+	}
+}
+
 func TestDiff_FK_DetectsRemovedFK(t *testing.T) {
 	// When a FK exists in the live snapshot but is removed from the target,
-	// the diff must emit a ChangeDropConstraint for it.
+	// the diff must emit a ChangeDropConstraint for it. Note: users is
+	// intentionally absent from the live snapshot — this tests constraint
+	// removal only, not table-drop detection.
 	liveFKConstraint := pg.Constraint{
 		Kind:       pg.KindForeignKey,
 		Name:       "posts_user_fk",

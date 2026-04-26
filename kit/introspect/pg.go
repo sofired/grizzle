@@ -376,8 +376,9 @@ func queryForeignKeys(ctx context.Context, pool *pgxpool.Pool, schema, table str
 	constraints := make([]pg.Constraint, 0, len(order))
 	for _, name := range order {
 		e := entries[name]
-		// Omit "public" schema prefix to match user-defined FK references
-		// which conventionally use unqualified names for the default schema.
+		// Use the unqualified table name for the default (public) schema so that
+		// introspected FK references match user-defined ones, which conventionally
+		// omit the "public." prefix. Non-public schemas are fully qualified.
 		refTable := e.refTable
 		if e.refSchema != "" && e.refSchema != "public" {
 			refTable = e.refSchema + "." + e.refTable
