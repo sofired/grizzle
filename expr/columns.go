@@ -176,11 +176,17 @@ func (c StringColumn) ILike(pattern string) Expression {
 }
 
 // NotLike produces a NOT LIKE predicate.
+//
+//	UsersT.Username.NotLike("admin%")
+//	// → "users"."username" NOT LIKE $1
 func (c StringColumn) NotLike(pattern string) Expression {
 	return likeExpr{ref: c.ColBase, op: "NOT LIKE", pattern: pattern}
 }
 
-// NotILike produces a NOT ILIKE predicate (PostgreSQL-specific).
+// NotILike produces a case-insensitive NOT LIKE predicate (PostgreSQL-specific).
+//
+//	UsersT.Username.NotILike("admin%")
+//	// → "users"."username" NOT ILIKE $1
 func (c StringColumn) NotILike(pattern string) Expression {
 	return likeExpr{ref: c.ColBase, op: "NOT ILIKE", pattern: pattern}
 }

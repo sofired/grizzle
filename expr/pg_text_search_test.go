@@ -475,3 +475,78 @@ func ExampleTsRank() {
 	// Output:
 	// TS_RANK("articles"."search_vector", plainto_tsquery($1)) DESC
 }
+
+func ExampleStringColumn_NotLike() {
+	ctx := expr.NewBuildContext(dialect.Postgres)
+	e := ts.UsersT.Username.NotLike("admin%")
+	fmt.Println(e.ToSQL(ctx))
+	// Output:
+	// "users"."username" NOT LIKE $1
+}
+
+func ExampleStringColumn_NotILike() {
+	ctx := expr.NewBuildContext(dialect.Postgres)
+	e := ts.UsersT.Username.NotILike("admin%")
+	fmt.Println(e.ToSQL(ctx))
+	// Output:
+	// "users"."username" NOT ILIKE $1
+}
+
+func ExampleTsRankCd() {
+	ctx := expr.NewBuildContext(dialect.Postgres)
+	tsq := expr.PlainToTsquery("grizzle orm")
+	rank := expr.TsRankCd(ts.ArticlesT.SearchVector, tsq)
+	fmt.Println(rank.ToSQL(ctx))
+	// Output:
+	// TS_RANK_CD("articles"."search_vector", plainto_tsquery($1))
+}
+
+func ExampleTsvectorColumn_MatchesWithConfig() {
+	ctx := expr.NewBuildContext(dialect.Postgres)
+	e := ts.ArticlesT.SearchVector.MatchesWithConfig("english", "grizzle & orm")
+	fmt.Println(e.ToSQL(ctx))
+	// Output:
+	// "articles"."search_vector" @@ to_tsquery($1, $2)
+}
+
+func ExampleToTsquery() {
+	ctx := expr.NewBuildContext(dialect.Postgres)
+	e := expr.ToTsquery("grizzle & orm")
+	fmt.Println(e.ToSQL(ctx))
+	// Output:
+	// to_tsquery($1)
+}
+
+func ExampleToTsqueryWithConfig() {
+	ctx := expr.NewBuildContext(dialect.Postgres)
+	e := expr.ToTsqueryWithConfig("english", "grizzle & orm")
+	fmt.Println(e.ToSQL(ctx))
+	// Output:
+	// to_tsquery($1, $2)
+}
+
+// -----------------------------------------------------------------------
+// TsvectorExpr alias tests
+// -----------------------------------------------------------------------
+
+func TestTsvectorExpr_As(t *testing.T) {
+	got := expr.ToTsvector(ts.ArticlesT.Body).As("tsv").ToSQL(pgCtx())
+	want := `to_tsvector("articles"."body") AS "tsv"`
+	if got != want {
+		t.Errorf("TsvectorExpr.As: got %q, want %q", got, want)
+	}
+}
+
+func TestTsvectorExpr_ColumnName(t *testing.T) {
+	// Without alias: falls back to "to_tsvector".
+	noAlias := expr.ToTsvector(ts.ArticlesT.Body)
+	if got, want := noAlias.ColumnName(), "to_tsvector"; got != want {
+		t.Errorf("ColumnName (no alias): got %q, want %q", got, want)
+	}
+
+	// With alias: returns the alias.
+	withAlias := expr.ToTsvector(ts.ArticlesT.Body).As("tsv")
+	if got, want := withAlias.ColumnName(), "tsv"; got != want {
+		t.Errorf("ColumnName (with alias): got %q, want %q", got, want)
+	}
+}
