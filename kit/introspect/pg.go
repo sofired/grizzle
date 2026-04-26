@@ -11,10 +11,40 @@ import (
 	pg "github.com/sofired/grizzle/schema/pg"
 )
 
-// Snapshot holds a read-back of the live DB schema.
+// LiveSnapshot holds a read-back of the live DB schema.
 // Returned by IntrospectPostgres so it can be diffed against the target.
 type LiveSnapshot struct {
 	Tables map[string]*LiveTable // keyed by qualified name
+	Views  map[string]*LiveView  // keyed by qualified name
+	Enums  map[string]*LiveEnum  // keyed by qualified name
+}
+
+// LiveView mirrors kit.ViewSnap but is built from information_schema queries.
+type LiveView struct {
+	Name   string
+	Schema string
+	SQL    string
+}
+
+func (v *LiveView) QualifiedName() string {
+	if v.Schema != "" && v.Schema != "public" {
+		return v.Schema + "." + v.Name
+	}
+	return v.Name
+}
+
+// LiveEnum mirrors kit.EnumSnap but is built from pg_catalog queries.
+type LiveEnum struct {
+	Name   string
+	Schema string
+	Values []string
+}
+
+func (e *LiveEnum) QualifiedName() string {
+	if e.Schema != "" && e.Schema != "public" {
+		return e.Schema + "." + e.Name
+	}
+	return e.Name
 }
 
 // LiveTable mirrors kit.TableSnap but is built from information_schema queries.
@@ -40,7 +70,11 @@ func IntrospectPostgres(ctx context.Context, pool *pgxpool.Pool, schemas ...stri
 		schemas = []string{"public"}
 	}
 
-	live := LiveSnapshot{Tables: make(map[string]*LiveTable)}
+	live := LiveSnapshot{
+		Tables: make(map[string]*LiveTable),
+		Views:  make(map[string]*LiveView),
+		Enums:  make(map[string]*LiveEnum),
+	}
 
 	// --- 1. Enumerate tables ---
 	tables, err := queryTables(ctx, pool, schemas)
@@ -78,7 +112,101 @@ func IntrospectPostgres(ctx context.Context, pool *pgxpool.Pool, schemas ...stri
 		t.Constraints = append(t.Constraints, checks...)
 	}
 
+	// --- 5. Views (information_schema.views) ---
+	views, err := queryViews(ctx, pool, schemas)
+	if err != nil {
+		return live, fmt.Errorf("introspect views: %w", err)
+	}
+	for _, v := range views {
+		live.Views[v.QualifiedName()] = v
+	}
+
+	// --- 6. Enum types (pg_catalog) ---
+	enums, err := queryEnums(ctx, pool, schemas)
+	if err != nil {
+		return live, fmt.Errorf("introspect enums: %w", err)
+	}
+	for _, e := range enums {
+		live.Enums[e.QualifiedName()] = e
+	}
+
 	return live, nil
+}
+
+func queryViews(ctx context.Context, pool *pgxpool.Pool, schemas []string) ([]*LiveView, error) {
+	placeholders := make([]string, len(schemas))
+	args := make([]any, len(schemas))
+	for i, s := range schemas {
+		placeholders[i] = fmt.Sprintf("$%d", i+1)
+		args[i] = s
+	}
+	// view_definition returns PostgreSQL's normalised SQL rewrite of the SELECT.
+	// Trailing semicolons are stripped in kit.normalizeViewSQL during comparison.
+	q := fmt.Sprintf(`
+		SELECT table_schema, table_name, view_definition
+		FROM information_schema.views
+		WHERE table_schema IN (%s)
+		ORDER BY table_schema, table_name`,
+		strings.Join(placeholders, ", "),
+	)
+	rows, err := pool.Query(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var views []*LiveView
+	for rows.Next() {
+		var schema, name string
+		var def *string
+		if err := rows.Scan(&schema, &name, &def); err != nil {
+			return nil, err
+		}
+		sql := ""
+		if def != nil {
+			sql = *def
+		}
+		views = append(views, &LiveView{Name: name, Schema: schema, SQL: sql})
+	}
+	return views, rows.Err()
+}
+
+func queryEnums(ctx context.Context, pool *pgxpool.Pool, schemas []string) ([]*LiveEnum, error) {
+	placeholders := make([]string, len(schemas))
+	args := make([]any, len(schemas))
+	for i, s := range schemas {
+		placeholders[i] = fmt.Sprintf("$%d", i+1)
+		args[i] = s
+	}
+	// pg_enum.enumsortorder preserves the declared order of values.
+	q := fmt.Sprintf(`
+		SELECT n.nspname AS schema, t.typname AS name,
+		       array_agg(e.enumlabel ORDER BY e.enumsortorder) AS values
+		FROM pg_type t
+		JOIN pg_namespace n ON n.oid = t.typnamespace
+		JOIN pg_enum e ON e.enumtypid = t.oid
+		WHERE t.typtype = 'e'
+		  AND n.nspname IN (%s)
+		GROUP BY n.nspname, t.typname
+		ORDER BY n.nspname, t.typname`,
+		strings.Join(placeholders, ", "),
+	)
+	rows, err := pool.Query(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var enums []*LiveEnum
+	for rows.Next() {
+		var schema, name string
+		var values []string
+		if err := rows.Scan(&schema, &name, &values); err != nil {
+			return nil, err
+		}
+		enums = append(enums, &LiveEnum{Name: name, Schema: schema, Values: values})
+	}
+	return enums, rows.Err()
 }
 
 func queryTables(ctx context.Context, pool *pgxpool.Pool, schemas []string) ([]*LiveTable, error) {

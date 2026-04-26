@@ -142,6 +142,44 @@ func GenerateChangeSQLMySQL(snap Snapshot, c Change) []string {
 			return nil
 		}
 		return dropConstraintSQLMySQL(c.TableName, *c.Constraint)
+
+	case ChangeCreateView:
+		if c.View == nil {
+			return nil
+		}
+		return []string{fmt.Sprintf(
+			"CREATE OR REPLACE VIEW %s AS %s",
+			quoteTableMySQL(c.View.QualifiedName()),
+			c.View.SQL,
+		)}
+
+	case ChangeDropView:
+		if c.View == nil {
+			return nil
+		}
+		return []string{fmt.Sprintf(
+			"DROP VIEW IF EXISTS %s",
+			quoteTableMySQL(c.View.QualifiedName()),
+		)}
+
+	case ChangeCreateEnum:
+		// MySQL does not have a named enum type; enum is a column-level attribute.
+		return []string{fmt.Sprintf(
+			"-- MySQL: CREATE TYPE AS ENUM is not supported; define ENUM inline on the column for %s",
+			c.TableName,
+		)}
+
+	case ChangeAlterEnum:
+		return []string{fmt.Sprintf(
+			"-- MySQL: ALTER TYPE ADD VALUE is not supported; modify the column definition for %s",
+			c.TableName,
+		)}
+
+	case ChangeDropEnum:
+		return []string{fmt.Sprintf(
+			"-- MySQL: DROP TYPE is not supported; no action needed for %s",
+			c.TableName,
+		)}
 	}
 	return nil
 }

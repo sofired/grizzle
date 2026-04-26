@@ -72,9 +72,17 @@ func DryRun(ctx context.Context, pool *pgxpool.Pool, tables ...pg.TableDefiner) 
 
 // liveToSnapshot converts an introspect.LiveSnapshot into a kit.Snapshot
 // so the differ can compare apples to apples.
+//
+// Views and enums are intentionally NOT populated here. Push() and DryRun()
+// accept only table definitions as targets, so populating live views/enums
+// would cause Diff() to emit DROP VIEW / DROP TYPE for every unmanaged live
+// object not listed in the caller's table set. A dedicated PushSchema() API
+// (tracked in #136) is the correct place to manage views and enums via Push.
 func liveToSnapshot(live introspect.LiveSnapshot) Snapshot {
 	snap := Snapshot{
 		Tables: make(map[string]*TableSnap, len(live.Tables)),
+		Views:  make(map[string]*ViewSnap),
+		Enums:  make(map[string]*EnumSnap),
 	}
 	for key, t := range live.Tables {
 		if t.Name == MigrationsTable {

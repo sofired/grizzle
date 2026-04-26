@@ -119,6 +119,44 @@ func GenerateChangeSQLSQLite(snap Snapshot, c Change) []string {
 			return nil
 		}
 		return dropConstraintSQLSQLite(c.TableName, *c.Constraint)
+
+	case ChangeCreateView:
+		if c.View == nil {
+			return nil
+		}
+		return []string{fmt.Sprintf(
+			"CREATE VIEW IF NOT EXISTS %s AS %s",
+			qiSQLite(c.View.Name),
+			c.View.SQL,
+		)}
+
+	case ChangeDropView:
+		if c.View == nil {
+			return nil
+		}
+		return []string{fmt.Sprintf(
+			"DROP VIEW IF EXISTS %s",
+			qiSQLite(c.View.Name),
+		)}
+
+	case ChangeCreateEnum:
+		// SQLite does not have named enum types; enum values are enforced via CHECK constraints.
+		return []string{fmt.Sprintf(
+			"-- SQLite: CREATE TYPE AS ENUM is not supported; use a CHECK constraint for %s",
+			c.TableName,
+		)}
+
+	case ChangeAlterEnum:
+		return []string{fmt.Sprintf(
+			"-- SQLite: ALTER TYPE ADD VALUE is not supported; modify the CHECK constraint for %s",
+			c.TableName,
+		)}
+
+	case ChangeDropEnum:
+		return []string{fmt.Sprintf(
+			"-- SQLite: DROP TYPE is not supported; no action needed for %s",
+			c.TableName,
+		)}
 	}
 	return nil
 }
