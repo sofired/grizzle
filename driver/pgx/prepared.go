@@ -45,9 +45,11 @@ var (
 // in their own logging and diagnostics.
 // At execution time, queries are executed using the SQL string so that pgx v5's
 // per-connection statement cache (QueryExecModeCacheStatement, the default mode)
-// prepares and reuses the plan on each pool connection independently — avoiding
-// the cross-connection named-statement mismatch that occurs when a named statement
-// prepared on one connection is referenced by name on a different pool connection.
+// prepares and reuses the plan on each pool connection independently. The cache
+// is keyed on the SQL text: submitting the same SQL string reuses the cached
+// plan without a round-trip Parse — avoiding the cross-connection named-statement
+// mismatch that occurs when a named statement prepared on one connection is
+// referenced by name on a different pool connection.
 //
 // Example (static active-users list):
 //
