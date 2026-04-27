@@ -354,6 +354,104 @@ func Round(col SelectableColumn, decimals ...int) FuncExpr {
 }
 
 // -------------------------------------------------------------------
+// PostgreSQL full-text search helper functions
+// -------------------------------------------------------------------
+
+// ToTsvector returns to_tsvector(col) or to_tsvector($config, col) —
+// converts a column value to a tsvector for use in FTS expressions or SELECT lists.
+// config is optional; pass it to specify a text search configuration (e.g. "english").
+//
+//	expr.ToTsvector(ArticlesT.Body)                    // to_tsvector("articles"."body")
+//	expr.ToTsvector(ArticlesT.Body, "english")         // to_tsvector($1, "articles"."body")
+func ToTsvector(col SelectableColumn, config ...string) TsvectorExpr {
+	if len(config) > 0 {
+		return TsvectorExpr{config: config[0], ref: colSelAsRef{col}, hasConfig: true}
+	}
+	return TsvectorExpr{ref: colSelAsRef{col}}
+}
+
+// ToTsquery returns to_tsquery($1) as a standalone tsquery Expression.
+// Useful when you need a tsquery value in SELECT lists or as an argument to TsRank.
+//
+//	expr.ToTsquery("grizzle & orm") // to_tsquery($1)
+func ToTsquery(query string) Expression {
+	return tsQueryFnExpr{fn: "to_tsquery", query: query}
+}
+
+// ToTsqueryWithConfig returns to_tsquery($1, $2) using an explicit text search configuration.
+// config is bound as $1 and query as $2, matching the PostgreSQL call signature.
+//
+//	expr.ToTsqueryWithConfig("english", "grizzle & orm") // to_tsquery($1, $2)
+func ToTsqueryWithConfig(config, query string) Expression {
+	return tsQueryFnExpr{fn: "to_tsquery", config: config, query: query, hasConfig: true}
+}
+
+// PlainToTsquery returns plainto_tsquery($1).
+// Converts plain-text input to a tsquery by treating each word as a term connected with AND.
+//
+//	expr.PlainToTsquery("grizzle orm") // plainto_tsquery($1)
+func PlainToTsquery(query string) Expression {
+	return tsQueryFnExpr{fn: "plainto_tsquery", query: query}
+}
+
+// PlainToTsqueryWithConfig returns plainto_tsquery($1, $2) using an explicit text search configuration.
+// config is bound as $1 and query as $2, matching the PostgreSQL call signature.
+//
+//	expr.PlainToTsqueryWithConfig("english", "grizzle orm") // plainto_tsquery($1, $2)
+func PlainToTsqueryWithConfig(config, query string) Expression {
+	return tsQueryFnExpr{fn: "plainto_tsquery", config: config, query: query, hasConfig: true}
+}
+
+// PhraseToTsquery returns phraseto_tsquery($1).
+// Matches an exact phrase — words must appear adjacent and in order.
+//
+//	expr.PhraseToTsquery("fast full text search") // phraseto_tsquery($1)
+func PhraseToTsquery(query string) Expression {
+	return tsQueryFnExpr{fn: "phraseto_tsquery", query: query}
+}
+
+// PhraseToTsqueryWithConfig returns phraseto_tsquery($1, $2) using an explicit text search configuration.
+// config is bound as $1 and query as $2, matching the PostgreSQL call signature.
+//
+//	expr.PhraseToTsqueryWithConfig("english", "fast full text search") // phraseto_tsquery($1, $2)
+func PhraseToTsqueryWithConfig(config, query string) Expression {
+	return tsQueryFnExpr{fn: "phraseto_tsquery", config: config, query: query, hasConfig: true}
+}
+
+// WebsearchToTsquery returns websearch_to_tsquery($1).
+// Parses web-search-style input: quoted phrases, minus for exclusion, OR for alternatives.
+//
+//	expr.WebsearchToTsquery("grizzle -orm") // websearch_to_tsquery($1)
+func WebsearchToTsquery(query string) Expression {
+	return tsQueryFnExpr{fn: "websearch_to_tsquery", query: query}
+}
+
+// WebsearchToTsqueryWithConfig returns websearch_to_tsquery($1, $2) using an explicit text search
+// configuration. config is bound as $1 and query as $2, matching the PostgreSQL call signature.
+//
+//	expr.WebsearchToTsqueryWithConfig("english", "grizzle -orm") // websearch_to_tsquery($1, $2)
+func WebsearchToTsqueryWithConfig(config, query string) Expression {
+	return tsQueryFnExpr{fn: "websearch_to_tsquery", config: config, query: query, hasConfig: true}
+}
+
+// TsRank returns TS_RANK(col, tsquery_expr) — a relevance ranking function for FTS results.
+// col is the tsvector column; tsq is the tsquery expression (use ToTsquery, PlainToTsquery, etc.).
+//
+//	expr.TsRank(ArticlesT.SearchVector, expr.PlainToTsquery("grizzle orm")).Desc()
+//	// → TS_RANK("articles"."search_vector", plainto_tsquery($1)) DESC
+func TsRank(col SelectableColumn, tsq Expression) FuncExpr {
+	return FuncExpr{fn: "TS_RANK", args: []Expression{Col(col), tsq}}
+}
+
+// TsRankCd returns TS_RANK_CD(col, tsquery_expr) — like TsRank but uses cover density ranking.
+//
+//	expr.TsRankCd(ArticlesT.SearchVector, expr.PlainToTsquery("grizzle orm")).Desc()
+//	// → TS_RANK_CD("articles"."search_vector", plainto_tsquery($1)) DESC
+func TsRankCd(col SelectableColumn, tsq Expression) FuncExpr {
+	return FuncExpr{fn: "TS_RANK_CD", args: []Expression{Col(col), tsq}}
+}
+
+// -------------------------------------------------------------------
 // AliasedCol — column with a SELECT-list alias (Fix #131)
 // -------------------------------------------------------------------
 
@@ -416,66 +514,3 @@ func (a AliasedCol) Asc() OrderExpr { return OrderExpr{ref: a, dir: "ASC"} }
 
 // Desc returns a descending ORDER BY on the underlying column (no alias).
 func (a AliasedCol) Desc() OrderExpr { return OrderExpr{ref: a, dir: "DESC"} }
-
-// -------------------------------------------------------------------
-// Full-text search functions (PostgreSQL) — Fix #89
-// -------------------------------------------------------------------
-
-// ToTsquery returns TO_TSQUERY(query) — converts a query string to a tsquery.
-// The result is a FuncExpr and supports As()/Asc()/Desc() and comparison
-// helpers, making it usable in SELECT lists, ORDER BY, and WHERE clauses.
-//
-//	expr.ToTsquery("fat & rat")
-func ToTsquery(query string) FuncExpr {
-	return FuncExpr{fn: "TO_TSQUERY", args: []Expression{Lit(query)}}
-}
-
-// ToTsqueryWithConfig returns TO_TSQUERY(config, query).
-// config is passed first so arg positions match the SQL argument order.
-//
-//	expr.ToTsqueryWithConfig("english", "fat & rat")
-func ToTsqueryWithConfig(config, query string) FuncExpr {
-	return FuncExpr{fn: "TO_TSQUERY", args: []Expression{Lit(config), Lit(query)}}
-}
-
-// PlainToTsquery returns PLAINTO_TSQUERY(query).
-//
-//	expr.PlainToTsquery("fat rat")
-func PlainToTsquery(query string) FuncExpr {
-	return FuncExpr{fn: "PLAINTO_TSQUERY", args: []Expression{Lit(query)}}
-}
-
-// PlainToTsqueryWithConfig returns PLAINTO_TSQUERY(config, query).
-//
-//	expr.PlainToTsqueryWithConfig("english", "fat rat")
-func PlainToTsqueryWithConfig(config, query string) FuncExpr {
-	return FuncExpr{fn: "PLAINTO_TSQUERY", args: []Expression{Lit(config), Lit(query)}}
-}
-
-// PhraseToTsquery returns PHRASETO_TSQUERY(query).
-//
-//	expr.PhraseToTsquery("fat cat")
-func PhraseToTsquery(query string) FuncExpr {
-	return FuncExpr{fn: "PHRASETO_TSQUERY", args: []Expression{Lit(query)}}
-}
-
-// PhraseToTsqueryWithConfig returns PHRASETO_TSQUERY(config, query).
-//
-//	expr.PhraseToTsqueryWithConfig("english", "fat cat")
-func PhraseToTsqueryWithConfig(config, query string) FuncExpr {
-	return FuncExpr{fn: "PHRASETO_TSQUERY", args: []Expression{Lit(config), Lit(query)}}
-}
-
-// WebsearchToTsquery returns WEBSEARCH_TO_TSQUERY(query).
-//
-//	expr.WebsearchToTsquery("fat cat")
-func WebsearchToTsquery(query string) FuncExpr {
-	return FuncExpr{fn: "WEBSEARCH_TO_TSQUERY", args: []Expression{Lit(query)}}
-}
-
-// WebsearchToTsqueryWithConfig returns WEBSEARCH_TO_TSQUERY(config, query).
-//
-//	expr.WebsearchToTsqueryWithConfig("english", "fat cat")
-func WebsearchToTsqueryWithConfig(config, query string) FuncExpr {
-	return FuncExpr{fn: "WEBSEARCH_TO_TSQUERY", args: []Expression{Lit(config), Lit(query)}}
-}
