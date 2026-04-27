@@ -2740,6 +2740,24 @@ func TestTableAlias_OriginalColumnHandlesUnchanged(t *testing.T) {
 	}
 }
 
+func TestTableAlias_EmptyStringIsNoOp(t *testing.T) {
+	// As("") must be a no-op: alias, table alias, and column refs must be
+	// identical to the original to avoid unqualified (ambiguous) column refs.
+	result := ts.EmployeesT.As("")
+	if result.GrizTableAlias() != "employees" {
+		t.Errorf("As(\"\") changed GrizTableAlias: got %q, want %q", result.GrizTableAlias(), "employees")
+	}
+	if result.Name.TableName() != "employees" {
+		t.Errorf("As(\"\") changed column TableAlias: got %q, want %q", result.Name.TableName(), "employees")
+	}
+	ctx := expr.NewBuildContext(dialect.Postgres)
+	got := result.Name.EQ("Alice").ToSQL(ctx)
+	want := `"employees"."name" = $1`
+	if got != want {
+		t.Errorf("As(\"\") column ref: got %q, want %q", got, want)
+	}
+}
+
 func TestAliasedCol_GroupBy_StripsAlias(t *testing.T) {
 	// Passing an AliasedCol to GroupBy must not emit the AS clause.
 	assertSQL(t, "AliasedCol in GROUP BY strips alias",

@@ -194,7 +194,11 @@ func (t {{.TableTypeName}}) GrizTableAlias() string {
 
 // As returns a renamed copy of {{.TableTypeName}} for use in self-joins and aliased queries.
 // Column references on the returned value use alias instead of {{quote .TableName}}.
+// Calling As with an empty string is a no-op and returns the receiver unchanged.
 func (t {{.TableTypeName}}) As(alias string) {{.TableTypeName}} {
+	if alias == "" {
+		return t
+	}
 	t.tableAlias = alias
 {{- range .Columns}}
 	t.{{.FieldName}} = {{.ColType}}{ColBase: expr.ColBase{TableAlias: alias, ColName: {{quote .ColName}}}}

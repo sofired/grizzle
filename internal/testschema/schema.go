@@ -88,7 +88,11 @@ func (t RealmsTable) GrizTableAlias() string {
 
 // As returns a renamed copy of RealmsTable for use in self-joins and aliased queries.
 // Column references on the returned value use alias instead of "realms".
+// Calling As with an empty string is a no-op and returns the receiver unchanged.
 func (t RealmsTable) As(alias string) RealmsTable {
+	if alias == "" {
+		return t
+	}
 	t.tableAlias = alias
 	t.ID = expr.UUIDColumn{ColBase: expr.ColBase{TableAlias: alias, ColName: "id"}}
 	t.Name = expr.StringColumn{ColBase: expr.ColBase{TableAlias: alias, ColName: "name"}}
@@ -137,7 +141,11 @@ func (t UsersTable) GrizTableAlias() string {
 
 // As returns a renamed copy of UsersTable for use in self-joins and aliased queries.
 // Column references on the returned value use alias instead of "users".
+// Calling As with an empty string is a no-op and returns the receiver unchanged.
 func (t UsersTable) As(alias string) UsersTable {
+	if alias == "" {
+		return t
+	}
 	t.tableAlias = alias
 	t.ID = expr.UUIDColumn{ColBase: expr.ColBase{TableAlias: alias, ColName: "id"}}
 	t.RealmID = expr.UUIDColumn{ColBase: expr.ColBase{TableAlias: alias, ColName: "realm_id"}}
@@ -276,7 +284,11 @@ func (t EmployeesTable) GrizTableAlias() string {
 
 // As returns a renamed copy of EmployeesTable for use in self-joins and aliased queries.
 // Column references on the returned value use alias instead of "employees".
+// Calling As with an empty string is a no-op and returns the receiver unchanged.
 func (t EmployeesTable) As(alias string) EmployeesTable {
+	if alias == "" {
+		return t
+	}
 	t.tableAlias = alias
 	t.ID = expr.UUIDColumn{ColBase: expr.ColBase{TableAlias: alias, ColName: "id"}}
 	t.Name = expr.StringColumn{ColBase: expr.ColBase{TableAlias: alias, ColName: "name"}}
