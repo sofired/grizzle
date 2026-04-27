@@ -255,9 +255,11 @@ func (b *SelectBuilder) With(name string, sub *SelectBuilder) *SelectBuilder {
 //	    From(EmployeesT).
 //	    Where(EmployeesT.ID.EQ(rootID))
 //
+//	// orgID is a typed reference to the "id" column of the "org" CTE:
+//	orgID := expr.UUIDColumn{ColBase: expr.ColBase{TableAlias: "org", ColName: "id"}}
 //	rec := query.Select(EmployeesT.ID, EmployeesT.ManagerID).
 //	    From(EmployeesT).
-//	    InnerJoin(query.CTERef("org"), EmployeesT.ManagerID.EQ(expr.ColBase{TableAlias: "org", ColName: "id"}))
+//	    InnerJoin(query.CTERef("org"), EmployeesT.ManagerID.EQCol(orgID))
 //
 //	query.Select().
 //	    WithRecursive("org", anchor, rec).
@@ -335,6 +337,17 @@ func (b *SelectBuilder) RightJoin(t TableSource, on expr.Expression) *SelectBuil
 func (b *SelectBuilder) FullJoin(t TableSource, on expr.Expression) *SelectBuilder {
 	cp := *b
 	cp.joins = append(append([]joinClause(nil), cp.joins...), joinClause{kind: joinFull, table: t, on: on})
+	return &cp
+}
+
+// CrossJoin adds a CROSS JOIN clause. A CROSS JOIN produces the Cartesian product
+// of the two tables and has no ON condition.
+//
+//	query.Select().From(UsersT).CrossJoin(RealmsT)
+//	// SELECT * FROM "users" CROSS JOIN "realms"
+func (b *SelectBuilder) CrossJoin(t TableSource) *SelectBuilder {
+	cp := *b
+	cp.joins = append(append([]joinClause(nil), cp.joins...), joinClause{kind: joinCross, table: t})
 	return &cp
 }
 
@@ -657,11 +670,10 @@ func selectColSQL(ctx *expr.BuildContext, c expr.SelectableColumn) string {
 	return ctx.ColRef(c.TableName(), c.ColumnName())
 }
 
-// distinctColSQL produces the SQL fragment for a column inside DISTINCT ON (...).
-// Unlike selectColSQL it never emits an "AS alias" suffix: DISTINCT ON only
-// accepts bare column references, not aliased expressions.
-// AliasedCol is unwrapped one level so that expr.ColAs(col, "alias") renders
-// as the underlying column without the SELECT-list alias.
+// distinctColSQL produces the SQL fragment for a column in non-SELECT positions
+// such as GROUP BY and DISTINCT ON where an AS alias clause is invalid.
+// AliasedCol values are unwrapped one level so only the bare column reference
+// is emitted; all other expression types are rendered via ToSQL as usual.
 func distinctColSQL(ctx *expr.BuildContext, c expr.SelectableColumn) string {
 	// Unwrap one level of AliasedCol so we render the inner column, not the alias.
 	type unwrapper interface{ Unwrap() expr.SelectableColumn }

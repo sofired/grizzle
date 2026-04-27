@@ -41,6 +41,18 @@ func (c ColBase) Asc() OrderExpr { return OrderExpr{ref: c, dir: "ASC"} }
 func (c ColBase) Desc() OrderExpr { return OrderExpr{ref: c, dir: "DESC"} }
 
 // -------------------------------------------------------------------
+// As method on ColBase — returns an AliasedCol for SELECT aliases
+// -------------------------------------------------------------------
+
+// As returns an AliasedCol that renders "table"."col" AS "alias" in a
+// SELECT list. It does not change the table alias; to create a renamed copy
+// of a table for self-joins, call As on the table type itself (e.g.,
+// EmployeesTable.As or RealmsTable.As).
+func (c ColBase) As(alias string) AliasedCol {
+	return ColAs(c, alias)
+}
+
+// -------------------------------------------------------------------
 // OrderExpr
 // -------------------------------------------------------------------
 

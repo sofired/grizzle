@@ -59,8 +59,12 @@ func TestGenerateTable_Smoke(t *testing.T) {
 	// type name and field name separately rather than "Field Type" as one string.
 	checks := []string{
 		"type UsersTable struct",
+		"tableAlias string",
 		"func (UsersTable) GrizTableName() string",
-		"func (UsersTable) GrizTableAlias() string",
+		"func (t UsersTable) GrizTableAlias() string",
+		"func (t UsersTable) As(alias string) UsersTable",
+		// As() method body must reassign column handles with the new alias.
+		`ColBase: expr.ColBase{TableAlias: alias`,
 		"var UsersT = UsersTable{",
 		"type UserSelect struct",
 		"type UserInsert struct",
