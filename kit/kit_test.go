@@ -623,3 +623,37 @@ func TestDiff_FK_RefTableChange_DetectedAsChange(t *testing.T) {
 		t.Errorf("expected 1 drop + 1 add for FK table change, got %d drops %d adds: %v", drops, adds, changes)
 	}
 }
+
+func TestDiff_FK_OnUpdateChange_DetectedAsChange(t *testing.T) {
+	// Change FK ON UPDATE action — must be detected as a drop+re-add.
+	oldDef := pg.Table("posts",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("user_id", pg.UUID().NotNull()),
+	).WithConstraints(func(t pg.TableRef) []pg.Constraint {
+		return []pg.Constraint{
+			pg.ForeignKey("posts_user_fk").
+				From(t.Col("user_id")).
+				References("users", "id").
+				OnUpdate(pg.FKActionNoAction).
+				Build(),
+		}
+	})
+	newDef := pg.Table("posts",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("user_id", pg.UUID().NotNull()),
+	).WithConstraints(func(t pg.TableRef) []pg.Constraint {
+		return []pg.Constraint{
+			pg.ForeignKey("posts_user_fk").
+				From(t.Col("user_id")).
+				References("users", "id").
+				OnUpdate(pg.FKActionRestrict). // changed
+				Build(),
+		}
+	})
+	changes := kit.Diff(kit.FromDefs(oldDef), kit.FromDefs(newDef))
+	drops := countKind(changes, kit.ChangeDropConstraint)
+	adds := countKind(changes, kit.ChangeAddConstraint)
+	if drops != 1 || adds != 1 {
+		t.Errorf("expected 1 drop + 1 add for FK ON UPDATE change, got %d drops %d adds: %v", drops, adds, changes)
+	}
+}

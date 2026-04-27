@@ -48,9 +48,10 @@ type StatusResult struct {
 
 // Migrate is like Push but records the applied SQL in the _grizzle_migrations
 // history table. Calling Migrate twice with an unchanged schema is a no-op.
+// It accepts tables from any dialect via the TableDefiner interface.
 //
 //	result, err := kit.Migrate(ctx, pool, schema.Users, schema.Realms)
-func Migrate(ctx context.Context, pool *pgxpool.Pool, tables ...*pg.TableDef) (MigrateResult, error) {
+func Migrate(ctx context.Context, pool *pgxpool.Pool, tables ...pg.TableDefiner) (MigrateResult, error) {
 	if err := ensureMigrationsTable(ctx, pool); err != nil {
 		return MigrateResult{}, err
 	}
@@ -80,6 +81,7 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool, tables ...*pg.TableDef) (M
 
 // Status reports the applied migration history and any pending changes without
 // modifying the database.
+// It accepts tables from any dialect via the TableDefiner interface.
 //
 //	status, err := kit.Status(ctx, pool, schema.Users, schema.Realms)
 //	for _, r := range status.Applied {
@@ -88,7 +90,7 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool, tables ...*pg.TableDef) (M
 //	if len(status.Pending) > 0 {
 //	    fmt.Println("Pending changes:", len(status.Pending))
 //	}
-func Status(ctx context.Context, pool *pgxpool.Pool, tables ...*pg.TableDef) (StatusResult, error) {
+func Status(ctx context.Context, pool *pgxpool.Pool, tables ...pg.TableDefiner) (StatusResult, error) {
 	if err := ensureMigrationsTable(ctx, pool); err != nil {
 		return StatusResult{}, err
 	}

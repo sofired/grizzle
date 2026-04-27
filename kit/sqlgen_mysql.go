@@ -24,9 +24,12 @@ import (
 //   - gen_random_uuid() → UUID() in MySQL 8.0+ or (UUID()) in MariaDB
 
 // GenerateCreateSQLMySQL returns CREATE TABLE statements using MySQL syntax.
-func GenerateCreateSQLMySQL(tables ...*pg.TableDef) string {
+// It accepts tables from any dialect via the TableDefiner interface; the
+// DDL is always rendered in MySQL syntax regardless of origin dialect.
+func GenerateCreateSQLMySQL(tables ...pg.TableDefiner) string {
 	var stmts []string
-	for _, t := range tables {
+	for _, td := range tables {
+		t := td.Def()
 		stmts = append(stmts, createTableSQLMySQL(t))
 		for _, c := range t.Constraints {
 			if sql := indexSQLMySQL(t.QualifiedName(), c); sql != "" {
@@ -335,10 +338,21 @@ func mysqlType(pgType string) string {
 		return "BIGINT"
 	case lower == "smallint" || lower == "int2":
 		return "SMALLINT"
+	case lower == "tinyint":
+		return "TINYINT"
+	case lower == "mediumint":
+		return "MEDIUMINT"
+	case lower == "year":
+		return "YEAR"
 	case lower == "real" || lower == "float4":
 		return "FLOAT"
 	case lower == "double precision" || lower == "float8":
 		return "DOUBLE"
+	case strings.HasPrefix(lower, "enum(") || strings.HasPrefix(lower, "set("):
+		// Uppercase the keyword only; preserve the value casing because MySQL
+		// stores enum members exactly as defined and matches case-insensitively.
+		lparen := strings.Index(pgType, "(")
+		return strings.ToUpper(pgType[:lparen]) + pgType[lparen:]
 	default:
 		// Unknown type — pass through and let MySQL decide.
 		return strings.ToUpper(pgType)

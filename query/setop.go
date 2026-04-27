@@ -123,7 +123,9 @@ func (b *SetOpBuilder) addPart(op string, sel *SelectBuilder) *SetOpBuilder {
 // -------------------------------------------------------------------
 
 // OrderBy sets the ORDER BY for the overall combined result.
-// Column references used here must match the column names in the first SELECT.
+// Each OrderExpr is rendered without its table qualifier — only the column
+// name is valid in UNION/INTERSECT/EXCEPT ORDER BY clauses. Column references
+// used here must match the column names produced by the first SELECT.
 func (b *SetOpBuilder) OrderBy(exprs ...expr.OrderExpr) *SetOpBuilder {
 	cp := *b
 	cp.orderBy = exprs
