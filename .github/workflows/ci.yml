@@ -54,3 +54,4 @@ jobs:
         with:
           go-version-input: "stable"
           go-package: ./...
+          repo-checkout: false
