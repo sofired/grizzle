@@ -51,7 +51,8 @@ type Change struct {
 // ChangeCreateTable. The same applies to columns within a table: a column with
 // PreviousName matching a removed column emits ChangeRenameColumn instead of
 // ChangeDropColumn + ChangeAddColumn. Each removed entity can be claimed by at
-// most one rename; first match (by sorted new-name order) wins.
+// most one rename; for tables, the first match in sorted new-table-name order
+// wins, and for columns, the first match in new.Columns slice order wins.
 //
 // Ordering is deterministic:
 //  1. Rename or create new tables (renames before creates, both sorted by new name).

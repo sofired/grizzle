@@ -1049,6 +1049,38 @@ func TestRenameTable_SQLGen_CrossSchema_Postgres(t *testing.T) {
 	}
 }
 
+// TestRenameTable_SQLGen_MixedPublicSchema_Postgres verifies that a rename where
+// one side uses the explicit "public." qualifier and the other is unqualified is
+// treated as a same-schema rename (not cross-schema), so no SET SCHEMA is emitted
+// and "" never appears as a schema name in the output.
+func TestRenameTable_SQLGen_MixedPublicSchema_Postgres(t *testing.T) {
+	snap := kit.EmptySnapshot()
+	cases := []struct {
+		src, dst string
+	}{
+		{"public.accounts", "users"},
+		{"accounts", "public.users"},
+	}
+	for _, tc := range cases {
+		change := kit.Change{
+			Kind:         kit.ChangeRenameTable,
+			TableName:    tc.src,
+			RenameTarget: tc.dst,
+		}
+		stmts := kit.GenerateChangeSQL(snap, change)
+		if len(stmts) != 1 {
+			t.Errorf("src=%q dst=%q: expected 1 statement (same-schema), got %d: %v",
+				tc.src, tc.dst, len(stmts), stmts)
+			continue
+		}
+		for _, s := range stmts {
+			if strings.Contains(s, `SET SCHEMA ""`) || strings.Contains(s, "SET SCHEMA \"\"") {
+				t.Errorf("src=%q dst=%q: emitted invalid SET SCHEMA \"\": %s", tc.src, tc.dst, s)
+			}
+		}
+	}
+}
+
 // TestRenameTable_SQLGen_SchemaQualified_MySQL verifies that MySQL RENAME TABLE
 // preserves the schema qualifier on both sides when the TableName and
 // RenameTarget are schema-qualified.

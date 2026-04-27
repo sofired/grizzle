@@ -50,18 +50,17 @@ func GenerateChangeSQL(snap Snapshot, c Change) []string {
 		if c.RenameTarget == "" {
 			return nil
 		}
-		srcSchema := schemaOf(c.TableName)
-		dstSchema := schemaOf(c.RenameTarget)
+		// Normalize "" and "public" as equivalent: an unqualified PostgreSQL name
+		// resolves to the public schema under the default search_path, so treating
+		// them as the same avoids spurious cross-schema paths that would emit
+		// SET SCHEMA "" (invalid SQL) when one side is qualified and the other is not.
+		srcSchema := pgNormalizeSchema(schemaOf(c.TableName))
+		dstSchema := pgNormalizeSchema(schemaOf(c.RenameTarget))
 		newUnqualified := unqualifiedName(c.RenameTarget)
 		if srcSchema != dstSchema {
 			// Cross-schema: rename within source schema first, then move.
 			// PostgreSQL requires two steps because RENAME TO cannot change the schema.
-			var intermediate string
-			if srcSchema != "" {
-				intermediate = srcSchema + "." + newUnqualified
-			} else {
-				intermediate = newUnqualified
-			}
+			intermediate := srcSchema + "." + newUnqualified
 			return []string{
 				fmt.Sprintf("ALTER TABLE %s RENAME TO %s",
 					quoteTable(c.TableName), qi(newUnqualified)),
@@ -367,6 +366,16 @@ func schemaOf(name string) string {
 		return parts[0]
 	}
 	return ""
+}
+
+// pgNormalizeSchema treats "" and "public" as equivalent for PostgreSQL
+// cross-schema comparisons. An unqualified name resolves to the public schema
+// under the default search_path, so the two forms are semantically identical.
+func pgNormalizeSchema(schema string) string {
+	if schema == "" {
+		return "public"
+	}
+	return schema
 }
 
 // quoteUnqualifiedTable quotes only the unqualified (non-schema-prefixed) part
