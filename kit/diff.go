@@ -130,10 +130,10 @@ func Diff(old, new Snapshot) []Change {
 	// Also handle tables that were renamed: diff the renamed table's contents.
 	for _, name := range newNames {
 		if _, exists := old.Tables[name]; exists {
-			changes = append(changes, diffTable(name, old.Tables[name], new.Tables[name])...)
+			changes = append(changes, diffTable(name, old.Tables[name], new.Tables[name], renamedFrom)...)
 		} else if oldName, isRename := renamedTo[name]; isRename {
 			// Renamed table: diff columns and constraints under the new name.
-			changes = append(changes, diffTable(name, old.Tables[oldName], new.Tables[name])...)
+			changes = append(changes, diffTable(name, old.Tables[oldName], new.Tables[name], renamedFrom)...)
 		}
 	}
 
@@ -163,7 +163,10 @@ func sortedTableNames(tables map[string]*TableSnap) []string {
 }
 
 // diffTable computes column- and constraint-level changes for one table.
-func diffTable(tableName string, old, new *TableSnap) []Change {
+// tableRenames maps old table name → new table name (from the outer Diff call)
+// and is used to normalize FK target references in old constraints so that a
+// rename of a referenced table is not misread as a constraint drop+add.
+func diffTable(tableName string, old, new *TableSnap, tableRenames map[string]string) []Change {
 	var changes []Change
 
 	// --- Columns ---
@@ -248,7 +251,18 @@ func diffTable(tableName string, old, new *TableSnap) []Change {
 	}
 
 	// --- Constraints ---
-	oldCons := constraintMap(old.Constraints)
+	// Normalize old constraints so that column/table renames don't produce
+	// spurious drop+add cycles. After RENAME COLUMN or RENAME TABLE the database
+	// automatically updates constraint column references, so a constraint that
+	// only changed due to a rename compares equal to its post-rename form and
+	// generates no changes. Without normalization the add-before-drop ordering
+	// can fail at runtime because the existing constraint (now referencing the
+	// new column name) still holds the same constraint name.
+	normalizedOldCons := make([]pg.Constraint, len(old.Constraints))
+	for i, oc := range old.Constraints {
+		normalizedOldCons[i] = normalizeConstraintRefs(oc, colRenamedFrom, tableRenames)
+	}
+	oldCons := constraintMap(normalizedOldCons)
 	newCons := constraintMap(new.Constraints)
 
 	// Added constraints (preserve new.Constraints order for stability).
@@ -265,7 +279,7 @@ func diffTable(tableName string, old, new *TableSnap) []Change {
 	}
 
 	// Dropped constraints (or changed — drop+re-add).
-	for _, oc := range old.Constraints {
+	for _, oc := range normalizedOldCons {
 		key := constraintKey(oc)
 		nc, exists := newCons[key]
 		if !exists {
@@ -346,6 +360,51 @@ func constraintMap(cons []pg.Constraint) map[string]pg.Constraint {
 		m[constraintKey(c)] = c
 	}
 	return m
+}
+
+// normalizeConstraintRefs rewrites constraint column/table references using
+// rename maps so that a post-rename old constraint compares equal to the new
+// constraint definition. colRenames maps old column name → new column name
+// within the same table; tableRenames maps old table name → new table name
+// (used for FK target normalization).
+func normalizeConstraintRefs(c pg.Constraint, colRenames, tableRenames map[string]string) pg.Constraint {
+	if len(colRenames) > 0 {
+		c.Columns = applyRenames(c.Columns, colRenames)
+		c.FKColumns = applyRenames(c.FKColumns, colRenames)
+	}
+	if len(tableRenames) > 0 {
+		if newTable, ok := tableRenames[c.FKTable]; ok {
+			c.FKTable = newTable
+		}
+	}
+	return c
+}
+
+// applyRenames returns a new slice with any element found in renames replaced
+// by its mapped value. Returns the original slice unchanged if no renames apply.
+func applyRenames(cols []string, renames map[string]string) []string {
+	if len(cols) == 0 || len(renames) == 0 {
+		return cols
+	}
+	needsCopy := false
+	for _, col := range cols {
+		if _, ok := renames[col]; ok {
+			needsCopy = true
+			break
+		}
+	}
+	if !needsCopy {
+		return cols
+	}
+	out := make([]string, len(cols))
+	for i, col := range cols {
+		if newName, ok := renames[col]; ok {
+			out[i] = newName
+		} else {
+			out[i] = col
+		}
+	}
+	return out
 }
 
 // constraintsEqual compares two constraints for logical equality,

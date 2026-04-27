@@ -1121,6 +1121,97 @@ func TestRenameTable_SQLGen_SchemaQualified_SQLite(t *testing.T) {
 	}
 }
 
+// TestDiff_ColumnRename_ConstraintUnchanged verifies that a unique index on the
+// renamed column is not emitted as a spurious drop+add. After RENAME COLUMN the
+// database automatically updates constraint column references, so Diff() should
+// produce no constraint changes when only the column name changed.
+func TestDiff_ColumnRename_ConstraintUnchanged(t *testing.T) {
+	oldDef := pg.Table("users",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("email", pg.Varchar(255).NotNull()),
+	).WithConstraints(func(t pg.TableRef) []pg.Constraint {
+		return []pg.Constraint{
+			pg.UniqueIndex("users_email_key").On(t.Col("email")).Build(),
+		}
+	})
+
+	newDef := pg.Table("users",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("email_address", pg.Varchar(255).NotNull().RenamedFrom("email")),
+	).WithConstraints(func(t pg.TableRef) []pg.Constraint {
+		return []pg.Constraint{
+			// Same constraint, column name updated to match the rename.
+			pg.UniqueIndex("users_email_key").On(t.Col("email_address")).Build(),
+		}
+	})
+
+	changes := kit.Diff(kit.FromDefs(oldDef), kit.FromDefs(newDef))
+
+	drops := countKind(changes, kit.ChangeDropConstraint)
+	adds := countKind(changes, kit.ChangeAddConstraint)
+	renames := countKind(changes, kit.ChangeRenameColumn)
+
+	if renames != 1 {
+		t.Errorf("expected 1 RenameColumn, got %d: %v", renames, changes)
+	}
+	if drops != 0 || adds != 0 {
+		t.Errorf("expected 0 constraint changes (DB auto-updates after RENAME COLUMN), got %d drops %d adds: %v", drops, adds, changes)
+	}
+}
+
+// TestDiff_TableRename_FKConstraintUnchanged verifies that a foreign key on
+// another table that references the renamed table is not emitted as a spurious
+// drop+add. After RENAME TABLE the database automatically updates FK references,
+// so Diff() should produce no constraint changes for that FK.
+func TestDiff_TableRename_FKConstraintUnchanged(t *testing.T) {
+	oldAccounts := pg.Table("accounts",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+	).Build()
+	oldOrders := pg.Table("orders",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("account_id", pg.UUID().NotNull()),
+	).WithConstraints(func(t pg.TableRef) []pg.Constraint {
+		return []pg.Constraint{
+			pg.ForeignKey("orders_account_fk").
+				From(t.Col("account_id")).
+				References("accounts", "id").
+				Build(),
+		}
+	})
+
+	newUsers := pg.Table("users",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+	).RenamedFrom("accounts").Build()
+	newOrders := pg.Table("orders",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("account_id", pg.UUID().NotNull()),
+	).WithConstraints(func(t pg.TableRef) []pg.Constraint {
+		return []pg.Constraint{
+			// FK updated to reference the renamed table.
+			pg.ForeignKey("orders_account_fk").
+				From(t.Col("account_id")).
+				References("users", "id").
+				Build(),
+		}
+	})
+
+	changes := kit.Diff(
+		kit.FromDefs(oldAccounts, oldOrders),
+		kit.FromDefs(newUsers, newOrders),
+	)
+
+	drops := countKind(changes, kit.ChangeDropConstraint)
+	adds := countKind(changes, kit.ChangeAddConstraint)
+	renames := countKind(changes, kit.ChangeRenameTable)
+
+	if renames != 1 {
+		t.Errorf("expected 1 RenameTable, got %d: %v", renames, changes)
+	}
+	if drops != 0 || adds != 0 {
+		t.Errorf("expected 0 constraint changes (DB auto-updates FK after RENAME TABLE), got %d drops %d adds: %v", drops, adds, changes)
+	}
+}
+
 func TestDiff_ColumnRename_UnrelatedDropAddUnaffected(t *testing.T) {
 	// Renaming one column must not suppress unrelated add/drop for other columns.
 	oldDef := pg.Table("users",
