@@ -67,6 +67,27 @@ type mysqlTableBuilder struct {
 	pgBuilder *pg.TableBuilder
 }
 
+// RenamedFrom declares that this table was renamed from oldName.
+// Diff() will emit ChangeRenameTable instead of drop+create when oldName
+// matches a dropped table in the old snapshot. Leave empty for new tables
+// or tables whose name has not changed.
+//
+// oldName must match the map key used in the old snapshot exactly:
+//   - For tables without a schema (Schema == ""): pass the bare table name,
+//     e.g. "accounts".
+//   - For tables in a non-default schema: pass the dot-separated qualified
+//     name, e.g. "mydb.accounts".
+//   - For introspected snapshots (kit.Push / IntrospectMySQL), tables are
+//     keyed by the bare table name without a schema prefix.
+//
+// Passing a name that does not exactly match the old snapshot key will result
+// in no rename being detected; Diff() will fall back to drop+create.
+// Remove this call from your schema definition once the migration has been applied.
+func (b *mysqlTableBuilder) RenamedFrom(oldName string) *mysqlTableBuilder {
+	b.pgBuilder.RenamedFrom(oldName)
+	return b
+}
+
 // WithConstraints adds table-level constraints.
 // The callback receives a TableRef for column name resolution.
 func (b *mysqlTableBuilder) WithConstraints(fn func(t TableRef) []Constraint) *TableDef {

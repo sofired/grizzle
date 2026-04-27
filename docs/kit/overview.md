@@ -103,14 +103,29 @@ The diff engine detects and generates SQL for:
 |---|---|
 | New table | `CREATE TABLE …` |
 | Dropped table | `DROP TABLE IF EXISTS …` |
+| Renamed table | `ALTER TABLE … RENAME TO …` / `RENAME TABLE … TO …` |
 | New column | `ALTER TABLE … ADD COLUMN …` |
 | Dropped column | `ALTER TABLE … DROP COLUMN …` |
+| Renamed column | `ALTER TABLE … RENAME COLUMN … TO …` |
 | New index | `CREATE [UNIQUE] INDEX …` |
 | Dropped index | `DROP INDEX …` |
 
-::: warning Column type changes
-The differ does not currently generate `ALTER COLUMN … TYPE` statements. Rename columns or change their types with a manual migration when needed.
-:::
+To rename a table or column without data loss, use `RenamedFrom()` on the table or column builder. `Diff()` will emit `ChangeRenameTable` or `ChangeRenameColumn` instead of a destructive drop-and-recreate. **Remove the `RenamedFrom()` call from your schema definition once the migration has been applied** — it is a one-time migration annotation. Column type, nullability, and default changes can be generated for PostgreSQL and MySQL; SQLite may still require a manual table rebuild for those changes.
+
+```go
+// Rename a table
+pg.Table("users",
+    pg.C("id", pg.UUID().PrimaryKey()),
+    pg.C("login_name", pg.Varchar(255).NotNull()),
+).RenamedFrom("accounts")
+
+// Rename a column
+pg.Table("users",
+    pg.C("login_name", pg.Varchar(255).NotNull().RenamedFrom("username")),
+)
+```
+
+The `oldName` argument must exactly match how the table or column appears as a key in the existing snapshot — for introspected snapshots, public-schema tables are keyed without the `public.` prefix. See the `RenamedFrom` godoc for details.
 
 ## `grizzle gen` — code generation
 

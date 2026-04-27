@@ -46,6 +46,36 @@ func GenerateChangeSQL(snap Snapshot, c Change) []string {
 	case ChangeDropTable:
 		return []string{fmt.Sprintf("DROP TABLE IF EXISTS %s", quoteTable(c.TableName))}
 
+	case ChangeRenameTable:
+		if c.RenameTarget == "" {
+			return nil
+		}
+		// Normalize "" and "public" as equivalent: an unqualified PostgreSQL name
+		// resolves to the public schema under the default search_path, so treating
+		// them as the same avoids spurious cross-schema paths that would emit
+		// SET SCHEMA "" (invalid SQL) when one side is qualified and the other is not.
+		srcSchema := pgNormalizeSchema(schemaOf(c.TableName))
+		dstSchema := pgNormalizeSchema(schemaOf(c.RenameTarget))
+		newUnqualified := unqualifiedName(c.RenameTarget)
+		if srcSchema != dstSchema {
+			// Cross-schema: rename within source schema first, then move.
+			// PostgreSQL requires two steps because RENAME TO cannot change the schema.
+			intermediate := srcSchema + "." + newUnqualified
+			return []string{
+				fmt.Sprintf("ALTER TABLE %s RENAME TO %s",
+					quoteTable(c.TableName), qi(newUnqualified)),
+				fmt.Sprintf("ALTER TABLE %s SET SCHEMA %s",
+					quoteTable(intermediate), qi(dstSchema)),
+			}
+		}
+		// PostgreSQL RENAME TO accepts only the unqualified new name within the
+		// same schema; a schema-qualified target like "public"."users" is invalid.
+		return []string{fmt.Sprintf(
+			"ALTER TABLE %s RENAME TO %s",
+			quoteTable(c.TableName),
+			quoteUnqualifiedTable(c.RenameTarget),
+		)}
+
 	case ChangeAddColumn:
 		if c.NewCol == nil {
 			return nil
@@ -316,6 +346,44 @@ func quoteTable(name string) string {
 		return qi(parts[0]) + "." + qi(parts[1])
 	}
 	return qi(name)
+}
+
+// unqualifiedName strips any schema prefix from a potentially qualified name.
+// "public.users" → "users", "users" → "users".
+func unqualifiedName(name string) string {
+	parts := strings.SplitN(name, ".", 2)
+	if len(parts) == 2 {
+		return parts[1]
+	}
+	return name
+}
+
+// schemaOf returns the schema component of a potentially qualified name,
+// or "" if the name has no schema prefix.
+func schemaOf(name string) string {
+	parts := strings.SplitN(name, ".", 2)
+	if len(parts) == 2 {
+		return parts[0]
+	}
+	return ""
+}
+
+// pgNormalizeSchema treats "" and "public" as equivalent for PostgreSQL
+// cross-schema comparisons. An unqualified name resolves to the public schema
+// under the default search_path, so the two forms are semantically identical.
+func pgNormalizeSchema(schema string) string {
+	if schema == "" {
+		return "public"
+	}
+	return schema
+}
+
+// quoteUnqualifiedTable quotes only the unqualified (non-schema-prefixed) part
+// of a potentially schema-qualified name. Use where PostgreSQL DDL rejects a
+// schema-qualified identifier — e.g. RENAME TO.
+// "public.users" → `"users"`, "users" → `"users"`.
+func quoteUnqualifiedTable(name string) string {
+	return qi(unqualifiedName(name))
 }
 
 // quoteColList returns a comma-separated list of quoted column names.

@@ -35,6 +35,12 @@ type TableDef struct {
 	Schema      string // PostgreSQL schema namespace; empty = "public"
 	Columns     []ColumnDef
 	Constraints []Constraint
+	// PreviousName is intentionally excluded from JSON snapshots — it is only
+	// meaningful as a schema definition annotation for the current migration step
+	// and must not persist across snapshot saves. If it were persisted, a future
+	// table that happens to share the old name would trigger a spurious RENAME
+	// instead of a CREATE.
+	PreviousName string `json:"-"`
 }
 
 // Def returns a pointer to the receiver so that *TableDef satisfies
@@ -90,6 +96,31 @@ func (b *TableBuilder) WithConstraints(fn func(t TableRef) []Constraint) *TableD
 	}
 	b.def.Constraints = fn(ref)
 	return &b.def
+}
+
+// RenamedFrom declares that this table was renamed from oldName.
+// Diff() will emit ChangeRenameTable instead of drop+create when oldName
+// matches a dropped table in the old snapshot. Leave empty for new tables
+// or tables whose name has not changed.
+//
+// oldName must match the map key used in the old snapshot exactly:
+//   - For tables without a schema (Schema == ""): pass the bare table name,
+//     e.g. "accounts".
+//   - For tables in a non-public schema: pass the dot-separated qualified
+//     name, e.g. "auth.accounts".
+//   - For PostgreSQL tables in the public schema: the snapshot key depends
+//     on how the snapshot was built. FromDefs() / QualifiedName() keys
+//     public-schema tables as "public.accounts", but introspected snapshots
+//     (kit.Push / IntrospectPostgres) drop the "public." prefix and key
+//     them as just "accounts". Use the form that matches how the old snapshot
+//     was built.
+//
+// Passing a name that does not exactly match the old snapshot key will result
+// in no rename being detected; Diff() will fall back to drop+create.
+// Remove this call from your schema definition once the migration has been applied.
+func (b *TableBuilder) RenamedFrom(oldName string) *TableBuilder {
+	b.def.PreviousName = oldName
+	return b
 }
 
 // Build finalises the table definition without additional constraints.
