@@ -214,6 +214,18 @@ func DescribeChanges(changes []Change) string {
 				col = c.TableName + "." + c.OldCol.Name
 			}
 			counts[c.Kind] = append(counts[c.Kind], col)
+		case ChangeRenameColumn:
+			col := c.TableName
+			if c.OldCol != nil && c.NewCol != nil {
+				col = c.TableName + "." + c.OldCol.Name + "→" + c.NewCol.Name
+			}
+			counts[c.Kind] = append(counts[c.Kind], col)
+		case ChangeRenameTable:
+			label := c.TableName
+			if c.RenameTarget != "" {
+				label = c.TableName + "→" + c.RenameTarget
+			}
+			counts[c.Kind] = append(counts[c.Kind], label)
 		default:
 			counts[c.Kind] = append(counts[c.Kind], c.TableName)
 		}
