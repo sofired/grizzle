@@ -525,13 +525,15 @@ func (b *SelectBuilder) buildWith(ctx *expr.BuildContext) string {
 	sb.WriteString(buildWhere(ctx, b.where))
 
 	// GROUP BY
+	// Use distinctColSQL (not selectColSQL) to avoid emitting "AS alias" when
+	// the caller passes an AliasedCol — GROUP BY does not accept aliases (#131).
 	if len(b.groupBy) > 0 {
 		sb.WriteString(" GROUP BY ")
 		for i, c := range b.groupBy {
 			if i > 0 {
 				sb.WriteString(", ")
 			}
-			sb.WriteString(selectColSQL(ctx, c))
+			sb.WriteString(distinctColSQL(ctx, c))
 		}
 	}
 
