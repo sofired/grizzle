@@ -9,6 +9,7 @@ package pgx
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -118,8 +119,8 @@ func TestPreparedExec_ExecUsesSQLNotName(t *testing.T) {
 	if stub.gotSQL == stmt.name {
 		t.Errorf("Exec submitted the statement name %q instead of the SQL string", stub.gotSQL)
 	}
-	if len(stub.gotArgs) != len(stmt.args) {
-		t.Errorf("Exec submitted %d args, want %d", len(stub.gotArgs), len(stmt.args))
+	if !reflect.DeepEqual(stub.gotArgs, stmt.args) {
+		t.Errorf("Exec submitted args %v, want %v", stub.gotArgs, stmt.args)
 	}
 }
 
@@ -175,5 +176,8 @@ func TestPreparedExec_ExecTxUsesSQLNotName(t *testing.T) {
 	}
 	if fake.gotSQL == stmt.name {
 		t.Errorf("ExecTx submitted the statement name %q instead of the SQL string", fake.gotSQL)
+	}
+	if !reflect.DeepEqual(fake.gotArgs, stmt.args) {
+		t.Errorf("ExecTx submitted args %v, want %v", fake.gotArgs, stmt.args)
 	}
 }
