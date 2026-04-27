@@ -460,7 +460,7 @@ func TestDiff_Ordering_EnumDroppedAfterTable(t *testing.T) {
 
 	changes := kit.Diff(old, new)
 
-	var enumIdx, tableIdx int = -1, -1
+	enumIdx, tableIdx := -1, -1
 	for i, c := range changes {
 		if c.Kind == kit.ChangeDropEnum {
 			enumIdx = i
