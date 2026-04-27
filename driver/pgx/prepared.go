@@ -4,8 +4,33 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/sofired/grizzle/dialect"
 	"github.com/sofired/grizzle/query"
+)
+
+// poolQuerier is satisfied by *pgxpool.Pool and any test stub — it captures
+// the minimal Query surface used by PreparedSelect execution.
+type poolQuerier interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}
+
+// poolExecer is satisfied by *pgxpool.Pool, pgx.Tx, and any test stub — it
+// captures the minimal Exec surface used by PreparedExec execution.
+type poolExecer interface {
+	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
+}
+
+// Compile-time interface satisfaction checks. These fail at build time if a
+// pgx major-version upgrade changes the method signatures, catching the
+// mismatch before it becomes a runtime error.
+var (
+	_ poolQuerier = (*pgxpool.Pool)(nil)
+	_ poolExecer  = (*pgxpool.Pool)(nil)
+	_ poolExecer  = (pgx.Tx)(nil)
 )
 
 // PreparedSelect is a SELECT query whose SQL has been pre-built and validated
@@ -16,10 +41,15 @@ import (
 // Pre-validation means any SQL error (wrong column name, type mismatch, bad
 // syntax) is surfaced at server startup rather than during a live request.
 //
-// The statement name is used only for validation at startup (it identifies
-// which query failed in error messages). At execution time the SQL string is
-// used directly, so the name does not appear in pg_stat_statements or
-// pg_prepared_statements during normal query execution.
+// The name is a human-readable label available via Name() for callers to use
+// in their own logging and diagnostics.
+// At execution time, queries are executed using the SQL string so that pgx v5's
+// per-connection statement cache (QueryExecModeCacheStatement, the default mode)
+// prepares and reuses the plan on each pool connection independently. The cache
+// is keyed on the SQL text: submitting the same SQL string reuses the cached
+// plan without a round-trip Parse — avoiding the cross-connection named-statement
+// mismatch that occurs when a named statement prepared on one connection is
+// referenced by name on a different pool connection.
 //
 // Example (static active-users list):
 //
@@ -39,8 +69,6 @@ import (
 //	users, err := activeUsers.QueryAll(ctx, db)
 //
 // PreparedSelect holds the pre-built SQL and its bound args.
-// Execution uses the SQL string directly; pgx v5's per-connection statement
-// cache handles re-preparation transparently across pool connections.
 type PreparedSelect[T any] struct {
 	name string
 	sql  string
@@ -58,34 +86,46 @@ func PrepareSelect[T any](ctx context.Context, db *DB, name string, b *query.Sel
 	return &PreparedSelect[T]{name: name, sql: sql, args: args}, nil
 }
 
-// Name returns the validation label supplied when the statement was prepared.
+// Name returns the statement name, available for callers to use in their own
+// logging and diagnostics.
 func (p *PreparedSelect[T]) Name() string { return p.name }
 
 // SQL returns the pre-built SQL string.
 func (p *PreparedSelect[T]) SQL() string { return p.sql }
 
 // QueryAll executes the prepared query and returns all matching rows.
-//
-// The SQL string is used for execution rather than the statement name.
-// pgxpool connections are per-connection; named prepared statements are
-// not reliable across connections in the pool. Using the SQL directly
-// lets pgx v5's per-connection statement cache handle re-preparation
-// transparently on new pool connections (Fix #12).
 func (p *PreparedSelect[T]) QueryAll(ctx context.Context, db *DB) ([]T, error) {
-	rows, err := db.Pool().Query(ctx, p.sql, p.args...)
-	return ScanAll[T](rows, err)
+	return p.queryAllWith(ctx, db.Pool())
 }
 
 // QueryOne executes the prepared query and expects exactly one row.
 // Returns an error if zero or more than one row is returned.
 func (p *PreparedSelect[T]) QueryOne(ctx context.Context, db *DB) (T, error) {
-	rows, err := db.Pool().Query(ctx, p.sql, p.args...)
-	return ScanOne[T](rows, err)
+	return p.queryOneWith(ctx, db.Pool())
 }
 
 // QueryOpt executes the prepared query and returns nil if no rows are found.
 func (p *PreparedSelect[T]) QueryOpt(ctx context.Context, db *DB) (*T, error) {
-	rows, err := db.Pool().Query(ctx, p.sql, p.args...)
+	return p.queryOptWith(ctx, db.Pool())
+}
+
+// queryAllWith is the internal implementation used by QueryAll. It accepts a
+// poolQuerier so that tests can inject a stub and assert the SQL string passed
+// to the pool — verifying that execution uses p.sql, not p.name.
+func (p *PreparedSelect[T]) queryAllWith(ctx context.Context, q poolQuerier) ([]T, error) {
+	rows, err := q.Query(ctx, p.sql, p.args...)
+	return ScanAll[T](rows, err)
+}
+
+// queryOneWith is the internal implementation used by QueryOne.
+func (p *PreparedSelect[T]) queryOneWith(ctx context.Context, q poolQuerier) (T, error) {
+	rows, err := q.Query(ctx, p.sql, p.args...)
+	return ScanOne[T](rows, err)
+}
+
+// queryOptWith is the internal implementation used by QueryOpt.
+func (p *PreparedSelect[T]) queryOptWith(ctx context.Context, q poolQuerier) (*T, error) {
+	rows, err := q.Query(ctx, p.sql, p.args...)
 	return ScanOneOpt[T](rows, err)
 }
 
@@ -130,26 +170,28 @@ func PrepareExec(ctx context.Context, db *DB, name string, b interface {
 	return &PreparedExec{name: name, sql: sql, args: args}, nil
 }
 
-// Name returns the validation label supplied when the statement was prepared.
+// Name returns the statement name, available for callers to use in their own
+// logging and diagnostics.
 func (p *PreparedExec) Name() string { return p.name }
 
 // SQL returns the pre-built SQL string.
 func (p *PreparedExec) SQL() string { return p.sql }
 
 // Exec runs the prepared mutation and returns the number of rows affected.
-//
-// Uses the SQL string directly for pool reliability (Fix #12).
 func (p *PreparedExec) Exec(ctx context.Context, db *DB) (int64, error) {
-	tag, err := db.Pool().Exec(ctx, p.sql, p.args...)
-	if err != nil {
-		return 0, err
-	}
-	return tag.RowsAffected(), nil
+	return p.execWith(ctx, db.Pool())
 }
 
 // ExecTx runs the prepared mutation inside an existing transaction.
 func (p *PreparedExec) ExecTx(ctx context.Context, tx *Tx) (int64, error) {
-	tag, err := tx.tx.Exec(ctx, p.sql, p.args...)
+	return p.execWith(ctx, tx.tx)
+}
+
+// execWith is the internal implementation used by Exec and ExecTx. It accepts
+// a poolExecer so that tests can inject a stub and assert the SQL string passed
+// to the pool — verifying that execution uses p.sql, not p.name.
+func (p *PreparedExec) execWith(ctx context.Context, e poolExecer) (int64, error) {
+	tag, err := e.Exec(ctx, p.sql, p.args...)
 	if err != nil {
 		return 0, err
 	}
@@ -231,12 +273,15 @@ func RegisterExec(reg *Registry, name string, b interface {
 // Internal helpers
 // -------------------------------------------------------------------
 
-// validateStatement prepares a statement on a single pooled connection to
-// check its SQL validity. The connection is immediately released back to the pool.
+// validateStatement prepares a named statement on a single pooled connection to
+// check its SQL validity, then immediately releases the connection back to the pool.
+// It is used only for startup validation; execution later uses the SQL string
+// directly so that pgx's per-connection statement cache works correctly across
+// all pool connections.
 //
-// pgx v5's Conn.Prepare sends a Parse message to PostgreSQL, which validates
-// the SQL without executing it — wrong column names, type errors, and syntax
-// problems are all caught here.
+// pgx v5's Conn.Prepare sends a Parse + Describe message to PostgreSQL, which
+// validates the SQL without executing it — wrong column names, type errors, and
+// syntax problems are all caught here.
 func validateStatement(ctx context.Context, db *DB, name, sql string) error {
 	conn, err := db.Pool().Acquire(ctx)
 	if err != nil {
