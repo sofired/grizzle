@@ -143,6 +143,15 @@ func (b *TinyIntBuilder) Default(val int) *TinyIntBuilder {
 	b.def.DefaultExpr = fmt.Sprintf("%d", val)
 	return b
 }
+// RenamedFrom declares that this column was renamed from oldName.
+// Diff() will emit ChangeRenameColumn instead of drop+add when oldName
+// matches a dropped column in the old snapshot.
+// Remove this call from your schema definition once the migration has been applied.
+func (b *TinyIntBuilder) RenamedFrom(oldName string) *TinyIntBuilder {
+	b.def.PreviousName = oldName
+	return b
+}
+
 func (b *TinyIntBuilder) Build(name string) pg.ColumnDef {
 	d := b.def
 	d.Name = name
@@ -168,6 +177,15 @@ func (b *SmallIntBuilder) Default(val int) *SmallIntBuilder {
 	b.def.DefaultExpr = fmt.Sprintf("%d", val)
 	return b
 }
+// RenamedFrom declares that this column was renamed from oldName.
+// Diff() will emit ChangeRenameColumn instead of drop+add when oldName
+// matches a dropped column in the old snapshot.
+// Remove this call from your schema definition once the migration has been applied.
+func (b *SmallIntBuilder) RenamedFrom(oldName string) *SmallIntBuilder {
+	b.def.PreviousName = oldName
+	return b
+}
+
 func (b *SmallIntBuilder) Build(name string) pg.ColumnDef {
 	d := b.def
 	d.Name = name
@@ -193,6 +211,15 @@ func (b *DoubleBuilder) Default(val float64) *DoubleBuilder {
 	b.def.DefaultExpr = fmt.Sprintf("%g", val)
 	return b
 }
+// RenamedFrom declares that this column was renamed from oldName.
+// Diff() will emit ChangeRenameColumn instead of drop+add when oldName
+// matches a dropped column in the old snapshot.
+// Remove this call from your schema definition once the migration has been applied.
+func (b *DoubleBuilder) RenamedFrom(oldName string) *DoubleBuilder {
+	b.def.PreviousName = oldName
+	return b
+}
+
 func (b *DoubleBuilder) Build(name string) pg.ColumnDef {
 	d := b.def
 	d.Name = name
@@ -223,6 +250,15 @@ func (b *MediumIntBuilder) Default(val int) *MediumIntBuilder {
 	b.def.DefaultExpr = fmt.Sprintf("%d", val)
 	return b
 }
+// RenamedFrom declares that this column was renamed from oldName.
+// Diff() will emit ChangeRenameColumn instead of drop+add when oldName
+// matches a dropped column in the old snapshot.
+// Remove this call from your schema definition once the migration has been applied.
+func (b *MediumIntBuilder) RenamedFrom(oldName string) *MediumIntBuilder {
+	b.def.PreviousName = oldName
+	return b
+}
+
 func (b *MediumIntBuilder) Build(name string) pg.ColumnDef {
 	d := b.def
 	d.Name = name
@@ -248,6 +284,15 @@ func (b *YearBuilder) Default(val int) *YearBuilder {
 	b.def.DefaultExpr = fmt.Sprintf("%d", val)
 	return b
 }
+// RenamedFrom declares that this column was renamed from oldName.
+// Diff() will emit ChangeRenameColumn instead of drop+add when oldName
+// matches a dropped column in the old snapshot.
+// Remove this call from your schema definition once the migration has been applied.
+func (b *YearBuilder) RenamedFrom(oldName string) *YearBuilder {
+	b.def.PreviousName = oldName
+	return b
+}
+
 func (b *YearBuilder) Build(name string) pg.ColumnDef {
 	d := b.def
 	d.Name = name
@@ -284,6 +329,15 @@ func (b *EnumBuilder) Default(val string) *EnumBuilder {
 	b.def.DefaultExpr = fmt.Sprintf("'%s'", strings.ReplaceAll(val, "'", "''"))
 	return b
 }
+// RenamedFrom declares that this column was renamed from oldName.
+// Diff() will emit ChangeRenameColumn instead of drop+add when oldName
+// matches a dropped column in the old snapshot.
+// Remove this call from your schema definition once the migration has been applied.
+func (b *EnumBuilder) RenamedFrom(oldName string) *EnumBuilder {
+	b.def.PreviousName = oldName
+	return b
+}
+
 func (b *EnumBuilder) Build(name string) pg.ColumnDef {
 	d := b.def
 	d.Name = name
@@ -320,6 +374,15 @@ func (b *SetBuilder) Default(val string) *SetBuilder {
 	b.def.DefaultExpr = fmt.Sprintf("'%s'", strings.ReplaceAll(val, "'", "''"))
 	return b
 }
+// RenamedFrom declares that this column was renamed from oldName.
+// Diff() will emit ChangeRenameColumn instead of drop+add when oldName
+// matches a dropped column in the old snapshot.
+// Remove this call from your schema definition once the migration has been applied.
+func (b *SetBuilder) RenamedFrom(oldName string) *SetBuilder {
+	b.def.PreviousName = oldName
+	return b
+}
+
 func (b *SetBuilder) Build(name string) pg.ColumnDef {
 	d := b.def
 	d.Name = name

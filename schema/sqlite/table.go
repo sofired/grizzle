@@ -67,6 +67,15 @@ type sqliteTableBuilder struct {
 	pgBuilder *pg.TableBuilder
 }
 
+// RenamedFrom declares that this table was renamed from oldName.
+// Diff() will emit ChangeRenameTable instead of drop+create when oldName
+// matches a dropped table in the old snapshot.
+// Remove this call from your schema definition once the migration has been applied.
+func (b *sqliteTableBuilder) RenamedFrom(oldName string) *sqliteTableBuilder {
+	b.pgBuilder.RenamedFrom(oldName)
+	return b
+}
+
 // WithConstraints adds table-level constraints.
 // The callback receives a TableRef for column name resolution.
 func (b *sqliteTableBuilder) WithConstraints(fn func(t TableRef) []Constraint) *TableDef {

@@ -107,6 +107,15 @@ func (b *UUIDBuilder) DefaultRandom() *UUIDBuilder {
 	return b
 }
 
+// RenamedFrom declares that this column was renamed from oldName.
+// Diff() will emit ChangeRenameColumn instead of drop+add when oldName
+// matches a dropped column in the old snapshot.
+// Remove this call from your schema definition once the migration has been applied.
+func (b *UUIDBuilder) RenamedFrom(oldName string) *UUIDBuilder {
+	b.def.PreviousName = oldName
+	return b
+}
+
 func (b *UUIDBuilder) Build(name string) pg.ColumnDef {
 	if b.def.Name == "" {
 		b.def.Name = name
@@ -148,6 +157,15 @@ func (b *BooleanBuilder) Default(val bool) *BooleanBuilder {
 	} else {
 		b.def.DefaultExpr = "0"
 	}
+	return b
+}
+
+// RenamedFrom declares that this column was renamed from oldName.
+// Diff() will emit ChangeRenameColumn instead of drop+add when oldName
+// matches a dropped column in the old snapshot.
+// Remove this call from your schema definition once the migration has been applied.
+func (b *BooleanBuilder) RenamedFrom(oldName string) *BooleanBuilder {
+	b.def.PreviousName = oldName
 	return b
 }
 
@@ -205,6 +223,15 @@ func (b *SQLiteTimestampBuilder) DefaultNow() *SQLiteTimestampBuilder {
 	return b
 }
 
+// RenamedFrom declares that this column was renamed from oldName.
+// Diff() will emit ChangeRenameColumn instead of drop+add when oldName
+// matches a dropped column in the old snapshot.
+// Remove this call from your schema definition once the migration has been applied.
+func (b *SQLiteTimestampBuilder) RenamedFrom(oldName string) *SQLiteTimestampBuilder {
+	b.def.PreviousName = oldName
+	return b
+}
+
 func (b *SQLiteTimestampBuilder) Build(name string) pg.ColumnDef {
 	if b.def.Name == "" {
 		b.def.Name = name
@@ -250,6 +277,15 @@ func (b *SQLiteJSONBuilder) Default(jsonExpr string) *SQLiteJSONBuilder {
 	return b
 }
 
+// RenamedFrom declares that this column was renamed from oldName.
+// Diff() will emit ChangeRenameColumn instead of drop+add when oldName
+// matches a dropped column in the old snapshot.
+// Remove this call from your schema definition once the migration has been applied.
+func (b *SQLiteJSONBuilder) RenamedFrom(oldName string) *SQLiteJSONBuilder {
+	b.def.PreviousName = oldName
+	return b
+}
+
 func (b *SQLiteJSONBuilder) Build(name string) pg.ColumnDef {
 	if b.def.Name == "" {
 		b.def.Name = name
@@ -286,6 +322,15 @@ func (b *RealBuilder) Default(val float64) *RealBuilder {
 	b.def.DefaultExpr = fmt.Sprintf("%g", val)
 	return b
 }
+// RenamedFrom declares that this column was renamed from oldName.
+// Diff() will emit ChangeRenameColumn instead of drop+add when oldName
+// matches a dropped column in the old snapshot.
+// Remove this call from your schema definition once the migration has been applied.
+func (b *RealBuilder) RenamedFrom(oldName string) *RealBuilder {
+	b.def.PreviousName = oldName
+	return b
+}
+
 func (b *RealBuilder) Build(name string) pg.ColumnDef {
 	if b.def.Name == "" {
 		b.def.Name = name
@@ -313,6 +358,15 @@ func (b *BlobBuilder) PrimaryKey() *BlobBuilder {
 	b.def.NotNull = true
 	return b
 }
+// RenamedFrom declares that this column was renamed from oldName.
+// Diff() will emit ChangeRenameColumn instead of drop+add when oldName
+// matches a dropped column in the old snapshot.
+// Remove this call from your schema definition once the migration has been applied.
+func (b *BlobBuilder) RenamedFrom(oldName string) *BlobBuilder {
+	b.def.PreviousName = oldName
+	return b
+}
+
 func (b *BlobBuilder) Build(name string) pg.ColumnDef {
 	if b.def.Name == "" {
 		b.def.Name = name
