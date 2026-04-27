@@ -44,6 +44,7 @@ const (
 	joinLeft  joinType = "LEFT JOIN"
 	joinRight joinType = "RIGHT JOIN"
 	joinFull  joinType = "FULL JOIN"
+	joinCross joinType = "CROSS JOIN"
 )
 
 type joinClause struct {
