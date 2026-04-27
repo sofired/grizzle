@@ -9,9 +9,11 @@ import (
 
 // GenerateCreateSQL returns the full SQL to create all given tables from scratch,
 // including separate CREATE INDEX statements. Statements are separated by ";\n".
-func GenerateCreateSQL(tables ...*pg.TableDef) string {
+// It accepts tables from any dialect via the TableDefiner interface.
+func GenerateCreateSQL(tables ...pg.TableDefiner) string {
 	var stmts []string
-	for _, t := range tables {
+	for _, td := range tables {
+		t := td.Def()
 		stmts = append(stmts, createTableSQL(t))
 		for _, c := range t.Constraints {
 			if sql := indexSQL(t.QualifiedName(), c); sql != "" {

@@ -137,10 +137,26 @@ func (b *InsertBuilder) DoUpdateSetExcluded(cols ...string) *InsertBuilder {
 // DoUpdateSetStruct extracts non-nil db-tagged fields and adds them to the
 // DO UPDATE SET clause as explicit col = val assignments. Nil pointer fields
 // are skipped (same semantics as UpdateBuilder.SetStruct).
+// If row is nil, a nil pointer, or not a struct, the conflict action falls back
+// to DO NOTHING to avoid emitting an invalid empty SET list. A valid struct
+// whose pointer fields are all nil adds no new assignments but does not clear
+// any assignments already accumulated via DoUpdateSet or DoUpdateSetExcluded;
+// the defense-in-depth guard in buildOnConflict / buildOnDuplicateKey handles
+// the case where the final merged set is still empty.
 func (b *InsertBuilder) DoUpdateSetStruct(row any) *InsertBuilder {
-	cols, vals := structSetsForUpdate(row)
+	cols, vals, err := structSetsForUpdate(row)
 	cp := *b
 	u := b.upsertCopy()
+	if err != nil {
+		// Invalid input (nil, nil pointer, non-struct): fall back to DO NOTHING
+		// rather than emitting a syntactically invalid DO UPDATE SET with no
+		// assignments.
+		u.doNothing = true
+		u.sets = nil
+		u.excluded = nil
+		cp.upsert = u
+		return &cp
+	}
 	u.doNothing = false
 	for i, c := range cols {
 		u.sets = append(u.sets, setClause{col: c, val: vals[i]})
@@ -273,7 +289,9 @@ func buildOnConflict(sb *strings.Builder, ctx *expr.BuildContext, u *upsertClaus
 		sb.WriteString(ctx.Quote(u.conflictConstraint))
 	}
 
-	if u.doNothing {
+	if u.doNothing || (len(u.sets) == 0 && len(u.excluded) == 0) {
+		// Emit DO NOTHING when explicitly requested or when there are no SET
+		// assignments — an empty DO UPDATE SET list is invalid SQL.
 		sb.WriteString(" DO NOTHING")
 	} else {
 		sb.WriteString(" DO UPDATE SET ")
@@ -306,9 +324,11 @@ func buildOnConflict(sb *strings.Builder, ctx *expr.BuildContext, u *upsertClaus
 // Note: MySQL ignores the conflict-target columns — the conflict is determined
 // by the table's PRIMARY KEY and UNIQUE indexes automatically.
 func buildOnDuplicateKey(sb *strings.Builder, ctx *expr.BuildContext, u *upsertClause) {
-	if u.doNothing {
+	if u.doNothing || (len(u.sets) == 0 && len(u.excluded) == 0) {
 		// MySQL has no DO NOTHING equivalent in ON DUPLICATE KEY UPDATE syntax.
 		// Callers should use IgnoreConflicts() to get INSERT IGNORE INTO instead.
+		// Also omit the clause when there are no SET assignments — an empty
+		// ON DUPLICATE KEY UPDATE list is invalid SQL.
 		// Emit nothing so the statement remains valid (just a regular INSERT).
 		return
 	}

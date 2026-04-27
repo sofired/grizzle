@@ -448,6 +448,114 @@ func TestUpsert_DoUpdateSetStruct(t *testing.T) {
 	)
 }
 
+// TestUpsert_DoUpdateSetStruct_NilInput verifies that passing nil to
+// DoUpdateSetStruct falls back to DO NOTHING rather than emitting an invalid
+// empty DO UPDATE SET clause.
+func TestUpsert_DoUpdateSetStruct_NilInput(t *testing.T) {
+	realmID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	username := "alice"
+	row := ts.UserInsert{RealmID: realmID, Username: username}
+	assertSQL(t, "upsert do update set struct nil falls back to do nothing",
+		query.InsertInto(ts.UsersT).
+			Values(row).
+			OnConflict("realm_id", "username").
+			DoUpdateSetStruct(nil),
+		`INSERT INTO "users" ("realm_id", "username") VALUES ($1, $2) ON CONFLICT ("realm_id", "username") DO NOTHING`,
+		[]any{realmID, username},
+	)
+}
+
+// TestUpsert_DoUpdateSetStruct_NilPointer verifies that passing a nil pointer
+// to DoUpdateSetStruct falls back to DO NOTHING.
+func TestUpsert_DoUpdateSetStruct_NilPointer(t *testing.T) {
+	realmID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	username := "alice"
+	row := ts.UserInsert{RealmID: realmID, Username: username}
+	var upd *ts.UserUpdate // nil pointer
+	assertSQL(t, "upsert do update set struct nil pointer falls back to do nothing",
+		query.InsertInto(ts.UsersT).
+			Values(row).
+			OnConflict("realm_id", "username").
+			DoUpdateSetStruct(upd),
+		`INSERT INTO "users" ("realm_id", "username") VALUES ($1, $2) ON CONFLICT ("realm_id", "username") DO NOTHING`,
+		[]any{realmID, username},
+	)
+}
+
+// TestUpsert_DoUpdateSetStruct_NonStruct verifies that passing a non-struct
+// to DoUpdateSetStruct falls back to DO NOTHING.
+func TestUpsert_DoUpdateSetStruct_NonStruct(t *testing.T) {
+	realmID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	username := "alice"
+	row := ts.UserInsert{RealmID: realmID, Username: username}
+	assertSQL(t, "upsert do update set struct non-struct falls back to do nothing",
+		query.InsertInto(ts.UsersT).
+			Values(row).
+			OnConflict("realm_id", "username").
+			DoUpdateSetStruct("not-a-struct"),
+		`INSERT INTO "users" ("realm_id", "username") VALUES ($1, $2) ON CONFLICT ("realm_id", "username") DO NOTHING`,
+		[]any{realmID, username},
+	)
+}
+
+// TestUpsert_DoUpdateSetStruct_AllNilFields verifies that passing a struct
+// where all pointer fields are nil (producing no SET assignments) falls back
+// to DO NOTHING rather than an empty SET list.
+func TestUpsert_DoUpdateSetStruct_AllNilFields(t *testing.T) {
+	realmID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	username := "alice"
+	row := ts.UserInsert{RealmID: realmID, Username: username}
+	upd := ts.UserUpdate{} // all pointer fields are nil
+	assertSQL(t, "upsert do update set struct all nil fields falls back to do nothing",
+		query.InsertInto(ts.UsersT).
+			Values(row).
+			OnConflict("realm_id", "username").
+			DoUpdateSetStruct(upd),
+		`INSERT INTO "users" ("realm_id", "username") VALUES ($1, $2) ON CONFLICT ("realm_id", "username") DO NOTHING`,
+		[]any{realmID, username},
+	)
+}
+
+// TestUpsert_DoUpdateSetStruct_NilInput_MySQL verifies that on MySQL dialects,
+// DoUpdateSetStruct with nil input omits the ON DUPLICATE KEY UPDATE clause
+// (emitting a plain INSERT) rather than an invalid empty assignment list.
+func TestUpsert_DoUpdateSetStruct_NilInput_MySQL(t *testing.T) {
+	realmID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	username := "alice"
+	row := ts.UserInsert{RealmID: realmID, Username: username}
+	sql, _ := query.InsertInto(ts.UsersT).
+		Values(row).
+		OnConflict("realm_id", "username").
+		DoUpdateSetStruct(nil).
+		Build(dialect.MySQL)
+	if strings.Contains(sql, "ON DUPLICATE KEY UPDATE") {
+		t.Errorf("expected no ON DUPLICATE KEY UPDATE clause, got: %s", sql)
+	}
+	if strings.Contains(sql, "UPDATE ") {
+		t.Errorf("expected no UPDATE clause of any kind, got: %s", sql)
+	}
+}
+
+// TestUpsert_DoUpdateSetStruct_AllNilFields_WithPriorSets verifies that when
+// DoUpdateSetStruct receives a valid struct with all nil pointer fields, it
+// does not clear SET assignments already accumulated via DoUpdateSet.
+func TestUpsert_DoUpdateSetStruct_AllNilFields_WithPriorSets(t *testing.T) {
+	realmID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	username := "alice"
+	enabled := true
+	row := ts.UserInsert{RealmID: realmID, Username: username}
+	upd := ts.UserUpdate{} // all pointer fields are nil
+	assertSQL(t, "prior DoUpdateSet not cleared by all-nil DoUpdateSetStruct",
+		query.InsertInto(ts.UsersT).
+			Values(row).
+			OnConflict("realm_id", "username").
+			DoUpdateSet("enabled", enabled).
+			DoUpdateSetStruct(upd),
+		`INSERT INTO "users" ("realm_id", "username") VALUES ($1, $2) ON CONFLICT ("realm_id", "username") DO UPDATE SET "enabled" = $3`,
+		[]any{realmID, username, enabled},
+	)
+}
+
 // -------------------------------------------------------------------
 // UPDATE tests
 // -------------------------------------------------------------------
@@ -868,14 +976,47 @@ func TestIndex(t *testing.T) {
 	}
 	r1 := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 	r2 := uuid.MustParse("00000000-0000-0000-0000-000000000002")
-	realms := []Realm{{ID: r1, Name: "Alpha"}, {ID: r2, Name: "Beta"}}
-	idx := query.Index(realms, func(r Realm) uuid.UUID { return r.ID })
-	if idx[r1].Name != "Alpha" {
-		t.Errorf("expected Alpha, got %s", idx[r1].Name)
-	}
-	if idx[r2].Name != "Beta" {
-		t.Errorf("expected Beta, got %s", idx[r2].Name)
-	}
+
+	t.Run("unique keys", func(t *testing.T) {
+		realms := []Realm{{ID: r1, Name: "Alpha"}, {ID: r2, Name: "Beta"}}
+		idx := query.Index(realms, func(r Realm) uuid.UUID { return r.ID })
+		if idx[r1].Name != "Alpha" {
+			t.Errorf("expected Alpha, got %s", idx[r1].Name)
+		}
+		if idx[r2].Name != "Beta" {
+			t.Errorf("expected Beta, got %s", idx[r2].Name)
+		}
+	})
+
+	t.Run("duplicate keys use first-wins semantics", func(t *testing.T) {
+		realms := []Realm{
+			{ID: r1, Name: "Alpha"},
+			{ID: r2, Name: "Beta"},
+			{ID: r1, Name: "AlphaDuplicate"},
+		}
+		idx := query.Index(realms, func(r Realm) uuid.UUID { return r.ID })
+		if idx[r1].Name != "Alpha" {
+			t.Errorf("first-wins: expected Alpha, got %s", idx[r1].Name)
+		}
+		if len(idx) != 2 {
+			t.Errorf("expected map length 2, got %d", len(idx))
+		}
+	})
+
+	t.Run("empty slice", func(t *testing.T) {
+		idx := query.Index([]Realm{}, func(r Realm) uuid.UUID { return r.ID })
+		if len(idx) != 0 {
+			t.Errorf("expected empty map, got %d entries", len(idx))
+		}
+	})
+
+	t.Run("single item", func(t *testing.T) {
+		realms := []Realm{{ID: r1, Name: "Only"}}
+		idx := query.Index(realms, func(r Realm) uuid.UUID { return r.ID })
+		if idx[r1].Name != "Only" {
+			t.Errorf("expected Only, got %s", idx[r1].Name)
+		}
+	})
 }
 
 func TestFirst(t *testing.T) {
@@ -1077,6 +1218,30 @@ func TestSubquery_NotIn(t *testing.T) {
 	)
 }
 
+func TestSubquery_In_AliasedCol_NoASClause(t *testing.T) {
+	// If an AliasedCol is passed as the SubqueryIn column reference, the AS
+	// alias must not appear in the rendered SQL (Fix #131).
+	sub := query.Select(ts.RealmsT.ID).From(ts.RealmsT).Where(ts.RealmsT.Name.EQ("acme"))
+	assertSQL(t, "AliasedCol IN (subquery) strips alias",
+		query.Select(ts.UsersT.ID).From(ts.UsersT).
+			Where(query.SubqueryIn(expr.ColAs(ts.UsersT.RealmID, "realm"), sub)),
+		`SELECT "users"."id" FROM "users" WHERE "users"."realm_id" IN (SELECT "realms"."id" FROM "realms" WHERE "realms"."name" = $1)`,
+		[]any{"acme"},
+	)
+}
+
+func TestSubquery_NotIn_AliasedCol_NoASClause(t *testing.T) {
+	// If an AliasedCol is passed as the SubqueryNotIn column reference, the AS
+	// alias must not appear in the rendered SQL (Fix #131 — NOT IN path).
+	sub := query.Select(ts.RealmsT.ID).From(ts.RealmsT).Where(ts.RealmsT.Name.EQ("banned"))
+	assertSQL(t, "AliasedCol NOT IN (subquery) strips alias",
+		query.Select(ts.UsersT.ID).From(ts.UsersT).
+			Where(query.SubqueryNotIn(expr.ColAs(ts.UsersT.RealmID, "realm"), sub)),
+		`SELECT "users"."id" FROM "users" WHERE "users"."realm_id" NOT IN (SELECT "realms"."id" FROM "realms" WHERE "realms"."name" = $1)`,
+		[]any{"banned"},
+	)
+}
+
 func TestSubquery_SharedParams(t *testing.T) {
 	// Outer query has a param, inner query also has a param — numbers must not collide.
 	sub := query.Select(ts.RealmsT.ID).From(ts.RealmsT).Where(ts.RealmsT.Name.EQ("acme"))
@@ -1216,6 +1381,56 @@ func TestAgg_HavingGTE(t *testing.T) {
 			Having(expr.Count().GTE(3)),
 		`SELECT "users"."realm_id" FROM "users" GROUP BY "users"."realm_id" HAVING COUNT(*) >= $1`,
 		[]any{3},
+	)
+}
+
+// -------------------------------------------------------------------
+// Fix #131 — AliasedCol in GROUP BY must not emit AS alias
+// -------------------------------------------------------------------
+
+func TestGroupBy_AliasedCol_NoASClause(t *testing.T) {
+	// expr.ColAs wraps a column with a SELECT-list alias. When passed to
+	// GroupBy, only the underlying column reference should be rendered —
+	// GROUP BY does not accept AS clauses.
+	assertSQL(t, "GROUP BY aliased col strips AS",
+		query.Select(
+			expr.ColAs(ts.UsersT.RealmID, "realm"),
+			expr.Count().As("cnt"),
+		).
+			From(ts.UsersT).
+			GroupBy(expr.ColAs(ts.UsersT.RealmID, "realm")),
+		`SELECT "users"."realm_id" AS "realm", COUNT(*) AS "cnt" FROM "users" GROUP BY "users"."realm_id"`,
+		nil,
+	)
+}
+
+func TestGroupBy_AliasedCol_MultipleColumns(t *testing.T) {
+	// Multiple AliasedCol columns in GROUP BY — each must be rendered without
+	// its AS alias.
+	assertSQL(t, "GROUP BY multiple aliased cols",
+		query.Select(
+			expr.ColAs(ts.UsersT.RealmID, "realm"),
+			expr.ColAs(ts.UsersT.Enabled, "active"),
+			expr.Count().As("cnt"),
+		).
+			From(ts.UsersT).
+			GroupBy(
+				expr.ColAs(ts.UsersT.RealmID, "realm"),
+				expr.ColAs(ts.UsersT.Enabled, "active"),
+			),
+		`SELECT "users"."realm_id" AS "realm", "users"."enabled" AS "active", COUNT(*) AS "cnt" FROM "users" GROUP BY "users"."realm_id", "users"."enabled"`,
+		nil,
+	)
+}
+
+func TestGroupBy_PlainCol_Unchanged(t *testing.T) {
+	// Non-aliased columns in GROUP BY must continue to work unchanged.
+	assertSQL(t, "GROUP BY plain column",
+		query.Select(ts.UsersT.RealmID, expr.Count().As("cnt")).
+			From(ts.UsersT).
+			GroupBy(ts.UsersT.RealmID),
+		`SELECT "users"."realm_id", COUNT(*) AS "cnt" FROM "users" GROUP BY "users"."realm_id"`,
+		nil,
 	)
 }
 
@@ -1559,9 +1774,262 @@ func TestSelect_ForShare_MySQL(t *testing.T) {
 	}
 }
 
+// TestSelect_ForUpdate_SQLite verifies that FOR UPDATE is silently dropped for
+// SQLite, which uses file-level locking and does not support row-level locking.
+func TestSelect_ForUpdate_SQLite(t *testing.T) {
+	q := query.Select().From(ts.UsersT).ForUpdate()
+	got, _ := q.Build(dialect.SQLite)
+	if strings.Contains(got, "FOR UPDATE") {
+		t.Errorf("FOR UPDATE should not be emitted for SQLite, got: %s", got)
+	}
+}
+
+// TestSelect_ForShare_SQLite verifies that FOR SHARE is silently dropped for
+// SQLite, which uses file-level locking and does not support row-level locking.
+func TestSelect_ForShare_SQLite(t *testing.T) {
+	q := query.Select().From(ts.UsersT).ForShare()
+	got, _ := q.Build(dialect.SQLite)
+	if strings.Contains(got, "FOR SHARE") || strings.Contains(got, "LOCK IN") {
+		t.Errorf("locking clause should not be emitted for SQLite, got: %s", got)
+	}
+}
+
+func TestSelect_ForNoKeyUpdate_Postgres(t *testing.T) {
+	q := query.Select().From(ts.UsersT).ForNoKeyUpdate()
+	got, _ := q.Build(dialect.Postgres)
+	if !strings.Contains(got, "FOR NO KEY UPDATE") {
+		t.Errorf("expected FOR NO KEY UPDATE in: %s", got)
+	}
+}
+
+func TestSelect_ForNoKeyUpdate_MySQL(t *testing.T) {
+	q := query.Select().From(ts.UsersT).ForNoKeyUpdate()
+	got, _ := q.Build(dialect.MySQL)
+	if strings.Contains(got, "NO KEY") {
+		t.Errorf("FOR NO KEY UPDATE should not be emitted for MySQL, got: %s", got)
+	}
+}
+
+func TestSelect_ForKeyShare_Postgres(t *testing.T) {
+	q := query.Select().From(ts.UsersT).ForKeyShare()
+	got, _ := q.Build(dialect.Postgres)
+	if !strings.Contains(got, "FOR KEY SHARE") {
+		t.Errorf("expected FOR KEY SHARE in: %s", got)
+	}
+}
+
+func TestSelect_ForKeyShare_MySQL(t *testing.T) {
+	q := query.Select().From(ts.UsersT).ForKeyShare()
+	got, _ := q.Build(dialect.MySQL)
+	if strings.Contains(got, "KEY SHARE") {
+		t.Errorf("FOR KEY SHARE should not be emitted for MySQL, got: %s", got)
+	}
+}
+
+// aliasedTable is a minimal TableSource whose alias differs from its name,
+// used to verify that the OF clause renders the alias and not the base name.
+type aliasedTable struct{ name, alias string }
+
+func (a aliasedTable) GrizTableName() string  { return a.name }
+func (a aliasedTable) GrizTableAlias() string { return a.alias }
+
+func TestSelect_ForUpdate_Of_Alias(t *testing.T) {
+	tbl := aliasedTable{name: "orders", alias: "o"}
+	q := query.Select().From(tbl).ForUpdate().Of(tbl)
+	got, _ := q.Build(dialect.Postgres)
+	want := `SELECT * FROM "orders" AS "o" FOR UPDATE OF "o"`
+	if got != want {
+		t.Errorf("OF alias\ngot:  %s\nwant: %s", got, want)
+	}
+}
+
+func TestSelect_ForUpdate_Of_NoAlias(t *testing.T) {
+	q := query.Select().From(ts.UsersT).ForUpdate().Of(ts.UsersT)
+	assertSQL(t, "FOR UPDATE OF no-alias",
+		q,
+		`SELECT * FROM "users" FOR UPDATE OF "users"`,
+		nil,
+	)
+}
+
+func TestSelect_ForShare_Of_Postgres(t *testing.T) {
+	tbl := aliasedTable{name: "orders", alias: "o"}
+	q := query.Select().From(tbl).ForShare().Of(tbl)
+	got, _ := q.Build(dialect.Postgres)
+	want := `SELECT * FROM "orders" AS "o" FOR SHARE OF "o"`
+	if got != want {
+		t.Errorf("FOR SHARE OF\ngot:  %s\nwant: %s", got, want)
+	}
+}
+
+func TestSelect_ForShare_Of_MySQL_Dropped(t *testing.T) {
+	// MySQL LOCK IN SHARE MODE does not support OF; it must be dropped.
+	tbl := aliasedTable{name: "orders", alias: "o"}
+	q := query.Select().From(tbl).ForShare().Of(tbl)
+	got, _ := q.Build(dialect.MySQL)
+	if strings.Contains(got, " OF ") {
+		t.Errorf("MySQL LOCK IN SHARE MODE must not emit OF clause, got: %s", got)
+	}
+	if !strings.Contains(got, "LOCK IN SHARE MODE") {
+		t.Errorf("expected LOCK IN SHARE MODE in: %s", got)
+	}
+}
+
+func TestSelect_ForUpdate_Of_MySQL_MultiTable(t *testing.T) {
+	// MySQL 8.0+ FOR UPDATE supports OF with multiple tables.
+	t1 := aliasedTable{name: "orders", alias: "o"}
+	t2 := aliasedTable{name: "items", alias: "i"}
+	q := query.Select().From(t1).ForUpdate().Of(t1, t2)
+	got, _ := q.Build(dialect.MySQL)
+	if strings.Count(got, " OF ") != 1 {
+		t.Fatalf("expected exactly one OF clause in: %s", got)
+	}
+	// MySQL uses backtick quoting.
+	if !strings.Contains(got, "`o`") {
+		t.Errorf("expected first table alias `o` in OF clause: %s", got)
+	}
+	if !strings.Contains(got, "`i`") {
+		t.Errorf("expected second table alias `i` in OF clause: %s", got)
+	}
+}
+
+func TestSelect_Of_BeforeForUpdate(t *testing.T) {
+	// Of() can precede ForUpdate(); call order does not matter.
+	tbl := aliasedTable{name: "orders", alias: "o"}
+	q := query.Select().From(tbl).Of(tbl).ForUpdate()
+	got, _ := q.Build(dialect.Postgres)
+	want := `SELECT * FROM "orders" AS "o" FOR UPDATE OF "o"`
+	if got != want {
+		t.Errorf("Of before ForUpdate\ngot:  %s\nwant: %s", got, want)
+	}
+}
+
+func TestSelect_ForUpdate_Of_SQLite_Dropped(t *testing.T) {
+	// SQLite has no row-level locking; the entire clause must be dropped.
+	tbl := aliasedTable{name: "orders", alias: "o"}
+	q := query.Select().From(tbl).ForUpdate().Of(tbl)
+	got, _ := q.Build(dialect.SQLite)
+	if strings.Contains(got, "FOR UPDATE") || strings.Contains(got, " OF ") {
+		t.Errorf("SQLite must drop all locking clauses, got: %s", got)
+	}
+}
+
+// -------------------------------------------------------------------
+// For(strength, opts...) — SKIP LOCKED / NOWAIT tests
+// -------------------------------------------------------------------
+
+func TestSelect_For_SkipLocked_Postgres(t *testing.T) {
+	q := query.Select().From(ts.UsersT).For(query.LockForUpdate, query.SkipLocked)
+	got, _ := q.Build(dialect.Postgres)
+	want := `SELECT * FROM "users" FOR UPDATE SKIP LOCKED`
+	if got != want {
+		t.Errorf("got:  %s\nwant: %s", got, want)
+	}
+}
+
+func TestSelect_For_NoWait_Postgres(t *testing.T) {
+	q := query.Select().From(ts.UsersT).For(query.LockForUpdate, query.NoWait)
+	got, _ := q.Build(dialect.Postgres)
+	want := `SELECT * FROM "users" FOR UPDATE NOWAIT`
+	if got != want {
+		t.Errorf("got:  %s\nwant: %s", got, want)
+	}
+}
+
+func TestSelect_For_SkipLocked_MySQL(t *testing.T) {
+	q := query.Select().From(ts.UsersT).For(query.LockForUpdate, query.SkipLocked)
+	got, _ := q.Build(dialect.MySQL)
+	// MySQL uses backtick quoting and appends SKIP LOCKED after FOR UPDATE.
+	if !strings.Contains(got, "FOR UPDATE") {
+		t.Errorf("expected FOR UPDATE in: %s", got)
+	}
+	if !strings.Contains(got, "SKIP LOCKED") {
+		t.Errorf("expected SKIP LOCKED in: %s", got)
+	}
+}
+
+func TestSelect_For_NoWait_MySQL(t *testing.T) {
+	q := query.Select().From(ts.UsersT).For(query.LockForUpdate, query.NoWait)
+	got, _ := q.Build(dialect.MySQL)
+	if !strings.Contains(got, "FOR UPDATE") {
+		t.Errorf("expected FOR UPDATE in: %s", got)
+	}
+	if !strings.Contains(got, "NOWAIT") {
+		t.Errorf("expected NOWAIT in: %s", got)
+	}
+}
+
+func TestSelect_For_SkipLocked_SQLite_Dropped(t *testing.T) {
+	// SQLite has no row-level locking; the entire clause including opts must be dropped.
+	q := query.Select().From(ts.UsersT).For(query.LockForUpdate, query.SkipLocked)
+	got, _ := q.Build(dialect.SQLite)
+	if strings.Contains(got, "FOR UPDATE") || strings.Contains(got, "SKIP LOCKED") {
+		t.Errorf("SQLite must drop all locking clauses, got: %s", got)
+	}
+}
+
+func TestSelect_For_NoKeyUpdate_Of_Postgres(t *testing.T) {
+	tbl := aliasedTable{name: "orders", alias: "o"}
+	q := query.Select().From(tbl).For(query.LockForNoKeyUpdate).Of(tbl)
+	got, _ := q.Build(dialect.Postgres)
+	want := `SELECT * FROM "orders" AS "o" FOR NO KEY UPDATE OF "o"`
+	if got != want {
+		t.Errorf("got:  %s\nwant: %s", got, want)
+	}
+}
+
+func TestSelect_For_KeyShare_Of_Postgres(t *testing.T) {
+	tbl := aliasedTable{name: "orders", alias: "o"}
+	q := query.Select().From(tbl).For(query.LockForKeyShare).Of(tbl)
+	got, _ := q.Build(dialect.Postgres)
+	want := `SELECT * FROM "orders" AS "o" FOR KEY SHARE OF "o"`
+	if got != want {
+		t.Errorf("got:  %s\nwant: %s", got, want)
+	}
+}
+
+func TestSelect_For_WithOptsAndOf(t *testing.T) {
+	// FOR UPDATE OF "o" NOWAIT — combined Of+opts on postgres.
+	tbl := aliasedTable{name: "orders", alias: "o"}
+	q := query.Select().From(tbl).For(query.LockForUpdate, query.NoWait).Of(tbl)
+	got, _ := q.Build(dialect.Postgres)
+	want := `SELECT * FROM "orders" AS "o" FOR UPDATE OF "o" NOWAIT`
+	if got != want {
+		t.Errorf("got:  %s\nwant: %s", got, want)
+	}
+}
+
 // -------------------------------------------------------------------
 // UPDATE / DELETE LIMIT tests
 // -------------------------------------------------------------------
+
+// -------------------------------------------------------------------
+// Update nil / invalid struct guard (Fix #3 / Fix #120)
+// -------------------------------------------------------------------
+
+func TestUpdate_SetStruct_Nil(t *testing.T) {
+	t.Run("nil interface", func(t *testing.T) {
+		sql, args := query.Update(ts.UsersT).SetStruct(nil).Build(dialect.Postgres)
+		if sql != "" || args != nil {
+			t.Errorf("expected empty result for nil SetStruct, got sql=%q args=%v", sql, args)
+		}
+	})
+
+	t.Run("nil pointer exercises !rv.IsValid() guard", func(t *testing.T) {
+		var p *ts.UserUpdate // nil pointer — Elem() returns invalid reflect.Value
+		sql, args := query.Update(ts.UsersT).SetStruct(p).Build(dialect.Postgres)
+		if sql != "" || args != nil {
+			t.Errorf("expected empty result for nil pointer SetStruct, got sql=%q args=%v", sql, args)
+		}
+	})
+
+	t.Run("non-struct value", func(t *testing.T) {
+		sql, args := query.Update(ts.UsersT).SetStruct(42).Build(dialect.Postgres)
+		if sql != "" || args != nil {
+			t.Errorf("expected empty result for non-struct SetStruct, got sql=%q args=%v", sql, args)
+		}
+	})
+}
 
 func TestUpdate_Limit_MySQL(t *testing.T) {
 	q := query.Update(ts.UsersT).
@@ -1695,9 +2163,51 @@ func TestSetOp_UnionAll_ThreeParts(t *testing.T) {
 func TestSetOp_Union_WithLimitOrderBy(t *testing.T) {
 	a := query.Select(ts.UsersT.Username).From(ts.UsersT)
 	b := query.Select(ts.RealmsT.Name).From(ts.RealmsT)
+	// Set operation ORDER BY must strip the table qualifier (Fix #11).
 	assertSQL(t, "union with limit and order",
 		a.Union(b).OrderBy(ts.UsersT.Username.Asc()).Limit(10),
-		`(SELECT "users"."username" FROM "users") UNION (SELECT "realms"."name" FROM "realms") ORDER BY "users"."username" ASC LIMIT 10`,
+		`(SELECT "users"."username" FROM "users") UNION (SELECT "realms"."name" FROM "realms") ORDER BY "username" ASC LIMIT 10`,
+		nil,
+	)
+}
+
+// Fix #134 — SetOpBuilder.OrderByCols edge cases
+func TestSetOp_Intersect_WithOrderBy(t *testing.T) {
+	a := query.Select(ts.UsersT.Username).From(ts.UsersT)
+	b := query.Select(ts.RealmsT.Name).From(ts.RealmsT)
+	assertSQL(t, "intersect with order by",
+		a.Intersect(b).OrderBy(ts.UsersT.Username.Asc()),
+		`(SELECT "users"."username" FROM "users") INTERSECT (SELECT "realms"."name" FROM "realms") ORDER BY "username" ASC`,
+		nil,
+	)
+}
+
+func TestSetOp_Except_WithOrderBy(t *testing.T) {
+	a := query.Select(ts.UsersT.Username).From(ts.UsersT)
+	b := query.Select(ts.RealmsT.Name).From(ts.RealmsT)
+	assertSQL(t, "except with order by",
+		a.Except(b).OrderBy(ts.UsersT.Username.Desc()),
+		`(SELECT "users"."username" FROM "users") EXCEPT (SELECT "realms"."name" FROM "realms") ORDER BY "username" DESC`,
+		nil,
+	)
+}
+
+func TestSetOp_EmptyOrderBy(t *testing.T) {
+	// No OrderBy call — result must not contain ORDER BY.
+	a := query.Select(ts.UsersT.Username).From(ts.UsersT)
+	b := query.Select(ts.RealmsT.Name).From(ts.RealmsT)
+	sql, _ := a.Union(b).Build(dialect.Postgres)
+	if strings.Contains(sql, "ORDER BY") {
+		t.Errorf("expected no ORDER BY in result without OrderBy() call, got: %s", sql)
+	}
+}
+
+func TestSetOp_LimitOffset(t *testing.T) {
+	a := query.Select(ts.UsersT.Username).From(ts.UsersT)
+	b := query.Select(ts.RealmsT.Name).From(ts.RealmsT)
+	assertSQL(t, "union with limit and offset",
+		a.Union(b).OrderBy(ts.UsersT.Username.Asc()).Limit(5).Offset(10),
+		`(SELECT "users"."username" FROM "users") UNION (SELECT "realms"."name" FROM "realms") ORDER BY "username" ASC LIMIT 5 OFFSET 10`,
 		nil,
 	)
 }
@@ -2059,5 +2569,270 @@ func TestWithRecursive_AndRegularCTE(t *testing.T) {
 
 	if !strings.HasPrefix(sql, "WITH RECURSIVE") {
 		t.Errorf("expected WITH RECURSIVE (any recursive CTE triggers it), got: %s", sql)
+	}
+}
+
+// -------------------------------------------------------------------
+// Dialect-gating tests (issue #178)
+// -------------------------------------------------------------------
+
+// noCTEDialect is a test-only dialect that reports SupportsCTE() = false.
+type noCTEDialect struct{}
+
+func (noCTEDialect) Name() string               { return "no_cte" }
+func (noCTEDialect) Placeholder(_ int) string   { return "?" }
+func (noCTEDialect) QuoteIdent(n string) string { return `"` + n + `"` }
+func (noCTEDialect) SupportsReturning() bool    { return false }
+func (noCTEDialect) UpsertStyle() dialect.UpsertStyle {
+	return dialect.UpsertOnConflict
+}
+func (noCTEDialect) InsertIgnoreClause() string    { return "" }
+func (noCTEDialect) SupportsCTE() bool             { return false }
+func (noCTEDialect) SupportsWindowFunctions() bool { return true }
+func (noCTEDialect) SupportsDistinctOn() bool      { return false }
+func (noCTEDialect) SupportsForUpdate() bool       { return false }
+func (noCTEDialect) SupportsForNoKeyUpdate() bool  { return false }
+func (noCTEDialect) SupportsForShareOf() bool      { return false }
+func (noCTEDialect) SupportsFullJoin() bool        { return false }
+func (noCTEDialect) ForShareClause() string        { return "" }
+
+// noWindowDialect is a test-only dialect that reports SupportsWindowFunctions() = false.
+type noWindowDialect struct{ noCTEDialect }
+
+func (noWindowDialect) SupportsCTE() bool             { return true }
+func (noWindowDialect) SupportsWindowFunctions() bool { return false }
+
+func TestCTE_DroppedWhenNotSupported(t *testing.T) {
+	sub := query.Select(ts.UsersT.ID).From(ts.UsersT)
+	sql, _ := query.Select(ts.UsersT.ID).
+		With("recent", sub).
+		From(query.CTERef("recent")).
+		Build(noCTEDialect{})
+
+	if strings.Contains(sql, "WITH") {
+		t.Errorf("expected WITH clause to be dropped, got: %s", sql)
+	}
+	// The CTERef FROM reference is preserved as a plain table name; at runtime
+	// the database will raise an unknown-table error — the intended fail-loud
+	// behaviour rather than silently returning wrong rows.
+	want := `SELECT "users"."id" FROM "recent"`
+	if sql != want {
+		t.Errorf("CTE dropped: want %q, got %q", want, sql)
+	}
+}
+
+func TestCTE_RecursiveDroppedWhenNotSupported(t *testing.T) {
+	anchor := query.Select(ts.UsersT.ID).From(ts.UsersT).Where(ts.UsersT.Enabled.IsTrue())
+	recursive := query.Select(ts.UsersT.ID).From(ts.UsersT)
+	sql, _ := query.Select(ts.UsersT.ID).
+		WithRecursive("tree", anchor, recursive).
+		From(query.CTERef("tree")).
+		Build(noCTEDialect{})
+
+	// The CTERef FROM reference is preserved as a plain table name; at runtime
+	// the database will raise an unknown-table error — the intended fail-loud
+	// behaviour rather than silently returning wrong rows.
+	want := `SELECT "users"."id" FROM "tree"`
+	if sql != want {
+		t.Errorf("recursive CTE dropped: want %q, got %q", want, sql)
+	}
+}
+
+func TestCTE_EmittedWhenSupported(t *testing.T) {
+	sub := query.Select(ts.UsersT.ID).From(ts.UsersT)
+	sql, _ := query.Select(ts.UsersT.ID).
+		With("recent", sub).
+		From(query.CTERef("recent")).
+		Build(dialect.Postgres)
+
+	if !strings.HasPrefix(sql, `WITH "recent" AS (`) {
+		t.Errorf("expected WITH clause, got: %s", sql)
+	}
+}
+
+func TestDistinctOn_PostgresRendered(t *testing.T) {
+	sql, _ := query.Select(ts.UsersT.RealmID, ts.UsersT.Username).
+		From(ts.UsersT).
+		DistinctOn(ts.UsersT.RealmID).
+		OrderBy(ts.UsersT.RealmID.Asc(), ts.UsersT.CreatedAt.Desc()).
+		Build(dialect.Postgres)
+
+	want := `SELECT DISTINCT ON ("users"."realm_id") "users"."realm_id", "users"."username" FROM "users" ORDER BY "users"."realm_id" ASC, "users"."created_at" DESC`
+	if sql != want {
+		t.Errorf("SQL mismatch\n got:  %s\nwant: %s", sql, want)
+	}
+}
+
+func TestDistinctOn_DegradesToDistinctOnUnsupportedDialect(t *testing.T) {
+	// MySQL does not support DISTINCT ON — should degrade to SELECT DISTINCT.
+	sql, _ := query.Select(ts.UsersT.RealmID, ts.UsersT.Username).
+		From(ts.UsersT).
+		DistinctOn(ts.UsersT.RealmID).
+		Build(dialect.MySQL)
+
+	if strings.Contains(sql, "DISTINCT ON") {
+		t.Errorf("DISTINCT ON should be dropped for MySQL, got: %s", sql)
+	}
+	if !strings.Contains(sql, "SELECT DISTINCT") {
+		t.Errorf("expected SELECT DISTINCT fallback, got: %s", sql)
+	}
+}
+
+func TestDistinctOn_DegradesToDistinctForSQLite(t *testing.T) {
+	// SQLite does not support DISTINCT ON — should degrade to SELECT DISTINCT.
+	sql, _ := query.Select(ts.UsersT.RealmID, ts.UsersT.Username).
+		From(ts.UsersT).
+		DistinctOn(ts.UsersT.RealmID).
+		Build(dialect.SQLite)
+
+	if strings.Contains(sql, "DISTINCT ON") {
+		t.Errorf("DISTINCT ON should be dropped for SQLite, got: %s", sql)
+	}
+	if !strings.Contains(sql, "SELECT DISTINCT") {
+		t.Errorf("expected SELECT DISTINCT fallback, got: %s", sql)
+	}
+}
+
+func TestDistinctOn_MultipleCols(t *testing.T) {
+	sql, _ := query.Select(ts.UsersT.RealmID, ts.UsersT.Username, ts.UsersT.ID).
+		From(ts.UsersT).
+		DistinctOn(ts.UsersT.RealmID, ts.UsersT.Username).
+		Build(dialect.Postgres)
+
+	if !strings.Contains(sql, `DISTINCT ON ("users"."realm_id", "users"."username")`) {
+		t.Errorf("expected DISTINCT ON with two cols, got: %s", sql)
+	}
+}
+
+func TestWindowFunctions_DroppedWhenNotSupported(t *testing.T) {
+	// Window functions should be silently removed from the SELECT list.
+	sql, _ := query.Select(
+		ts.UsersT.ID,
+		expr.RowNumber().PartitionBy(ts.UsersT.RealmID).As("rn"),
+	).From(ts.UsersT).Build(noWindowDialect{})
+
+	if strings.Contains(sql, "ROW_NUMBER") {
+		t.Errorf("expected ROW_NUMBER to be dropped, got: %s", sql)
+	}
+	if !strings.Contains(sql, `"users"."id"`) {
+		t.Errorf("expected non-window column to remain, got: %s", sql)
+	}
+}
+
+func TestWindowFunctions_AllDroppedFallsBackToStar(t *testing.T) {
+	// When all selected columns are window functions and dialect drops them, fall back to *.
+	sql, _ := query.Select(
+		expr.RowNumber().As("rn"),
+		expr.Rank().As("rnk"),
+	).From(ts.UsersT).Build(noWindowDialect{})
+
+	if !strings.Contains(sql, "SELECT *") {
+		t.Errorf("expected SELECT * fallback when all window cols dropped, got: %s", sql)
+	}
+}
+
+func TestWindowFunctions_EmittedWhenSupported(t *testing.T) {
+	sql, _ := query.Select(
+		ts.UsersT.ID,
+		expr.RowNumber().PartitionBy(ts.UsersT.RealmID).As("rn"),
+	).From(ts.UsersT).Build(dialect.Postgres)
+
+	if !strings.Contains(sql, "ROW_NUMBER()") {
+		t.Errorf("expected ROW_NUMBER in output, got: %s", sql)
+	}
+}
+
+func TestFullJoin_DroppedOnMySQL(t *testing.T) {
+	sql, _ := query.Select(ts.UsersT.ID, ts.RealmsT.ID).
+		From(ts.UsersT).
+		FullJoin(ts.RealmsT, ts.UsersT.RealmID.EQCol(ts.RealmsT.ID)).
+		Build(dialect.MySQL)
+
+	if strings.Contains(sql, "FULL JOIN") {
+		t.Errorf("FULL JOIN should be dropped for MySQL, got: %s", sql)
+	}
+}
+
+func TestFullJoin_DroppedOnSQLite(t *testing.T) {
+	sql, _ := query.Select(ts.UsersT.ID).
+		From(ts.UsersT).
+		FullJoin(ts.RealmsT, ts.UsersT.RealmID.EQCol(ts.RealmsT.ID)).
+		Build(dialect.SQLite)
+
+	if strings.Contains(sql, "FULL JOIN") {
+		t.Errorf("FULL JOIN should be dropped for SQLite, got: %s", sql)
+	}
+}
+
+func TestFullJoin_EmittedOnPostgres(t *testing.T) {
+	sql, _ := query.Select(ts.UsersT.ID, ts.RealmsT.ID).
+		From(ts.UsersT).
+		FullJoin(ts.RealmsT, ts.UsersT.RealmID.EQCol(ts.RealmsT.ID)).
+		Build(dialect.Postgres)
+
+	if !strings.Contains(sql, "FULL JOIN") {
+		t.Errorf("expected FULL JOIN in PostgreSQL output, got: %s", sql)
+	}
+}
+
+func TestFullJoin_MixedJoins_OnlyFullDropped(t *testing.T) {
+	// Inner join should remain; full join should be dropped on MySQL.
+	sql, _ := query.Select(ts.UsersT.ID).
+		From(ts.UsersT).
+		InnerJoin(ts.RealmsT, ts.UsersT.RealmID.EQCol(ts.RealmsT.ID)).
+		FullJoin(ts.RealmsT, ts.UsersT.RealmID.EQCol(ts.RealmsT.ID)).
+		Build(dialect.MySQL)
+
+	if strings.Contains(sql, "FULL JOIN") {
+		t.Errorf("FULL JOIN should be dropped for MySQL, got: %s", sql)
+	}
+	if !strings.Contains(sql, "INNER JOIN") {
+		t.Errorf("INNER JOIN should remain, got: %s", sql)
+	}
+}
+
+func TestWindowFunctions_AliasedColWrappingWindowExpr_DroppedWhenNotSupported(t *testing.T) {
+	// expr.ColAs(windowExpr, alias) wraps a WindowExpr in an AliasedCol.
+	// The window-function gate must unwrap AliasedCol to detect the inner WindowExpr
+	// and drop it on dialects that do not support window functions.
+	sql, _ := query.Select(
+		ts.UsersT.ID,
+		expr.ColAs(expr.RowNumber(), "rn"), // AliasedCol wrapping a WindowExpr
+	).From(ts.UsersT).Build(noWindowDialect{})
+
+	if strings.Contains(sql, "ROW_NUMBER") {
+		t.Errorf("ColAs-wrapped WindowExpr should be dropped on no-window dialect, got: %s", sql)
+	}
+	if !strings.Contains(sql, `"users"."id"`) {
+		t.Errorf("non-window column should remain after dropping ColAs-wrapped WindowExpr, got: %s", sql)
+	}
+}
+
+func TestWindowFunctions_AliasedColWrappingWindowExpr_AllDroppedFallsBackToStar(t *testing.T) {
+	// When all columns are ColAs-wrapped WindowExprs and the dialect drops them,
+	// the query should fall back to SELECT * (same as bare WindowExpr).
+	sql, _ := query.Select(
+		expr.ColAs(expr.RowNumber(), "rn"),
+		expr.ColAs(expr.Rank(), "rnk"),
+	).From(ts.UsersT).Build(noWindowDialect{})
+
+	if !strings.Contains(sql, "SELECT *") {
+		t.Errorf("expected SELECT * fallback when all ColAs-wrapped window cols dropped, got: %s", sql)
+	}
+}
+
+func TestDistinctOn_EmptyColsIsNoOp(t *testing.T) {
+	// DistinctOn() with no arguments sets distinct=true but distinctOn stays empty.
+	// On non-supporting dialects this should degrade to SELECT DISTINCT (not panic).
+	sql, _ := query.Select(ts.UsersT.ID).
+		From(ts.UsersT).
+		DistinctOn(). // empty variadic
+		Build(dialect.MySQL)
+
+	if !strings.Contains(sql, "SELECT DISTINCT") {
+		t.Errorf("empty DistinctOn() should degrade to SELECT DISTINCT on MySQL, got: %s", sql)
+	}
+	if strings.Contains(sql, "DISTINCT ON") {
+		t.Errorf("DISTINCT ON must not appear for empty DistinctOn() on MySQL, got: %s", sql)
 	}
 }

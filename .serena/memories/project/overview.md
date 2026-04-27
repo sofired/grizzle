@@ -53,6 +53,5 @@ Schema definition (user writes) → `grizzle gen` → typed Go structs:
 4. Prepared statements
 5. Relations definition + relational query API
 
-## Go Not Installed on Dev Machine
-Go is not installed in /home/claude/ environment. Run `go mod tidy && go test ./...` locally.
-The code has been manually reviewed for correctness.
+## Dev Environment
+Go 1.24+ required. Run `go test ./...` to verify the build.
