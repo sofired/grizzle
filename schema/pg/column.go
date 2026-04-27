@@ -385,7 +385,6 @@ func (b *TimestampBuilder) Build(name string) ColumnDef { return b.build(name) }
 // JSONBBuilder builds a jsonb column definition.
 type JSONBBuilder struct {
 	colBuilder
-	goTypeOverride string //nolint:unused
 }
 
 // JSONB starts a jsonb column.
