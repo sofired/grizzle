@@ -50,6 +50,25 @@ func GenerateChangeSQL(snap Snapshot, c Change) []string {
 		if c.RenameTarget == "" {
 			return nil
 		}
+		srcSchema := schemaOf(c.TableName)
+		dstSchema := schemaOf(c.RenameTarget)
+		newUnqualified := unqualifiedName(c.RenameTarget)
+		if srcSchema != dstSchema {
+			// Cross-schema: rename within source schema first, then move.
+			// PostgreSQL requires two steps because RENAME TO cannot change the schema.
+			var intermediate string
+			if srcSchema != "" {
+				intermediate = srcSchema + "." + newUnqualified
+			} else {
+				intermediate = newUnqualified
+			}
+			return []string{
+				fmt.Sprintf("ALTER TABLE %s RENAME TO %s",
+					quoteTable(c.TableName), qi(newUnqualified)),
+				fmt.Sprintf("ALTER TABLE %s SET SCHEMA %s",
+					quoteTable(intermediate), qi(dstSchema)),
+			}
+		}
 		// PostgreSQL RENAME TO accepts only the unqualified new name within the
 		// same schema; a schema-qualified target like "public"."users" is invalid.
 		return []string{fmt.Sprintf(
@@ -338,6 +357,16 @@ func unqualifiedName(name string) string {
 		return parts[1]
 	}
 	return name
+}
+
+// schemaOf returns the schema component of a potentially qualified name,
+// or "" if the name has no schema prefix.
+func schemaOf(name string) string {
+	parts := strings.SplitN(name, ".", 2)
+	if len(parts) == 2 {
+		return parts[0]
+	}
+	return ""
 }
 
 // quoteUnqualifiedTable quotes only the unqualified (non-schema-prefixed) part

@@ -1024,6 +1024,31 @@ func TestRenameTable_SQLGen_SchemaQualified_Postgres(t *testing.T) {
 	}
 }
 
+// TestRenameTable_SQLGen_CrossSchema_Postgres verifies that a PostgreSQL rename
+// spanning two schemas emits RENAME TO (within source schema) followed by
+// SET SCHEMA, so the table lands in the target schema rather than silently
+// staying in the source schema under the new name.
+func TestRenameTable_SQLGen_CrossSchema_Postgres(t *testing.T) {
+	snap := kit.EmptySnapshot()
+	change := kit.Change{
+		Kind:         kit.ChangeRenameTable,
+		TableName:    "auth.accounts",
+		RenameTarget: "public.users",
+	}
+	stmts := kit.GenerateChangeSQL(snap, change)
+	if len(stmts) != 2 {
+		t.Fatalf("expected 2 statements for cross-schema rename, got %d: %v", len(stmts), stmts)
+	}
+	wantRename := `ALTER TABLE "auth"."accounts" RENAME TO "users"`
+	if stmts[0] != wantRename {
+		t.Errorf("stmt[0] got:  %s\nwant: %s", stmts[0], wantRename)
+	}
+	wantSetSchema := `ALTER TABLE "auth"."users" SET SCHEMA "public"`
+	if stmts[1] != wantSetSchema {
+		t.Errorf("stmt[1] got:  %s\nwant: %s", stmts[1], wantSetSchema)
+	}
+}
+
 // TestRenameTable_SQLGen_SchemaQualified_MySQL verifies that MySQL RENAME TABLE
 // preserves the schema qualifier on both sides when the TableName and
 // RenameTarget are schema-qualified.

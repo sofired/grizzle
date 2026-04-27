@@ -103,15 +103,20 @@ func (b *TableBuilder) WithConstraints(fn func(t TableRef) []Constraint) *TableD
 // matches a dropped table in the old snapshot. Leave empty for new tables
 // or tables whose name has not changed.
 //
-// oldName must match the qualified map key used in the old snapshot:
+// oldName must match the map key used in the old snapshot exactly:
 //   - For tables without a schema (Schema == ""): pass the bare table name,
 //     e.g. "accounts".
-//   - For tables with a schema set: pass the dot-separated qualified name,
-//     e.g. "auth.accounts" or "public.accounts" — matching the key that
-//     FromDefs() / QualifiedName() would have stored.
+//   - For tables in a non-public schema: pass the dot-separated qualified
+//     name, e.g. "auth.accounts".
+//   - For PostgreSQL tables in the public schema: the snapshot key depends
+//     on how the snapshot was built. FromDefs() / QualifiedName() keys
+//     public-schema tables as "public.accounts", but introspected snapshots
+//     (kit.Push / IntrospectPostgres) drop the "public." prefix and key
+//     them as just "accounts". Use the form that matches how the old snapshot
+//     was built.
 //
-// Passing an unqualified name when the old table had a schema (or vice-versa)
-// will result in no rename being detected; Diff() will fall back to drop+create.
+// Passing a name that does not exactly match the old snapshot key will result
+// in no rename being detected; Diff() will fall back to drop+create.
 // Remove this call from your schema definition once the migration has been applied.
 func (b *TableBuilder) RenamedFrom(oldName string) *TableBuilder {
 	b.def.PreviousName = oldName
