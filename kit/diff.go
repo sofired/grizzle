@@ -20,6 +20,7 @@ const (
 	ChangeAlterColumnNull    ChangeKind = "alter_column_nullable"
 	ChangeAlterColumnDefault ChangeKind = "alter_column_default"
 	ChangeRenameColumn       ChangeKind = "rename_column"
+	ChangeRenameTable        ChangeKind = "rename_table"
 	ChangeAddConstraint      ChangeKind = "add_constraint"
 	ChangeDropConstraint     ChangeKind = "drop_constraint"
 
@@ -36,7 +37,11 @@ const (
 // Change represents a single schema mutation — the unit that SQL generation works from.
 type Change struct {
 	Kind      ChangeKind
-	TableName string // qualified name (also used as object name for views/enums)
+	TableName string // qualified name (also used as object name for views/enums); for ChangeRenameTable this is the old (source) name
+
+	// RenameTarget is set only for ChangeRenameTable: it holds the new table name.
+	// For all other change kinds this field is empty.
+	RenameTarget string
 
 	// Set for column-level changes.
 	OldCol *pg.ColumnDef
@@ -57,16 +62,24 @@ type Change struct {
 // the old snapshot to the new snapshot. Pass EmptySnapshot() as old
 // when targeting a fresh database.
 //
+// Rename detection: if a new table carries PreviousName matching a table that
+// was removed, Diff emits ChangeRenameTable instead of ChangeDropTable +
+// ChangeCreateTable. The same applies to columns within a table: a column with
+// PreviousName matching a removed column emits ChangeRenameColumn instead of
+// ChangeDropColumn + ChangeAddColumn. Each removed entity can be claimed by at
+// most one rename; for tables, the first match in sorted new-table-name order
+// wins, and for columns, the first match in new.Columns slice order wins.
+//
 // Ordering is deterministic and safe for direct application:
 //
 //  1. Create new enums — types may be referenced by table columns.
-//  2. Create new tables — FK targets must exist before referencing tables.
+//  2. Rename or create new tables (renames before creates, both sorted by new name).
 //  3. Create new views — views SELECT FROM tables, which must already exist.
 //  4. Alter existing tables (columns + constraints, including drops).
 //  5. Alter existing enums (add values only; value removal is unsupported).
 //  6. Replace changed views (DROP then CREATE OR REPLACE in sequence).
 //  7. Drop removed views — before tables, since views depend on tables.
-//  8. Drop removed tables.
+//  8. Drop removed tables (unless renamed away).
 //  9. Drop removed enums — after tables that may reference them are gone.
 //
 // Within each phase, output is sorted by object name for determinism.
@@ -90,6 +103,34 @@ func Diff(old, new Snapshot) []Change {
 	newNames := sortedTableNames(new.Tables)
 	oldNames := sortedTableNames(old.Tables)
 
+	// Build sets of added and dropped tables for rename detection.
+	droppedTables := make(map[string]struct{})
+	for _, name := range oldNames {
+		if _, exists := new.Tables[name]; !exists {
+			droppedTables[name] = struct{}{}
+		}
+	}
+
+	// Build a lookup: old table name → new table name, for tables renamed via PreviousName.
+	// This prevents the same dropped-table from being matched by multiple new tables.
+	renamedFrom := make(map[string]string) // old name → new name
+	for _, name := range newNames {
+		newT := new.Tables[name]
+		if _, existsInOld := old.Tables[name]; !existsInOld && newT.PreviousName != "" {
+			if _, wasDropped := droppedTables[newT.PreviousName]; wasDropped {
+				if _, alreadyClaimed := renamedFrom[newT.PreviousName]; !alreadyClaimed {
+					renamedFrom[newT.PreviousName] = name
+				}
+			}
+		}
+	}
+
+	// Build reverse lookup: new table name → old table name.
+	renamedTo := make(map[string]string) // new name → old name
+	for oldName, newName := range renamedFrom {
+		renamedTo[newName] = oldName
+	}
+
 	// Phase 1: new enums not in old → CREATE TYPE ... AS ENUM.
 	for _, name := range sortedKeys(new.Enums) {
 		if _, exists := old.Enums[name]; !exists {
@@ -102,16 +143,30 @@ func Diff(old, new Snapshot) []Change {
 		}
 	}
 
-	// Phase 2: new tables not in old → CREATE TABLE.
+	// Phase 2: new tables not in old.
+	// Renames are collected and appended before creates so that FK references
+	// from a newly created table to the renamed table's new name are safe,
+	// regardless of alphabetical ordering.
+	var renames []Change
+	var creates []Change
 	for _, name := range newNames {
 		if _, exists := old.Tables[name]; !exists {
-			changes = append(changes, Change{
-				Kind:      ChangeCreateTable,
-				TableName: name,
-			})
-			// Individual column/constraint adds are implied by CREATE TABLE.
+			if oldName, isRename := renamedTo[name]; isRename {
+				renames = append(renames, Change{
+					Kind:         ChangeRenameTable,
+					TableName:    oldName,
+					RenameTarget: name,
+				})
+			} else {
+				creates = append(creates, Change{
+					Kind:      ChangeCreateTable,
+					TableName: name,
+				})
+			}
 		}
 	}
+	changes = append(changes, renames...)
+	changes = append(changes, creates...)
 
 	// Phase 3: new views not in old → CREATE VIEW (after tables exist).
 	for _, name := range sortedKeys(new.Views) {
@@ -126,12 +181,14 @@ func Diff(old, new Snapshot) []Change {
 	}
 
 	// Phase 4: tables present in both → diff columns and constraints.
+	// Also handle tables that were renamed: diff the renamed table's contents.
 	for _, name := range newNames {
-		oldT, exists := old.Tables[name]
-		if !exists {
-			continue // handled above
+		if _, exists := old.Tables[name]; exists {
+			changes = append(changes, diffTable(name, old.Tables[name], new.Tables[name], renamedFrom)...)
+		} else if oldName, isRename := renamedTo[name]; isRename {
+			// Renamed table: diff columns and constraints under the new name.
+			changes = append(changes, diffTable(name, old.Tables[oldName], new.Tables[name], renamedFrom)...)
 		}
-		changes = append(changes, diffTable(name, oldT, new.Tables[name])...)
 	}
 
 	// Phase 5: enums in both → diff values (additions only; removal requires pg_catalog surgery).
@@ -180,13 +237,15 @@ func Diff(old, new Snapshot) []Change {
 		}
 	}
 
-	// Phase 8: tables in old but not new → DROP TABLE.
+	// Phase 8: tables in old but not new → DROP TABLE (unless renamed away).
 	for _, name := range oldNames {
 		if _, exists := new.Tables[name]; !exists {
-			changes = append(changes, Change{
-				Kind:      ChangeDropTable,
-				TableName: name,
-			})
+			if _, wasRenamed := renamedFrom[name]; !wasRenamed {
+				changes = append(changes, Change{
+					Kind:      ChangeDropTable,
+					TableName: name,
+				})
+			}
 		}
 	}
 
@@ -248,43 +307,106 @@ func normalizeViewSQL(sql string) string {
 }
 
 // diffTable computes column- and constraint-level changes for one table.
-func diffTable(tableName string, old, new *TableSnap) []Change {
+// tableRenames maps old table name → new table name (from the outer Diff call)
+// and is used to normalize FK target references in old constraints so that a
+// rename of a referenced table is not misread as a constraint drop+add.
+func diffTable(tableName string, old, new *TableSnap, tableRenames map[string]string) []Change {
 	var changes []Change
 
 	// --- Columns ---
 	oldCols := colMap(old.Columns)
 	newCols := colMap(new.Columns)
 
-	// Added columns (preserve new.Columns order).
+	// Build a set of old column names that are not present in new (candidates for rename).
+	droppedCols := make(map[string]struct{})
+	for _, oc := range old.Columns {
+		if _, exists := newCols[oc.Name]; !exists {
+			droppedCols[oc.Name] = struct{}{}
+		}
+	}
+
+	// Build a mapping: old col name → new col name, for columns renamed via PreviousName.
+	// Each dropped-column can only be the source of one rename.
+	colRenamedFrom := make(map[string]string) // old name → new name
+	for _, nc := range new.Columns {
+		if _, existsInOld := oldCols[nc.Name]; !existsInOld && nc.PreviousName != "" {
+			if _, wasDropped := droppedCols[nc.PreviousName]; wasDropped {
+				if _, alreadyClaimed := colRenamedFrom[nc.PreviousName]; !alreadyClaimed {
+					colRenamedFrom[nc.PreviousName] = nc.Name
+				}
+			}
+		}
+	}
+	// Reverse lookup: new col name → old col name.
+	colRenamedTo := make(map[string]string) // new name → old name
+	for oldName, newName := range colRenamedFrom {
+		colRenamedTo[newName] = oldName
+	}
+
+	// Added/renamed columns (preserve new.Columns order).
 	for _, nc := range new.Columns {
 		oc, exists := oldCols[nc.Name]
 		if !exists {
 			nc := nc // copy
-			changes = append(changes, Change{
-				Kind:      ChangeAddColumn,
-				TableName: tableName,
-				NewCol:    &nc,
-			})
+			if oldColName, isRename := colRenamedTo[nc.Name]; isRename {
+				// Emit rename: OldCol carries the old name, NewCol carries the new name.
+				oldColDef := oldCols[oldColName]
+				o, n := oldColDef, nc
+				changes = append(changes, Change{
+					Kind:      ChangeRenameColumn,
+					TableName: tableName,
+					OldCol:    &o,
+					NewCol:    &n,
+				})
+				// Also diff the old vs new column definitions (targeting the new
+				// column name) so that type/nullability/default changes that
+				// co-occur with the rename are not silently dropped.
+				// We use a copy of the old column with its name updated to the new
+				// name so that the ALTER COLUMN statements reference the post-rename
+				// column name.
+				oldColRenamed := oldColDef
+				oldColRenamed.Name = nc.Name
+				changes = append(changes, diffColumn(tableName, oldColRenamed, nc)...)
+			} else {
+				changes = append(changes, Change{
+					Kind:      ChangeAddColumn,
+					TableName: tableName,
+					NewCol:    &nc,
+				})
+			}
 			continue
 		}
 		// Modified columns.
 		changes = append(changes, diffColumn(tableName, oc, nc)...)
 	}
 
-	// Dropped columns.
+	// Dropped columns (skip columns that were renamed away).
 	for _, oc := range old.Columns {
 		if _, exists := newCols[oc.Name]; !exists {
-			oc := oc // copy
-			changes = append(changes, Change{
-				Kind:      ChangeDropColumn,
-				TableName: tableName,
-				OldCol:    &oc,
-			})
+			if _, wasRenamed := colRenamedFrom[oc.Name]; !wasRenamed {
+				oc := oc // copy
+				changes = append(changes, Change{
+					Kind:      ChangeDropColumn,
+					TableName: tableName,
+					OldCol:    &oc,
+				})
+			}
 		}
 	}
 
 	// --- Constraints ---
-	oldCons := constraintMap(old.Constraints)
+	// Normalize old constraints so that column/table renames don't produce
+	// spurious drop+add cycles. After RENAME COLUMN or RENAME TABLE the database
+	// automatically updates constraint column references, so a constraint that
+	// only changed due to a rename compares equal to its post-rename form and
+	// generates no changes. Without normalization the add-before-drop ordering
+	// can fail at runtime because the existing constraint (now referencing the
+	// new column name) still holds the same constraint name.
+	normalizedOldCons := make([]pg.Constraint, len(old.Constraints))
+	for i, oc := range old.Constraints {
+		normalizedOldCons[i] = normalizeConstraintRefs(oc, tableName, colRenamedFrom, tableRenames)
+	}
+	oldCons := constraintMap(normalizedOldCons)
 	newCons := constraintMap(new.Constraints)
 
 	// Added constraints (preserve new.Constraints order for stability).
@@ -301,7 +423,7 @@ func diffTable(tableName string, old, new *TableSnap) []Change {
 	}
 
 	// Dropped constraints (or changed — drop+re-add).
-	for _, oc := range old.Constraints {
+	for _, oc := range normalizedOldCons {
 		key := constraintKey(oc)
 		nc, exists := newCons[key]
 		if !exists {
@@ -382,6 +504,60 @@ func constraintMap(cons []pg.Constraint) map[string]pg.Constraint {
 		m[constraintKey(c)] = c
 	}
 	return m
+}
+
+// normalizeConstraintRefs rewrites constraint column/table references using
+// rename maps so that a post-rename old constraint compares equal to the new
+// constraint definition. colRenames maps old column name → new column name
+// within the current table only; tableRenames maps old table name → new table
+// name (used for FK target normalization). currentTable is the new (post-rename)
+// name of the table being diffed and is used to scope colRenames to FKColumns
+// only for self-referential FKs — applying local column renames to a foreign
+// table's referenced columns is incorrect.
+func normalizeConstraintRefs(c pg.Constraint, currentTable string, colRenames, tableRenames map[string]string) pg.Constraint {
+	if len(colRenames) > 0 {
+		c.Columns = applyRenames(c.Columns, colRenames)
+		// Apply colRenames to FKColumns only for self-referential FKs. colRenames
+		// captures column renames within currentTable; the FKTable in the old
+		// constraint uses the pre-rename table name, so check both the current
+		// name and any old name that maps to it.
+		if c.FKTable == currentTable || tableRenames[c.FKTable] == currentTable {
+			c.FKColumns = applyRenames(c.FKColumns, colRenames)
+		}
+	}
+	if len(tableRenames) > 0 {
+		if newTable, ok := tableRenames[c.FKTable]; ok {
+			c.FKTable = newTable
+		}
+	}
+	return c
+}
+
+// applyRenames returns a new slice with any element found in renames replaced
+// by its mapped value. Returns the original slice unchanged if no renames apply.
+func applyRenames(cols []string, renames map[string]string) []string {
+	if len(cols) == 0 || len(renames) == 0 {
+		return cols
+	}
+	needsCopy := false
+	for _, col := range cols {
+		if _, ok := renames[col]; ok {
+			needsCopy = true
+			break
+		}
+	}
+	if !needsCopy {
+		return cols
+	}
+	out := make([]string, len(cols))
+	for i, col := range cols {
+		if newName, ok := renames[col]; ok {
+			out[i] = newName
+		} else {
+			out[i] = col
+		}
+	}
+	return out
 }
 
 // constraintsEqual compares two constraints for logical equality,

@@ -37,6 +37,12 @@ type TableSnap struct {
 	Schema      string          `json:"schema,omitempty"`
 	Columns     []pg.ColumnDef  `json:"columns"`
 	Constraints []pg.Constraint `json:"constraints,omitempty"`
+	// PreviousName is intentionally excluded from JSON snapshots — it is only
+	// meaningful as a schema definition annotation for the current migration step
+	// and must not persist across snapshot saves. If it were persisted, a future
+	// table that happens to share the old name would trigger a spurious RENAME
+	// instead of a CREATE.
+	PreviousName string `json:"-"`
 }
 
 // QualifiedName returns the schema-qualified name used as the map key.
@@ -92,10 +98,11 @@ func FromDefs(tables ...pg.TableDefiner) Snapshot {
 	for _, td := range tables {
 		t := td.Def()
 		ts := &TableSnap{
-			Name:        t.Name,
-			Schema:      t.Schema,
-			Columns:     t.Columns,
-			Constraints: t.Constraints,
+			Name:         t.Name,
+			Schema:       t.Schema,
+			Columns:      t.Columns,
+			Constraints:  t.Constraints,
+			PreviousName: t.PreviousName,
 		}
 		snap.Tables[ts.QualifiedName()] = ts
 	}
