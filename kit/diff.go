@@ -488,12 +488,17 @@ func normFKAction(a pg.FKAction) pg.FKAction {
 // orderNewTables returns names in dependency order so that, when creating new
 // tables, a table that other new tables reference via FK is always emitted
 // before the referencing table. Tables with no FK dependencies on other new
-// tables come first (sorted alphabetically among themselves). Cycles fall
-// back to input order and the DB will surface the constraint error.
+// tables come first, sorted alphabetically. Cycles fall back to alphabetical
+// order and the DB will surface the constraint error.
 func orderNewTables(names []string, tables map[string]*TableSnap) []string {
 	if len(names) <= 1 {
 		return names
 	}
+
+	sorted := make([]string, len(names))
+	copy(sorted, names)
+	sort.Strings(sorted)
+	names = sorted
 
 	nameSet := make(map[string]bool, len(names))
 	for _, n := range names {
@@ -542,7 +547,7 @@ func orderNewTables(names []string, tables map[string]*TableSnap) []string {
 		sort.Strings(adj[k])
 	}
 
-	// Seed with zero-degree nodes in their original (alphabetical) order.
+	// Seed with zero-degree nodes in alphabetical order (names is sorted above).
 	queue := make([]string, 0, len(names))
 	for _, n := range names {
 		if inDegree[n] == 0 {
@@ -566,7 +571,7 @@ func orderNewTables(names []string, tables map[string]*TableSnap) []string {
 		}
 	}
 
-	// Cycle fallback: append remaining nodes in original input order.
+	// Cycle fallback: append remaining nodes in alphabetical order.
 	if len(result) < len(names) {
 		inResult := make(map[string]bool, len(result))
 		for _, r := range result {
