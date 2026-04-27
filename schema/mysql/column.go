@@ -143,6 +143,7 @@ func (b *TinyIntBuilder) Default(val int) *TinyIntBuilder {
 	b.def.DefaultExpr = fmt.Sprintf("%d", val)
 	return b
 }
+
 // RenamedFrom declares that this column was renamed from oldName.
 // Diff() will emit ChangeRenameColumn instead of drop+add when oldName
 // matches a dropped column in the old snapshot.
@@ -177,6 +178,7 @@ func (b *SmallIntBuilder) Default(val int) *SmallIntBuilder {
 	b.def.DefaultExpr = fmt.Sprintf("%d", val)
 	return b
 }
+
 // RenamedFrom declares that this column was renamed from oldName.
 // Diff() will emit ChangeRenameColumn instead of drop+add when oldName
 // matches a dropped column in the old snapshot.
@@ -211,6 +213,7 @@ func (b *DoubleBuilder) Default(val float64) *DoubleBuilder {
 	b.def.DefaultExpr = fmt.Sprintf("%g", val)
 	return b
 }
+
 // RenamedFrom declares that this column was renamed from oldName.
 // Diff() will emit ChangeRenameColumn instead of drop+add when oldName
 // matches a dropped column in the old snapshot.
@@ -250,6 +253,7 @@ func (b *MediumIntBuilder) Default(val int) *MediumIntBuilder {
 	b.def.DefaultExpr = fmt.Sprintf("%d", val)
 	return b
 }
+
 // RenamedFrom declares that this column was renamed from oldName.
 // Diff() will emit ChangeRenameColumn instead of drop+add when oldName
 // matches a dropped column in the old snapshot.
@@ -284,6 +288,7 @@ func (b *YearBuilder) Default(val int) *YearBuilder {
 	b.def.DefaultExpr = fmt.Sprintf("%d", val)
 	return b
 }
+
 // RenamedFrom declares that this column was renamed from oldName.
 // Diff() will emit ChangeRenameColumn instead of drop+add when oldName
 // matches a dropped column in the old snapshot.
@@ -329,6 +334,7 @@ func (b *EnumBuilder) Default(val string) *EnumBuilder {
 	b.def.DefaultExpr = fmt.Sprintf("'%s'", strings.ReplaceAll(val, "'", "''"))
 	return b
 }
+
 // RenamedFrom declares that this column was renamed from oldName.
 // Diff() will emit ChangeRenameColumn instead of drop+add when oldName
 // matches a dropped column in the old snapshot.
@@ -374,6 +380,7 @@ func (b *SetBuilder) Default(val string) *SetBuilder {
 	b.def.DefaultExpr = fmt.Sprintf("'%s'", strings.ReplaceAll(val, "'", "''"))
 	return b
 }
+
 // RenamedFrom declares that this column was renamed from oldName.
 // Diff() will emit ChangeRenameColumn instead of drop+add when oldName
 // matches a dropped column in the old snapshot.

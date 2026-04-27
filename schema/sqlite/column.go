@@ -322,6 +322,7 @@ func (b *RealBuilder) Default(val float64) *RealBuilder {
 	b.def.DefaultExpr = fmt.Sprintf("%g", val)
 	return b
 }
+
 // RenamedFrom declares that this column was renamed from oldName.
 // Diff() will emit ChangeRenameColumn instead of drop+add when oldName
 // matches a dropped column in the old snapshot.
@@ -358,6 +359,7 @@ func (b *BlobBuilder) PrimaryKey() *BlobBuilder {
 	b.def.NotNull = true
 	return b
 }
+
 // RenamedFrom declares that this column was renamed from oldName.
 // Diff() will emit ChangeRenameColumn instead of drop+add when oldName
 // matches a dropped column in the old snapshot.
