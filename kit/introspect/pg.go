@@ -82,7 +82,7 @@ func IntrospectPostgres(ctx context.Context, pool *pgxpool.Pool, schemas ...stri
 	for _, t := range live.Tables {
 		fks, err := queryForeignKeys(ctx, pool, t.Schema, t.Name)
 		if err != nil {
-			return live, fmt.Errorf("introspect foreign keys for %s: %w", t.Name, err)
+			return live, fmt.Errorf("introspect foreign keys for %s: %w", t.QualifiedName(), err)
 		}
 		t.Constraints = append(t.Constraints, fks...)
 	}

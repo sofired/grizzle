@@ -986,3 +986,55 @@ func TestDiff_FK_OnUpdateChange_DetectedAsChange(t *testing.T) {
 		t.Errorf("expected 1 drop + 1 add for FK ON UPDATE change, got %d drops %d adds: %v", drops, adds, changes)
 	}
 }
+
+func TestDiff_FK_InlineReferences_RoundTrip_NoSpuriousDrop(t *testing.T) {
+	// When a user schema defines an FK via inline ColumnDef.References (not an
+	// explicit ForeignKey() table constraint), the introspected live snapshot
+	// will have a named FK constraint in Constraints. Diffing live→target must
+	// not produce a spurious ChangeDropConstraint for that FK.
+	live := kit.Snapshot{
+		Version: "1",
+		Tables: map[string]*kit.TableSnap{
+			"users": {
+				Name: "users",
+				Columns: []pg.ColumnDef{
+					{Name: "id", SQLType: "uuid", NotNull: true, PrimaryKey: true, HasDefault: true, DefaultExpr: "gen_random_uuid()"},
+				},
+			},
+			"posts": {
+				Name: "posts",
+				Columns: []pg.ColumnDef{
+					{Name: "id", SQLType: "uuid", NotNull: true, PrimaryKey: true, HasDefault: true, DefaultExpr: "gen_random_uuid()"},
+					{Name: "user_id", SQLType: "uuid", NotNull: true},
+				},
+				// The DB has a named FK constraint — exactly what IntrospectPostgres returns.
+				Constraints: []pg.Constraint{
+					{
+						Kind:       pg.KindForeignKey,
+						Name:       "posts_user_id_fkey",
+						Columns:    []string{"user_id"},
+						FKTable:    "users",
+						FKColumns:  []string{"id"},
+						FKOnDelete: pg.FKActionNoAction,
+						FKOnUpdate: pg.FKActionNoAction,
+					},
+				},
+			},
+		},
+	}
+
+	// Target schema uses inline References — no explicit ForeignKey constraint.
+	usersDef := pg.Table("users",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+	).Build()
+	postsDef := pg.Table("posts",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("user_id", pg.UUID().NotNull().References("users", "id")),
+	).Build()
+
+	target := kit.FromDefs(usersDef, postsDef)
+	changes := kit.Diff(live, target)
+	if len(changes) != 0 {
+		t.Errorf("expected 0 changes for inline-References round-trip, got %d: %v", len(changes), changes)
+	}
+}

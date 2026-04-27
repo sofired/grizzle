@@ -147,6 +147,17 @@ func diffTable(tableName string, old, new *TableSnap) []Change {
 	oldCons := constraintMap(old.Constraints)
 	newCons := constraintMap(new.Constraints)
 
+	// Build a set of inline FK signatures from the target's column References.
+	// Single-column FKs defined via ColumnDef.References don't appear in
+	// Constraints, so we track them here to avoid emitting spurious
+	// ChangeDropConstraint when the live DB has a named FK for the same column.
+	inlineRefs := make(map[string]struct{})
+	for _, col := range new.Columns {
+		if col.References != nil {
+			inlineRefs[col.Name+":"+col.References.Table+":"+col.References.Column] = struct{}{}
+		}
+	}
+
 	// Added constraints (preserve new.Constraints order for stability).
 	for _, nc := range new.Constraints {
 		key := constraintKey(nc)
@@ -165,6 +176,14 @@ func diffTable(tableName string, old, new *TableSnap) []Change {
 		key := constraintKey(oc)
 		nc, exists := newCons[key]
 		if !exists {
+			// Don't drop a single-column FK that is represented as an inline
+			// ColumnDef.References in the target schema — the FK is kept alive
+			// by the column definition and doesn't need to be managed here.
+			if oc.Kind == pg.KindForeignKey && len(oc.Columns) == 1 && len(oc.FKColumns) == 1 {
+				if _, matched := inlineRefs[oc.Columns[0]+":"+oc.FKTable+":"+oc.FKColumns[0]]; matched {
+					continue
+				}
+			}
 			oc := oc
 			changes = append(changes, Change{
 				Kind:       ChangeDropConstraint,
