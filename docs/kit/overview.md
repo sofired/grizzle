@@ -112,6 +112,21 @@ The diff engine detects and generates SQL for:
 
 To rename a table or column without data loss, use `RenamedFrom()` on the table or column builder. `Diff()` will emit `ChangeRenameTable` or `ChangeRenameColumn` instead of a destructive drop-and-recreate. **Remove the `RenamedFrom()` call from your schema definition once the migration has been applied** — it is a one-time migration annotation. Column type, nullability, and default changes can be generated for PostgreSQL and MySQL; SQLite may still require a manual table rebuild for those changes.
 
+```go
+// Rename a table
+pg.Table("users",
+    pg.C("id", pg.UUID().PrimaryKey()),
+    pg.C("login_name", pg.Varchar(255).NotNull()),
+).RenamedFrom("accounts")
+
+// Rename a column
+pg.Table("users",
+    pg.C("login_name", pg.Varchar(255).NotNull().RenamedFrom("username")),
+)
+```
+
+The `oldName` argument must exactly match how the table or column appears as a key in the existing snapshot — for introspected snapshots, public-schema tables are keyed without the `public.` prefix. See the `RenamedFrom` godoc for details.
+
 ## `grizzle gen` — code generation
 
 The CLI companion to the migration kit generates typed Go table definitions from an existing database schema:

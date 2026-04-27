@@ -69,7 +69,19 @@ type sqliteTableBuilder struct {
 
 // RenamedFrom declares that this table was renamed from oldName.
 // Diff() will emit ChangeRenameTable instead of drop+create when oldName
-// matches a dropped table in the old snapshot.
+// matches a dropped table in the old snapshot. Leave empty for new tables
+// or tables whose name has not changed.
+//
+// oldName must match the map key used in the old snapshot exactly:
+//   - For main-database tables (Schema == ""): pass the bare table name,
+//     e.g. "notes".
+//   - For attached-database tables: pass the dot-separated qualified name,
+//     e.g. "archive.notes".
+//   - For introspected snapshots (kit.Push / IntrospectSQLite), tables are
+//     keyed by the bare table name without a schema prefix.
+//
+// Passing a name that does not exactly match the old snapshot key will result
+// in no rename being detected; Diff() will fall back to drop+create.
 // Remove this call from your schema definition once the migration has been applied.
 func (b *sqliteTableBuilder) RenamedFrom(oldName string) *sqliteTableBuilder {
 	b.pgBuilder.RenamedFrom(oldName)

@@ -146,7 +146,8 @@ func (b *TinyIntBuilder) Default(val int) *TinyIntBuilder {
 
 // RenamedFrom declares that this column was renamed from oldName.
 // Diff() will emit ChangeRenameColumn instead of drop+add when oldName
-// matches a dropped column in the old snapshot.
+// matches a dropped column in the old snapshot. Leave empty for new columns
+// or columns whose name has not changed.
 // Remove this call from your schema definition once the migration has been applied.
 func (b *TinyIntBuilder) RenamedFrom(oldName string) *TinyIntBuilder {
 	b.def.PreviousName = oldName
@@ -181,7 +182,8 @@ func (b *SmallIntBuilder) Default(val int) *SmallIntBuilder {
 
 // RenamedFrom declares that this column was renamed from oldName.
 // Diff() will emit ChangeRenameColumn instead of drop+add when oldName
-// matches a dropped column in the old snapshot.
+// matches a dropped column in the old snapshot. Leave empty for new columns
+// or columns whose name has not changed.
 // Remove this call from your schema definition once the migration has been applied.
 func (b *SmallIntBuilder) RenamedFrom(oldName string) *SmallIntBuilder {
 	b.def.PreviousName = oldName
@@ -216,7 +218,8 @@ func (b *DoubleBuilder) Default(val float64) *DoubleBuilder {
 
 // RenamedFrom declares that this column was renamed from oldName.
 // Diff() will emit ChangeRenameColumn instead of drop+add when oldName
-// matches a dropped column in the old snapshot.
+// matches a dropped column in the old snapshot. Leave empty for new columns
+// or columns whose name has not changed.
 // Remove this call from your schema definition once the migration has been applied.
 func (b *DoubleBuilder) RenamedFrom(oldName string) *DoubleBuilder {
 	b.def.PreviousName = oldName
@@ -256,7 +259,8 @@ func (b *MediumIntBuilder) Default(val int) *MediumIntBuilder {
 
 // RenamedFrom declares that this column was renamed from oldName.
 // Diff() will emit ChangeRenameColumn instead of drop+add when oldName
-// matches a dropped column in the old snapshot.
+// matches a dropped column in the old snapshot. Leave empty for new columns
+// or columns whose name has not changed.
 // Remove this call from your schema definition once the migration has been applied.
 func (b *MediumIntBuilder) RenamedFrom(oldName string) *MediumIntBuilder {
 	b.def.PreviousName = oldName
@@ -291,7 +295,8 @@ func (b *YearBuilder) Default(val int) *YearBuilder {
 
 // RenamedFrom declares that this column was renamed from oldName.
 // Diff() will emit ChangeRenameColumn instead of drop+add when oldName
-// matches a dropped column in the old snapshot.
+// matches a dropped column in the old snapshot. Leave empty for new columns
+// or columns whose name has not changed.
 // Remove this call from your schema definition once the migration has been applied.
 func (b *YearBuilder) RenamedFrom(oldName string) *YearBuilder {
 	b.def.PreviousName = oldName
@@ -337,7 +342,8 @@ func (b *EnumBuilder) Default(val string) *EnumBuilder {
 
 // RenamedFrom declares that this column was renamed from oldName.
 // Diff() will emit ChangeRenameColumn instead of drop+add when oldName
-// matches a dropped column in the old snapshot.
+// matches a dropped column in the old snapshot. Leave empty for new columns
+// or columns whose name has not changed.
 // Remove this call from your schema definition once the migration has been applied.
 func (b *EnumBuilder) RenamedFrom(oldName string) *EnumBuilder {
 	b.def.PreviousName = oldName
@@ -383,7 +389,8 @@ func (b *SetBuilder) Default(val string) *SetBuilder {
 
 // RenamedFrom declares that this column was renamed from oldName.
 // Diff() will emit ChangeRenameColumn instead of drop+add when oldName
-// matches a dropped column in the old snapshot.
+// matches a dropped column in the old snapshot. Leave empty for new columns
+// or columns whose name has not changed.
 // Remove this call from your schema definition once the migration has been applied.
 func (b *SetBuilder) RenamedFrom(oldName string) *SetBuilder {
 	b.def.PreviousName = oldName
