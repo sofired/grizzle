@@ -175,7 +175,7 @@ package {{.PackageName}}
 // ---------------------------------------------------------------------------
 
 // {{.TableTypeName}} provides typed column handles for the {{.TableName}} table.
-// Each field is a typed column expression — use it to build WHERE clauses,
+// Each exported field is a typed column expression — use it to build WHERE clauses,
 // ORDER BY expressions, and SELECT lists with compile-time type checking.
 type {{.TableTypeName}} struct {
 	tableAlias string
