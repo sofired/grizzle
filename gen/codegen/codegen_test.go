@@ -464,6 +464,71 @@ var Items = mysql.Table("items",
 	}
 }
 
+func TestMySQL_NewTypes_Codegen(t *testing.T) {
+	// Regression test for issue #130: MediumInt, Year, Enum, and Set must not
+	// produce "unknown column builder" errors during codegen and must map to
+	// the correct expr column types.
+	src := `package testschema
+import mysql "github.com/sofired/grizzle/schema/mysql"
+var Products = mysql.Table("products",
+	mysql.C("id",        mysql.BigSerial()),
+	mysql.C("rank",      mysql.MediumInt().NotNull()),
+	mysql.C("year_made", mysql.Year()),
+	mysql.C("status",    mysql.Enum("draft", "published", "archived").NotNull()),
+	mysql.C("tags",      mysql.Set("featured", "sale", "new")),
+)
+`
+	dir := t.TempDir()
+	f := dir + "/schema.go"
+	if err := writeFile(f, src); err != nil {
+		t.Fatal(err)
+	}
+	tables, err := parser.ParseFile(f)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(tables) != 1 {
+		t.Fatalf("expected 1 table, got %d", len(tables))
+	}
+	gf, err := codegen.GenerateTable(tables[0], codegen.Options{PackageName: "testschema", OutputDir: dir})
+	if err != nil {
+		t.Fatalf("generate (should not fail for MySQL types MediumInt/Year/Enum/Set): %v", err)
+	}
+
+	src2 := string(gf.Source)
+
+	// BigSerial → BigIntColumn
+	if !strings.Contains(src2, "expr.BigIntColumn") {
+		t.Errorf("expected expr.BigIntColumn for mysql.BigSerial in output:\n%s", src2)
+	}
+	// MediumInt / Year → IntColumn + int
+	if !strings.Contains(src2, "expr.IntColumn") {
+		t.Errorf("expected expr.IntColumn for mysql.MediumInt/Year in output:\n%s", src2)
+	}
+	// Enum / Set → StringColumn + string
+	if !strings.Contains(src2, "expr.StringColumn") {
+		t.Errorf("expected expr.StringColumn for mysql.Enum/Set in output:\n%s", src2)
+	}
+
+	// Nullable Year → pointer int in Select model.
+	if !strings.Contains(src2, "*int") {
+		t.Errorf("expected *int for nullable mysql.Year in output:\n%s", src2)
+	}
+	// NotNull MediumInt → non-pointer int field present in Select model.
+	// go/format aligns with spaces, so check for the field name and type separately.
+	if !strings.Contains(src2, "Rank") {
+		t.Errorf("expected Rank field for mysql.MediumInt in output:\n%s", src2)
+	}
+	// NotNull Enum → plain string present in Select model.
+	if !strings.Contains(src2, "Status") {
+		t.Errorf("expected Status field for mysql.Enum in output:\n%s", src2)
+	}
+	// Nullable Set → pointer string in Select model.
+	if !strings.Contains(src2, "*string") {
+		t.Errorf("expected *string for nullable mysql.Set in output:\n%s", src2)
+	}
+}
+
 // writeFile is a simple helper for writing test files.
 func writeFile(path, content string) error {
 	return os.WriteFile(path, []byte(content), 0644)

@@ -227,7 +227,7 @@ func colMap(cols []pg.ColumnDef) map[string]pg.ColumnDef {
 
 // constraintKey returns a stable, collision-free key for a constraint.
 // It incorporates the kind and sorted column list so that unnamed constraints
-// or constraints sharing a name do not collide in the map (Fix #6).
+// or constraints sharing a name do not collide in the map.
 func constraintKey(c pg.Constraint) string {
 	cols := make([]string, len(c.Columns))
 	copy(cols, c.Columns)
@@ -245,7 +245,7 @@ func constraintMap(cons []pg.Constraint) map[string]pg.Constraint {
 }
 
 // constraintsEqual compares two constraints for logical equality,
-// including FK-specific fields (Fix #9).
+// including FK-specific fields (FKTable, FKColumns, FKOnDelete, FKOnUpdate).
 func constraintsEqual(a, b pg.Constraint) bool {
 	if a.Kind != b.Kind || a.Name != b.Name || a.WhereExpr != b.WhereExpr || a.CheckExpr != b.CheckExpr {
 		return false
@@ -258,7 +258,7 @@ func constraintsEqual(a, b pg.Constraint) bool {
 			return false
 		}
 	}
-	// Compare FK-specific fields (Fix #9).
+	// Compare FK-specific fields when present.
 	if a.Kind == pg.KindForeignKey {
 		if a.FKTable != b.FKTable {
 			return false

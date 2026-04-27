@@ -82,7 +82,9 @@ type subqueryInExpr struct {
 }
 
 func (e subqueryInExpr) ToSQL(ctx *expr.BuildContext) string {
-	return selectColSQL(ctx, e.col) + " IN (" + e.sub.buildWith(ctx) + ")"
+	// Use distinctColSQL to strip any AS alias from an AliasedCol; the IN
+	// left-hand side is a column reference, not a SELECT-list position (#131).
+	return distinctColSQL(ctx, e.col) + " IN (" + e.sub.buildWith(ctx) + ")"
 }
 
 type subqueryNotInExpr struct {
@@ -91,5 +93,7 @@ type subqueryNotInExpr struct {
 }
 
 func (e subqueryNotInExpr) ToSQL(ctx *expr.BuildContext) string {
-	return selectColSQL(ctx, e.col) + " NOT IN (" + e.sub.buildWith(ctx) + ")"
+	// Use distinctColSQL to strip any AS alias from an AliasedCol; the NOT IN
+	// left-hand side is a column reference, not a SELECT-list position (#131).
+	return distinctColSQL(ctx, e.col) + " NOT IN (" + e.sub.buildWith(ctx) + ")"
 }

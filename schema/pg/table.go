@@ -26,12 +26,23 @@ func C(name string, builder ColumnBuilder) NamedColumn {
 // TableDef is the complete, immutable definition of a PostgreSQL table.
 // It carries everything needed for migration snapshot generation and
 // Go code generation.
+//
+// TableDef implements TableDefiner (via the Def/Dialect methods below) so
+// that *TableDef can be passed wherever a dialect-agnostic TableDefiner is
+// expected — e.g. kit.FromDefs, kit.Push, kit.Migrate.
 type TableDef struct {
 	Name        string
 	Schema      string // PostgreSQL schema namespace; empty = "public"
 	Columns     []ColumnDef
 	Constraints []Constraint
 }
+
+// Def returns a pointer to the receiver so that *TableDef satisfies
+// the TableDefiner interface.
+func (t *TableDef) Def() *TableDef { return t }
+
+// Dialect returns "postgres" for a *TableDef produced by schema/pg.
+func (t *TableDef) Dialect() string { return "postgres" }
 
 // ColMap returns a map of column name → ColumnDef for quick lookups.
 func (t TableDef) ColMap() map[string]ColumnDef {
@@ -42,8 +53,23 @@ func (t TableDef) ColMap() map[string]ColumnDef {
 	return m
 }
 
-// tableBuilder accumulates columns and constraints during construction.
-type tableBuilder struct {
+// QualifiedName returns the schema-qualified table name for use in SQL.
+// Returns just the table name if no schema is set.
+func (t *TableDef) QualifiedName() string {
+	if t.Schema != "" {
+		return t.Schema + "." + t.Name
+	}
+	return t.Name
+}
+
+// -------------------------------------------------------------------
+// TableBuilder — internal builder type (exported for dialect packages)
+// -------------------------------------------------------------------
+
+// TableBuilder accumulates columns and constraints during construction.
+// It is exported so that dialect packages (schema/mysql, schema/sqlite)
+// can wrap it to produce their own dialect-specific table definition types.
+type TableBuilder struct {
 	def TableDef
 }
 
@@ -57,7 +83,7 @@ type tableBuilder struct {
 //	        pg.Check("age_check", "age >= 0"),
 //	    }
 //	})
-func (b *tableBuilder) WithConstraints(fn func(t TableRef) []Constraint) *TableDef {
+func (b *TableBuilder) WithConstraints(fn func(t TableRef) []Constraint) *TableDef {
 	ref := TableRef{
 		tableName: b.def.Name,
 		cols:      b.def.ColMap(),
@@ -67,16 +93,16 @@ func (b *tableBuilder) WithConstraints(fn func(t TableRef) []Constraint) *TableD
 }
 
 // Build finalises the table definition without additional constraints.
-func (b *tableBuilder) Build() *TableDef { return &b.def }
+func (b *TableBuilder) Build() *TableDef { return &b.def }
 
 // -------------------------------------------------------------------
-// Table factory
+// Table factories
 // -------------------------------------------------------------------
 
 // Table declares a PostgreSQL table with the given name and columns.
 // Column order is preserved as declared.
 //
-// Returns a *tableBuilder so you can chain .WithConstraints() or .Build().
+// Returns a *TableBuilder so you can chain .WithConstraints() or .Build().
 //
 //	var Users = pg.Table("users",
 //	    pg.C("id",   pg.UUID().PrimaryKey().DefaultRandom()),
@@ -86,12 +112,27 @@ func (b *tableBuilder) Build() *TableDef { return &b.def }
 //	        pg.UniqueIndex("users_name_idx").On(t.Col("name")).Build(),
 //	    }
 //	})
-func Table(name string, cols ...NamedColumn) *tableBuilder {
+func Table(name string, cols ...NamedColumn) *TableBuilder {
+	return NewTableBuilder(name, cols...)
+}
+
+// SchemaTable declares a table inside a named PostgreSQL schema namespace
+// (e.g. "auth", "audit"). The generated DDL will be:
+//
+//	CREATE TABLE <schema>.<name> (...)
+func SchemaTable(schema, name string, cols ...NamedColumn) *TableBuilder {
+	return NewSchemaTableBuilder(schema, name, cols...)
+}
+
+// NewTableBuilder constructs a TableBuilder for the given table name and columns.
+// This lower-level constructor is used by dialect packages (schema/mysql,
+// schema/sqlite) to create their own dialect-typed wrappers.
+func NewTableBuilder(name string, cols ...NamedColumn) *TableBuilder {
 	defs := make([]ColumnDef, len(cols))
 	for i, nc := range cols {
 		defs[i] = nc.builder.Build(nc.name)
 	}
-	return &tableBuilder{
+	return &TableBuilder{
 		def: TableDef{
 			Name:    name,
 			Columns: defs,
@@ -99,21 +140,10 @@ func Table(name string, cols ...NamedColumn) *tableBuilder {
 	}
 }
 
-// SchemaTable declares a table inside a named PostgreSQL schema namespace
-// (e.g. "auth", "audit"). The generated DDL will be:
-//
-//	CREATE TABLE <schema>.<name> (...)
-func SchemaTable(schema, name string, cols ...NamedColumn) *tableBuilder {
-	b := Table(name, cols...)
+// NewSchemaTableBuilder constructs a TableBuilder for a schema-namespaced table.
+// This lower-level constructor is used by dialect packages.
+func NewSchemaTableBuilder(schema, name string, cols ...NamedColumn) *TableBuilder {
+	b := NewTableBuilder(name, cols...)
 	b.def.Schema = schema
 	return b
-}
-
-// QualifiedName returns the schema-qualified table name for use in SQL.
-// Returns just the table name if no schema is set.
-func (t *TableDef) QualifiedName() string {
-	if t.Schema != "" {
-		return t.Schema + "." + t.Name
-	}
-	return t.Name
 }

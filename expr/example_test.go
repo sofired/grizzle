@@ -79,3 +79,18 @@ func ExampleRaw() {
 	// Output:
 	// now()
 }
+
+// ExampleRawArgs demonstrates embedding a raw SQL fragment with bound parameters.
+// Each $? placeholder is replaced in order with the next dialect-native placeholder
+// ($1, $2, ... for PostgreSQL; ? for MySQL and SQLite). The argument count must
+// exactly match the placeholder count — any mismatch panics at query-build time.
+func ExampleRawArgs() {
+	lon, lat, radius := -97.7431, 30.2672, 5000.0
+	e := expr.RawArgs("ST_DWithin(location, ST_MakePoint($?, $?), $?)", lon, lat, radius)
+	ctx := expr.NewBuildContext(dialect.Postgres)
+	fmt.Println(e.ToSQL(ctx))
+	fmt.Println(ctx.Args())
+	// Output:
+	// ST_DWithin(location, ST_MakePoint($1, $2), $3)
+	// [-97.7431 30.2672 5000]
+}
