@@ -621,7 +621,7 @@ func Bytea() *ByteaBuilder {
 	return b
 }
 
-func (b *ByteaBuilder) NotNull() *ByteaBuilder { b.setNotNull(); return b }
+func (b *ByteaBuilder) NotNull() *ByteaBuilder      { b.setNotNull(); return b }
 func (b *ByteaBuilder) Build(name string) ColumnDef { return b.build(name) }
 
 // -------------------------------------------------------------------
@@ -743,7 +743,7 @@ func DateRange() *RangeBuilder {
 	return b
 }
 
-func (b *RangeBuilder) NotNull() *RangeBuilder { b.setNotNull(); return b }
+func (b *RangeBuilder) NotNull() *RangeBuilder      { b.setNotNull(); return b }
 func (b *RangeBuilder) Build(name string) ColumnDef { return b.build(name) }
 
 // -------------------------------------------------------------------
