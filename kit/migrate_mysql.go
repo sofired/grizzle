@@ -38,7 +38,8 @@ CREATE TABLE IF NOT EXISTS ` + MigrationsTable + ` (
 
 // PushMySQL inspects the live MySQL database, diffs it against the provided
 // table definitions, and applies all necessary DDL changes in a transaction.
-func PushMySQL(ctx context.Context, db *sql.DB, tables ...*pg.TableDef) (PushResult, error) {
+// It accepts tables from any dialect via the TableDefiner interface.
+func PushMySQL(ctx context.Context, db *sql.DB, tables ...pg.TableDefiner) (PushResult, error) {
 	live, err := introspect.IntrospectMySQL(ctx, db)
 	if err != nil {
 		return PushResult{}, fmt.Errorf("introspect: %w", err)
@@ -58,7 +59,8 @@ func PushMySQL(ctx context.Context, db *sql.DB, tables ...*pg.TableDef) (PushRes
 
 // DryRunMySQL is like PushMySQL but does not apply changes — it only computes
 // and returns what would be run.
-func DryRunMySQL(ctx context.Context, db *sql.DB, tables ...*pg.TableDef) (PushResult, error) {
+// It accepts tables from any dialect via the TableDefiner interface.
+func DryRunMySQL(ctx context.Context, db *sql.DB, tables ...pg.TableDefiner) (PushResult, error) {
 	live, err := introspect.IntrospectMySQL(ctx, db)
 	if err != nil {
 		return PushResult{}, fmt.Errorf("introspect: %w", err)
@@ -73,7 +75,8 @@ func DryRunMySQL(ctx context.Context, db *sql.DB, tables ...*pg.TableDef) (PushR
 // MigrateMySQL is like PushMySQL but records the applied SQL in the
 // _grizzle_migrations history table. Calling MigrateMySQL twice with an
 // unchanged schema is a no-op.
-func MigrateMySQL(ctx context.Context, db *sql.DB, tables ...*pg.TableDef) (MigrateResult, error) {
+// It accepts tables from any dialect via the TableDefiner interface.
+func MigrateMySQL(ctx context.Context, db *sql.DB, tables ...pg.TableDefiner) (MigrateResult, error) {
 	if err := ensureMigrationsTableMySQL(ctx, db); err != nil {
 		return MigrateResult{}, err
 	}
@@ -103,7 +106,8 @@ func MigrateMySQL(ctx context.Context, db *sql.DB, tables ...*pg.TableDef) (Migr
 
 // StatusMySQL reports the applied migration history and any pending changes for
 // a MySQL database without modifying it.
-func StatusMySQL(ctx context.Context, db *sql.DB, tables ...*pg.TableDef) (StatusResult, error) {
+// It accepts tables from any dialect via the TableDefiner interface.
+func StatusMySQL(ctx context.Context, db *sql.DB, tables ...pg.TableDefiner) (StatusResult, error) {
 	if err := ensureMigrationsTableMySQL(ctx, db); err != nil {
 		return StatusResult{}, err
 	}

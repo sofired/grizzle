@@ -34,11 +34,12 @@ CREATE TABLE IF NOT EXISTS ` + MigrationsTable + ` (
 
 // PushSQLite inspects the live SQLite database, diffs it against the provided
 // table definitions, and applies all necessary DDL changes.
+// It accepts tables from any dialect via the TableDefiner interface.
 //
 // Note: SQLite does not support ALTER COLUMN (type, nullability, or default
 // changes). Such changes will produce SQL comment stubs; apply them by
 // rebuilding the affected table manually.
-func PushSQLite(ctx context.Context, db *sql.DB, tables ...*pg.TableDef) (PushResult, error) {
+func PushSQLite(ctx context.Context, db *sql.DB, tables ...pg.TableDefiner) (PushResult, error) {
 	live, err := introspect.IntrospectSQLite(ctx, db)
 	if err != nil {
 		return PushResult{}, fmt.Errorf("introspect: %w", err)
@@ -57,7 +58,8 @@ func PushSQLite(ctx context.Context, db *sql.DB, tables ...*pg.TableDef) (PushRe
 }
 
 // DryRunSQLite is like PushSQLite but does not apply changes.
-func DryRunSQLite(ctx context.Context, db *sql.DB, tables ...*pg.TableDef) (PushResult, error) {
+// It accepts tables from any dialect via the TableDefiner interface.
+func DryRunSQLite(ctx context.Context, db *sql.DB, tables ...pg.TableDefiner) (PushResult, error) {
 	live, err := introspect.IntrospectSQLite(ctx, db)
 	if err != nil {
 		return PushResult{}, fmt.Errorf("introspect: %w", err)
@@ -71,7 +73,8 @@ func DryRunSQLite(ctx context.Context, db *sql.DB, tables ...*pg.TableDef) (Push
 
 // MigrateSQLite is like PushSQLite but records the applied SQL in the
 // _grizzle_migrations history table.
-func MigrateSQLite(ctx context.Context, db *sql.DB, tables ...*pg.TableDef) (MigrateResult, error) {
+// It accepts tables from any dialect via the TableDefiner interface.
+func MigrateSQLite(ctx context.Context, db *sql.DB, tables ...pg.TableDefiner) (MigrateResult, error) {
 	if err := ensureMigrationsTableSQLite(ctx, db); err != nil {
 		return MigrateResult{}, err
 	}
@@ -101,7 +104,8 @@ func MigrateSQLite(ctx context.Context, db *sql.DB, tables ...*pg.TableDef) (Mig
 
 // StatusSQLite reports the applied migration history and any pending changes
 // for a SQLite database without modifying it.
-func StatusSQLite(ctx context.Context, db *sql.DB, tables ...*pg.TableDef) (StatusResult, error) {
+// It accepts tables from any dialect via the TableDefiner interface.
+func StatusSQLite(ctx context.Context, db *sql.DB, tables ...pg.TableDefiner) (StatusResult, error) {
 	if err := ensureMigrationsTableSQLite(ctx, db); err != nil {
 		return StatusResult{}, err
 	}

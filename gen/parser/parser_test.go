@@ -3,6 +3,7 @@ package parser_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/sofired/grizzle/gen/parser"
@@ -326,10 +327,11 @@ func evalOne(t *testing.T, colDecl string) pg.ColumnDef {
 import pg "github.com/sofired/grizzle/schema/pg"
 var T = pg.Table("t", ` + colDecl + `)`
 	tbl := oneTable(t, parseSource(t, src))
-	def, err := parser.EvalTable(tbl)
+	td, err := parser.EvalTable(tbl)
 	if err != nil {
 		t.Fatalf("EvalTable: %v", err)
 	}
+	def := td.Def()
 	if len(def.Columns) != 1 {
 		t.Fatalf("expected 1 column, got %d", len(def.Columns))
 	}
@@ -526,10 +528,11 @@ func TestEvalTable_SchemaName_Propagated(t *testing.T) {
 import pg "github.com/sofired/grizzle/schema/pg"
 var T = pg.SchemaTable("audit", "logs", pg.C("id", pg.UUID().PrimaryKey()))`
 	tbl := oneTable(t, parseSource(t, src))
-	def, err := parser.EvalTable(tbl)
+	td, err := parser.EvalTable(tbl)
 	if err != nil {
 		t.Fatalf("EvalTable: %v", err)
 	}
+	def := td.Def()
 	if def.Schema != "audit" {
 		t.Errorf("Schema: got %q, want audit", def.Schema)
 	}
@@ -572,10 +575,15 @@ var T = mysql.Table("items",
 	if len(tables) != 1 {
 		t.Fatalf("expected 1 table, got %d", len(tables))
 	}
-	def, err := parser.EvalTable(tables[0])
+	td, err := parser.EvalTable(tables[0])
 	if err != nil {
 		t.Fatalf("EvalTable: %v", err)
 	}
+	// Verify EvalTable returns the correct dialect type for MySQL tables.
+	if td.Dialect() != "mysql" {
+		t.Errorf("Dialect: got %q, want mysql", td.Dialect())
+	}
+	def := td.Def()
 	if len(def.Columns) != 4 {
 		t.Errorf("expected 4 columns, got %d", len(def.Columns))
 	}
@@ -614,10 +622,15 @@ var T = sqlite.Table("assets",
 	if len(tables) != 1 {
 		t.Fatalf("expected 1 table, got %d", len(tables))
 	}
-	def, err := parser.EvalTable(tables[0])
+	td, err := parser.EvalTable(tables[0])
 	if err != nil {
 		t.Fatalf("EvalTable: %v", err)
 	}
+	// Verify EvalTable returns the correct dialect type for SQLite tables.
+	if td.Dialect() != "sqlite" {
+		t.Errorf("Dialect: got %q, want sqlite", td.Dialect())
+	}
+	def := td.Def()
 	if len(def.Columns) != 3 {
 		t.Errorf("expected 3 columns, got %d", len(def.Columns))
 	}
@@ -645,5 +658,312 @@ var T = sqlite.SchemaTable("main", "events", sqlite.C("id", sqlite.Integer().Pri
 	}
 	if tbl.TableName != "events" {
 		t.Errorf("TableName: got %q, want events", tbl.TableName)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Error message dialect prefix tests
+// ---------------------------------------------------------------------------
+
+// parseSourceExpectError writes src to a temp file, parses it, and asserts
+// that the returned error contains the expected substring.
+func parseSourceExpectError(t *testing.T, src, wantErrContains string) {
+	t.Helper()
+	f := filepath.Join(t.TempDir(), "schema.go")
+	if err := os.WriteFile(f, []byte(src), 0644); err != nil {
+		t.Fatalf("write temp file: %v", err)
+	}
+	_, err := parser.ParseFile(f)
+	if err == nil {
+		t.Fatalf("expected error containing %q, got nil", wantErrContains)
+	}
+	if !strings.Contains(err.Error(), wantErrContains) {
+		t.Errorf("error %q does not contain %q", err.Error(), wantErrContains)
+	}
+}
+
+func TestParseFile_ErrorMsg_PgTable_NoArgs(t *testing.T) {
+	parseSourceExpectError(t, `package s
+import pg "github.com/sofired/grizzle/schema/pg"
+var T = pg.Table()`, "pg.Table:")
+}
+
+func TestParseFile_ErrorMsg_MysqlTable_NoArgs(t *testing.T) {
+	parseSourceExpectError(t, `package s
+import mysql "github.com/sofired/grizzle/schema/mysql"
+var T = mysql.Table()`, "mysql.Table:")
+}
+
+func TestParseFile_ErrorMsg_SqliteTable_NoArgs(t *testing.T) {
+	parseSourceExpectError(t, `package s
+import sqlite "github.com/sofired/grizzle/schema/sqlite"
+var T = sqlite.Table()`, "sqlite.Table:")
+}
+
+func TestParseFile_ErrorMsg_PgSchemaTable_TooFewArgs(t *testing.T) {
+	parseSourceExpectError(t, `package s
+import pg "github.com/sofired/grizzle/schema/pg"
+var T = pg.SchemaTable("only_one_arg")`, "pg.SchemaTable:")
+}
+
+func TestParseFile_ErrorMsg_MysqlSchemaTable_TooFewArgs(t *testing.T) {
+	parseSourceExpectError(t, `package s
+import mysql "github.com/sofired/grizzle/schema/mysql"
+var T = mysql.SchemaTable("only_one_arg")`, "mysql.SchemaTable:")
+}
+
+func TestParseFile_ErrorMsg_SqliteSchemaTable_TooFewArgs(t *testing.T) {
+	parseSourceExpectError(t, `package s
+import sqlite "github.com/sofired/grizzle/schema/sqlite"
+var T = sqlite.SchemaTable("only_one_arg")`, "sqlite.SchemaTable:")
+}
+
+func TestParseFile_ErrorMsg_MysqlTable_NotPg(t *testing.T) {
+	// Ensure a mysql.Table error does NOT contain "pg." to verify we're not
+	// regressing to the hardcoded prefix.
+	f := filepath.Join(t.TempDir(), "schema.go")
+	src := `package s
+import mysql "github.com/sofired/grizzle/schema/mysql"
+var T = mysql.Table()`
+	if err := os.WriteFile(f, []byte(src), 0644); err != nil {
+		t.Fatalf("write temp file: %v", err)
+	}
+	_, err := parser.ParseFile(f)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if strings.Contains(err.Error(), "pg.") {
+		t.Errorf("mysql error message should not contain pg. prefix, got: %q", err.Error())
+	}
+}
+
+func TestParseFile_ErrorMsg_SqliteTable_NotPg(t *testing.T) {
+	// Ensure a sqlite.Table error does NOT contain "pg." to verify we're not
+	// regressing to the hardcoded prefix.
+	f := filepath.Join(t.TempDir(), "schema.go")
+	src := `package s
+import sqlite "github.com/sofired/grizzle/schema/sqlite"
+var T = sqlite.Table()`
+	if err := os.WriteFile(f, []byte(src), 0644); err != nil {
+		t.Fatalf("write temp file: %v", err)
+	}
+	_, err := parser.ParseFile(f)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if strings.Contains(err.Error(), "pg.") {
+		t.Errorf("sqlite error message should not contain pg. prefix, got: %q", err.Error())
+	}
+}
+
+// TestEvalTable_MySQL_OnDelete verifies that mysql.OnDelete(mysql.FKActionCascade)
+// is correctly parsed — fixing the DEVIATION:BROKEN where BasePkg != "pg" caused
+// FK options to be silently dropped for non-PostgreSQL schemas (#156, #114).
+func TestEvalTable_MySQL_OnDelete(t *testing.T) {
+	src := `package s
+import mysql "github.com/sofired/grizzle/schema/mysql"
+var T = mysql.Table("t", mysql.C("realm_id", mysql.UUID().NotNull().References("realms", "id", mysql.OnDelete(mysql.FKActionCascade))))`
+	tbl := oneTable(t, parseSource(t, src))
+	td, err := parser.EvalTable(tbl)
+	if err != nil {
+		t.Fatalf("EvalTable: %v", err)
+	}
+	// Verify EvalTable returns mysql.TableDef for MySQL schema tables.
+	if td.Dialect() != "mysql" {
+		t.Errorf("Dialect: got %q, want mysql", td.Dialect())
+	}
+	c := td.Def().Columns[0]
+	if c.References == nil {
+		t.Fatal("References: want non-nil FKRef")
+	}
+	if c.References.OnDelete != pg.FKActionCascade {
+		t.Errorf("OnDelete: got %v, want FKActionCascade", c.References.OnDelete)
+	}
+}
+
+// TestEvalTable_SQLite_OnDelete verifies that sqlite.OnDelete(sqlite.FKActionRestrict)
+// is correctly parsed for SQLite schemas (#156, #114).
+func TestEvalTable_SQLite_OnDelete(t *testing.T) {
+	src := `package s
+import sqlite "github.com/sofired/grizzle/schema/sqlite"
+var T = sqlite.Table("t", sqlite.C("parent_id", sqlite.Integer().References("parents", "id", sqlite.OnDelete(sqlite.FKActionRestrict))))`
+	tbl := oneTable(t, parseSource(t, src))
+	td, err := parser.EvalTable(tbl)
+	if err != nil {
+		t.Fatalf("EvalTable: %v", err)
+	}
+	// Verify EvalTable returns sqlite.TableDef for SQLite schema tables.
+	if td.Dialect() != "sqlite" {
+		t.Errorf("Dialect: got %q, want sqlite", td.Dialect())
+	}
+	c := td.Def().Columns[0]
+	if c.References == nil {
+		t.Fatal("References: want non-nil FKRef")
+	}
+	if c.References.OnDelete != pg.FKActionRestrict {
+		t.Errorf("OnDelete: got %v, want FKActionRestrict", c.References.OnDelete)
+	}
+}
+
+// TestParsedTable_Dialect verifies that the Dialect field is populated from the
+// schema package name (pg, mysql, sqlite) for each dialect (#156).
+func TestParsedTable_Dialect(t *testing.T) {
+	cases := []struct {
+		src     string
+		dialect string
+	}{
+		{
+			src:     "package s\nimport pg \"github.com/sofired/grizzle/schema/pg\"\nvar T = pg.Table(\"t\", pg.C(\"id\", pg.UUID().PrimaryKey()))",
+			dialect: "pg",
+		},
+		{
+			src:     "package s\nimport mysql \"github.com/sofired/grizzle/schema/mysql\"\nvar T = mysql.Table(\"t\", mysql.C(\"id\", mysql.UUID().PrimaryKey()))",
+			dialect: "mysql",
+		},
+		{
+			src:     "package s\nimport sqlite \"github.com/sofired/grizzle/schema/sqlite\"\nvar T = sqlite.Table(\"t\", sqlite.C(\"id\", sqlite.Integer().PrimaryKey()))",
+			dialect: "sqlite",
+		},
+	}
+	for _, c := range cases {
+		tbl := oneTable(t, parseSource(t, c.src))
+		if tbl.Dialect != c.dialect {
+			t.Errorf("Dialect: got %q, want %q", tbl.Dialect, c.dialect)
+		}
+	}
+}
+
+// TestEvalTable_MySQL_OnUpdate verifies that mysql.OnUpdate(mysql.FKActionCascade)
+// is correctly parsed for MySQL schemas (#156, #114).
+func TestEvalTable_MySQL_OnUpdate(t *testing.T) {
+	src := `package s
+import mysql "github.com/sofired/grizzle/schema/mysql"
+var T = mysql.Table("t", mysql.C("ref_id", mysql.UUID().References("other", "id", mysql.OnUpdate(mysql.FKActionSetNull))))`
+	tbl := oneTable(t, parseSource(t, src))
+	td, err := parser.EvalTable(tbl)
+	if err != nil {
+		t.Fatalf("EvalTable: %v", err)
+	}
+	c := td.Def().Columns[0]
+	if c.References == nil {
+		t.Fatal("References: want non-nil FKRef")
+	}
+	if c.References.OnUpdate != pg.FKActionSetNull {
+		t.Errorf("OnUpdate: got %v, want FKActionSetNull", c.References.OnUpdate)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// MySQL Enum/Set EvalTable validation tests
+// ---------------------------------------------------------------------------
+
+func TestEvalTable_MysqlEnum_Valid(t *testing.T) {
+	src := `package s
+import mysql "github.com/sofired/grizzle/schema/mysql"
+var T = mysql.Table("t", mysql.C("status", mysql.Enum("active", "inactive")))`
+	tables := parseSource(t, src)
+	td, err := parser.EvalTable(tables[0])
+	if err != nil {
+		t.Fatalf("EvalTable: unexpected error: %v", err)
+	}
+	want := "enum('active','inactive')"
+	if td.Def().Columns[0].SQLType != want {
+		t.Errorf("SQLType: got %q, want %q", td.Def().Columns[0].SQLType, want)
+	}
+}
+
+func TestEvalTable_MysqlSet_Valid(t *testing.T) {
+	src := `package s
+import mysql "github.com/sofired/grizzle/schema/mysql"
+var T = mysql.Table("t", mysql.C("perms", mysql.Set("read", "write")))`
+	tables := parseSource(t, src)
+	td, err := parser.EvalTable(tables[0])
+	if err != nil {
+		t.Fatalf("EvalTable: unexpected error: %v", err)
+	}
+	want := "set('read','write')"
+	if td.Def().Columns[0].SQLType != want {
+		t.Errorf("SQLType: got %q, want %q", td.Def().Columns[0].SQLType, want)
+	}
+}
+
+func TestEvalTable_MysqlEnum_EmptyArgs_ReturnsError(t *testing.T) {
+	// Simulate a parsed column with Enum but no args (e.g. from a schema snapshot).
+	pt := &parser.ParsedTable{
+		TableName: "t",
+		Columns: []parser.ParsedColumn{
+			{
+				Name: "status",
+				Chain: &parser.ChainResult{
+					BasePkg:  "mysql",
+					BaseFn:   "Enum",
+					BaseArgs: []any{},
+				},
+			},
+		},
+	}
+	_, err := parser.EvalTable(pt)
+	if err == nil {
+		t.Fatal("expected error for Enum with zero args, got nil")
+	}
+}
+
+func TestEvalTable_MysqlSet_EmptyArgs_ReturnsError(t *testing.T) {
+	pt := &parser.ParsedTable{
+		TableName: "t",
+		Columns: []parser.ParsedColumn{
+			{
+				Name: "perms",
+				Chain: &parser.ChainResult{
+					BasePkg:  "mysql",
+					BaseFn:   "Set",
+					BaseArgs: []any{},
+				},
+			},
+		},
+	}
+	_, err := parser.EvalTable(pt)
+	if err == nil {
+		t.Fatal("expected error for Set with zero args, got nil")
+	}
+}
+
+func TestEvalTable_MysqlEnum_NonStringArg_ReturnsError(t *testing.T) {
+	pt := &parser.ParsedTable{
+		TableName: "t",
+		Columns: []parser.ParsedColumn{
+			{
+				Name: "status",
+				Chain: &parser.ChainResult{
+					BasePkg:  "mysql",
+					BaseFn:   "Enum",
+					BaseArgs: []any{int64(1)},
+				},
+			},
+		},
+	}
+	_, err := parser.EvalTable(pt)
+	if err == nil {
+		t.Fatal("expected error for Enum with non-string arg, got nil")
+	}
+}
+
+func TestEvalTable_MysqlSet_NonStringArg_ReturnsError(t *testing.T) {
+	pt := &parser.ParsedTable{
+		TableName: "t",
+		Columns: []parser.ParsedColumn{
+			{
+				Name: "perms",
+				Chain: &parser.ChainResult{
+					BasePkg:  "mysql",
+					BaseFn:   "Set",
+					BaseArgs: []any{int64(42)},
+				},
+			},
+		},
+	}
+	_, err := parser.EvalTable(pt)
+	if err == nil {
+		t.Fatal("expected error for Set with non-string arg, got nil")
 	}
 }

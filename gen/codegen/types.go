@@ -82,7 +82,8 @@ func applyBaseType(info *ColumnInfo, chain *parser.ChainResult) error {
 		info.GoTypePtr = "*uuid.UUID"
 		info.NeedsImport = "github.com/google/uuid"
 
-	case "Varchar", "Text", "Char":
+	// MySQL-specific: Enum and Set are string-typed columns.
+	case "Varchar", "Text", "Char", "Enum", "Set":
 		info.ColType = "expr.StringColumn"
 		info.GoType = "string"
 		info.GoTypePtr = "*string"
@@ -92,8 +93,8 @@ func applyBaseType(info *ColumnInfo, chain *parser.ChainResult) error {
 		info.GoType = "bool"
 		info.GoTypePtr = "*bool"
 
-	// MySQL-specific: TinyInt is a small signed integer, maps to IntColumn.
-	case "Integer", "SmallInt", "Serial", "SmallSerial", "TinyInt":
+	// MySQL-specific: TinyInt (1-byte), MediumInt (3-byte), Year map to IntColumn.
+	case "Integer", "SmallInt", "Serial", "SmallSerial", "TinyInt", "MediumInt", "Year":
 		info.ColType = "expr.IntColumn"
 		info.GoType = "int"
 		info.GoTypePtr = "*int"
