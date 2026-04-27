@@ -93,7 +93,10 @@ func (b *UpdateBuilder) Build(d dialect.Dialect) (string, []any) {
 	// Collect all SET clauses: explicit sets + struct sets
 	allSets := append([]setClause(nil), b.sets...)
 	if b.setStruct != nil {
-		cols, vals := structSetsForUpdate(b.setStruct)
+		cols, vals, err := structSetsForUpdate(b.setStruct)
+		if err != nil {
+			return "", nil
+		}
 		for i, c := range cols {
 			allSets = append(allSets, setClause{col: c, val: vals[i]})
 		}
@@ -138,10 +141,20 @@ func (b *UpdateBuilder) Build(d dialect.Dialect) (string, []any) {
 // structSetsForUpdate extracts db-tagged fields for SET clauses.
 // ALL nil pointer fields are skipped regardless of omitempty — in an update
 // struct, nil always means "leave this column unchanged".
-func structSetsForUpdate(row any) (cols []string, vals []any) {
+// Returns an error if row is nil, an invalid reflect value, or not a struct.
+func structSetsForUpdate(row any) (cols []string, vals []any, err error) {
+	if row == nil {
+		return nil, nil, fmt.Errorf("structSetsForUpdate: nil input")
+	}
 	rv := reflect.ValueOf(row)
 	if rv.Kind() == reflect.Ptr {
 		rv = rv.Elem()
+	}
+	if !rv.IsValid() {
+		return nil, nil, fmt.Errorf("structSetsForUpdate: invalid (nil pointer) input")
+	}
+	if rv.Kind() != reflect.Struct {
+		return nil, nil, fmt.Errorf("structSetsForUpdate: expected struct, got %s", rv.Kind())
 	}
 	rt := rv.Type()
 	for i := 0; i < rt.NumField(); i++ {

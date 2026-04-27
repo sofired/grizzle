@@ -3,11 +3,11 @@
 // Usage:
 //
 //	grizzle gen      [--schema <dir>] [--out <dir>] [--package <name>]
-//	grizzle sql      [--schema <dir>] [--dialect postgres|mysql]
-//	grizzle diff     [--schema <dir>] [--snapshot <file>] [--dialect postgres|mysql]
+//	grizzle sql      [--schema <dir>] [--dialect postgres|mysql|sqlite]
+//	grizzle diff     [--schema <dir>] [--snapshot <file>] [--dialect postgres|mysql|sqlite]
 //	grizzle snapshot [--schema <dir>] [--out <file>]
-//	grizzle migrate  [--schema <dir>] --db <dsn> [--dialect postgres|mysql]
-//	grizzle status   [--schema <dir>] --db <dsn> [--dialect postgres|mysql]
+//	grizzle migrate  [--schema <dir>] --db <dsn> [--dialect postgres|mysql|sqlite]
+//	grizzle status   [--schema <dir>] --db <dsn> [--dialect postgres|mysql|sqlite]
 package main
 
 import (
@@ -118,7 +118,7 @@ func runGen(args []string) error {
 		return fmt.Errorf("parse schema: %w", err)
 	}
 	if len(tables) == 0 {
-		log.Printf("warning: no pg.Table, mysql.Table, or pg.SchemaTable declarations found in %s", schemaAbs)
+		log.Printf("warning: no table declarations found in %s (expected pg.Table, mysql.Table, sqlite.Table, pg.SchemaTable, mysql.SchemaTable, or sqlite.SchemaTable calls)", schemaAbs)
 		return nil
 	}
 	if *verbose {
@@ -280,7 +280,7 @@ func runMigrate(args []string) error {
 	}
 }
 
-func runMigratePostgres(ctx context.Context, dsn string, dryRun bool, tables ...*pg.TableDef) error {
+func runMigratePostgres(ctx context.Context, dsn string, dryRun bool, tables ...pg.TableDefiner) error {
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
 		return fmt.Errorf("connect: %w", err)
@@ -314,7 +314,7 @@ func runMigratePostgres(ctx context.Context, dsn string, dryRun bool, tables ...
 	return nil
 }
 
-func runMigrateMySQL(ctx context.Context, dsn string, dryRun bool, tables ...*pg.TableDef) error {
+func runMigrateMySQL(ctx context.Context, dsn string, dryRun bool, tables ...pg.TableDefiner) error {
 	db, err := openMySQL(dsn)
 	if err != nil {
 		return err
@@ -348,7 +348,7 @@ func runMigrateMySQL(ctx context.Context, dsn string, dryRun bool, tables ...*pg
 	return nil
 }
 
-func runMigrateSQLite(ctx context.Context, dsn string, dryRun bool, tables ...*pg.TableDef) error {
+func runMigrateSQLite(ctx context.Context, dsn string, dryRun bool, tables ...pg.TableDefiner) error {
 	db, err := sql.Open("sqlite3", dsn)
 	if err != nil {
 		return fmt.Errorf("open sqlite3: %w", err)
@@ -474,8 +474,11 @@ func openMySQL(dsn string) (*sql.DB, error) {
 	return db, nil
 }
 
-// parseSchemaDir parses schema Go files and evaluates them into *pg.TableDef values.
-func parseSchemaDir(dir string) ([]*pg.TableDef, error) {
+// parseSchemaDir parses schema Go files and evaluates them into pg.TableDefiner
+// values. Each table is returned as the correct dialect-specific type:
+// *pg.TableDef for PostgreSQL schemas, *mysql.TableDef for MySQL schemas, and
+// *sqlite.TableDef for SQLite schemas.
+func parseSchemaDir(dir string) ([]pg.TableDefiner, error) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return nil, fmt.Errorf("resolve schema dir: %w", err)
@@ -485,9 +488,9 @@ func parseSchemaDir(dir string) ([]*pg.TableDef, error) {
 		return nil, fmt.Errorf("parse schema: %w", err)
 	}
 	if len(parsed) == 0 {
-		return nil, fmt.Errorf("no pg.Table declarations found in %s", abs)
+		return nil, fmt.Errorf("no table declarations found in %s (expected pg.Table, mysql.Table, sqlite.Table, pg.SchemaTable, mysql.SchemaTable, or sqlite.SchemaTable calls)", abs)
 	}
-	defs := make([]*pg.TableDef, 0, len(parsed))
+	defs := make([]pg.TableDefiner, 0, len(parsed))
 	for _, pt := range parsed {
 		td, err := parser.EvalTable(pt)
 		if err != nil {
@@ -520,7 +523,7 @@ gen flags:
 
 sql / diff flags:
   --schema <dir>        Directory containing schema Go files (default: .)
-  --dialect <dialect>   Target SQL dialect: postgres (default) or mysql
+  --dialect <dialect>   Target SQL dialect: postgres (default), mysql, or sqlite
   --snapshot <file>     (diff only) Baseline snapshot path (default: schema.snapshot.json)
 
 snapshot flags:
@@ -530,7 +533,7 @@ snapshot flags:
 migrate / status flags:
   --schema <dir>      Directory containing schema Go files (default: .)
   --db <dsn>          Database connection string (required)
-  --dialect <dialect> Target SQL dialect: postgres (default) or mysql
+  --dialect <dialect> Target SQL dialect: postgres (default), mysql, or sqlite
   --dry-run           (migrate only) Print SQL without applying it
 
 Examples:

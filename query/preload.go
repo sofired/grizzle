@@ -132,7 +132,10 @@ func GroupBy[T any, K comparable](items []T, key func(T) K) map[K][]T {
 func Index[T any, K comparable](items []T, key func(T) K) map[K]T {
 	m := make(map[K]T, len(items))
 	for _, item := range items {
-		m[key(item)] = item
+		k := key(item)
+		if _, exists := m[k]; !exists {
+			m[k] = item
+		}
 	}
 	return m
 }

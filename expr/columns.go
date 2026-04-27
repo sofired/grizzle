@@ -41,54 +41,6 @@ func (c ColBase) Asc() OrderExpr { return OrderExpr{ref: c, dir: "ASC"} }
 func (c ColBase) Desc() OrderExpr { return OrderExpr{ref: c, dir: "DESC"} }
 
 // -------------------------------------------------------------------
-// AliasedCol — a column reference with a SELECT alias
-// -------------------------------------------------------------------
-
-// AliasedCol wraps a ColBase and adds a SELECT alias (the AS clause).
-// It implements both SelectableColumn and Expression so it can appear in
-// SELECT lists and produce "table"."col" AS "alias" SQL.
-//
-// AliasedCol is only valid in a SELECT list. Do not pass it to GroupBy,
-// Having, or OrderBy — use the original unaliased column in those positions.
-//
-// Obtain one via ColBase.As or any typed column's promoted As method, e.g.:
-//
-//	mgr.Name.As("manager_name")
-type AliasedCol struct {
-	base  ColBase
-	alias string
-}
-
-// ToSQL implements Expression. Renders: "table"."col" AS "alias".
-// alias must be non-empty; an empty alias produces a bare column reference
-// with an empty ColumnName, which may produce unexpected results downstream.
-func (a AliasedCol) ToSQL(ctx *BuildContext) string {
-	ref := ctx.ColRef(a.base.TableAlias, a.base.ColName)
-	if a.alias == "" {
-		return ref
-	}
-	return ref + " AS " + ctx.Quote(a.alias)
-}
-
-// colRef implements colRefer (no alias — for use inside other expressions).
-func (a AliasedCol) colRef(ctx *BuildContext) string {
-	return ctx.ColRef(a.base.TableAlias, a.base.ColName)
-}
-
-// ColumnName implements SelectableColumn. Returns the alias, not the
-// underlying column name. This is used to name the output column in a
-// result set; use Unwrap().ColumnName() to get the raw column name.
-func (a AliasedCol) ColumnName() string { return a.alias }
-
-// TableName implements SelectableColumn.
-func (a AliasedCol) TableName() string { return a.base.TableAlias }
-
-// Unwrap returns the underlying unaliased column. Use this when a bare
-// column reference is needed (e.g. GROUP BY, DISTINCT ON) where the AS
-// clause produced by ToSQL would be invalid.
-func (a AliasedCol) Unwrap() SelectableColumn { return a.base }
-
-// -------------------------------------------------------------------
 // As method on ColBase — returns an AliasedCol for SELECT aliases
 // -------------------------------------------------------------------
 
@@ -97,7 +49,7 @@ func (a AliasedCol) Unwrap() SelectableColumn { return a.base }
 // of a table for self-joins, call As on the table type itself (e.g.,
 // EmployeesTable.As or RealmsTable.As).
 func (c ColBase) As(alias string) AliasedCol {
-	return AliasedCol{base: c, alias: alias}
+	return ColAs(c, alias)
 }
 
 // -------------------------------------------------------------------
@@ -117,6 +69,35 @@ func (o OrderExpr) ToSQL(ctx *BuildContext) string {
 		s += " " + o.nulls
 	}
 	return s
+}
+
+// ToSQLUnqualified renders the ORDER BY expression using only the column name,
+// without a table qualifier. Required for set operation (UNION/INTERSECT/EXCEPT)
+// ORDER BY clauses, where table qualifiers are not valid SQL.
+func (o OrderExpr) ToSQLUnqualified(ctx *BuildContext) string {
+	name := unqualifiedColRef(o.ref, ctx)
+	s := name + " " + o.dir
+	if o.nulls != "" {
+		s += " " + o.nulls
+	}
+	return s
+}
+
+// unqualifiedColRef returns only the column name portion of a colRef,
+// stripping any table qualifier. Falls back to the full colRef for complex
+// expressions (window functions, arithmetic, etc.) that have no table prefix.
+func unqualifiedColRef(ref colRefer, ctx *BuildContext) string {
+	// For ColBase (the common case), we can access the column name directly.
+	type namedCol interface {
+		ColumnName() string
+		TableName() string
+	}
+	if nc, ok := ref.(namedCol); ok && nc.TableName() != "" {
+		// Has a table qualifier — emit only the quoted column name.
+		return ctx.Quote(nc.ColumnName())
+	}
+	// No table qualifier or complex expression — use full colRef.
+	return ref.colRef(ctx)
 }
 
 // NullsFirst returns a copy of the ORDER BY expression with NULLS FIRST appended.
@@ -205,6 +186,43 @@ func (c StringColumn) Like(pattern string) Expression {
 func (c StringColumn) ILike(pattern string) Expression {
 	return likeExpr{ref: c.ColBase, op: "ILIKE", pattern: pattern}
 }
+
+// NotLike produces a NOT LIKE predicate.
+//
+//	UsersT.Username.NotLike("admin%")
+//	// → "users"."username" NOT LIKE $1
+func (c StringColumn) NotLike(pattern string) Expression {
+	return likeExpr{ref: c.ColBase, op: "NOT LIKE", pattern: pattern}
+}
+
+// NotILike produces a case-insensitive NOT LIKE predicate (PostgreSQL-specific).
+//
+//	UsersT.Username.NotILike("admin%")
+//	// → "users"."username" NOT ILIKE $1
+func (c StringColumn) NotILike(pattern string) Expression {
+	return likeExpr{ref: c.ColBase, op: "NOT ILIKE", pattern: pattern}
+}
+
+// RegexpMatch produces a case-sensitive regex match: col ~ $1 (PostgreSQL-specific).
+func (c StringColumn) RegexpMatch(pattern string) Expression {
+	return regexpExpr{ref: c.ColBase, op: "~", pattern: pattern}
+}
+
+// RegexpMatchI produces a case-insensitive regex match: col ~* $1 (PostgreSQL-specific).
+func (c StringColumn) RegexpMatchI(pattern string) Expression {
+	return regexpExpr{ref: c.ColBase, op: "~*", pattern: pattern}
+}
+
+// NotRegexpMatch produces a case-sensitive regex non-match: col !~ $1 (PostgreSQL-specific).
+func (c StringColumn) NotRegexpMatch(pattern string) Expression {
+	return regexpExpr{ref: c.ColBase, op: "!~", pattern: pattern}
+}
+
+// NotRegexpMatchI produces a case-insensitive regex non-match: col !~* $1 (PostgreSQL-specific).
+func (c StringColumn) NotRegexpMatchI(pattern string) Expression {
+	return regexpExpr{ref: c.ColBase, op: "!~*", pattern: pattern}
+}
+
 func (c StringColumn) In(vals ...string) Expression {
 	if len(vals) == 0 {
 		return Raw("FALSE")
@@ -613,4 +631,91 @@ func (c FloatColumn) SubCol(other FloatColumn) ArithExpr {
 }
 func (c FloatColumn) MulCol(other FloatColumn) ArithExpr {
 	return ArithExpr{left: c.ColBase, op: "*", right: other.ColBase}
+}
+
+// -------------------------------------------------------------------
+// BytesColumn
+// -------------------------------------------------------------------
+
+// BytesColumn is a typed column handle for BLOB / binary values.
+// BLOB columns are used in SQLite (and other databases) to store raw byte data.
+// The corresponding Go type is []byte.
+type BytesColumn struct{ ColBase }
+
+func (c BytesColumn) EQ(val []byte) Expression {
+	return binaryExpr{ref: c.ColBase, op: "=", val: val}
+}
+func (c BytesColumn) NEQ(val []byte) Expression {
+	return binaryExpr{ref: c.ColBase, op: "<>", val: val}
+}
+
+// -------------------------------------------------------------------
+// TsvectorColumn (PostgreSQL-specific)
+// -------------------------------------------------------------------
+
+// TsvectorColumn is a typed column handle for PostgreSQL TSVECTOR values.
+// It exposes PostgreSQL full-text search operators (@@ with various tsquery constructors).
+// These operators are PostgreSQL-specific and must only be used with a PostgreSQL dialect.
+type TsvectorColumn struct{ ColBase }
+
+// Matches returns col @@ to_tsquery($1) — matches a tsquery string.
+//
+//	ArticlesT.SearchVector.Matches("grizzle & orm")
+//	// → "articles"."search_vector" @@ to_tsquery($1)
+func (c TsvectorColumn) Matches(query string) Expression {
+	return ftsMatchExpr{ref: c.ColBase, tsFn: "to_tsquery", query: query}
+}
+
+// MatchesWithConfig returns col @@ to_tsquery($1, $2) — uses an explicit text search
+// configuration such as "english" or "simple".
+// config is bound as $1 and query as $2, matching the PostgreSQL call signature.
+//
+//	ArticlesT.SearchVector.MatchesWithConfig("english", "grizzle & orm")
+//	// → "articles"."search_vector" @@ to_tsquery($1, $2)
+func (c TsvectorColumn) MatchesWithConfig(config, query string) Expression {
+	return ftsMatchExpr{ref: c.ColBase, tsFn: "to_tsquery", config: config, query: query, hasConfig: true}
+}
+
+// MatchesPlain returns col @@ plainto_tsquery($1) — converts plain text to a tsquery
+// by treating each word as a term connected with AND.
+//
+//	ArticlesT.SearchVector.MatchesPlain("grizzle orm")
+//	// → "articles"."search_vector" @@ plainto_tsquery($1)
+func (c TsvectorColumn) MatchesPlain(query string) Expression {
+	return ftsMatchExpr{ref: c.ColBase, tsFn: "plainto_tsquery", query: query}
+}
+
+// MatchesPlainWithConfig returns col @@ plainto_tsquery($1, $2).
+// config is bound as $1 and query as $2, matching the PostgreSQL call signature.
+func (c TsvectorColumn) MatchesPlainWithConfig(config, query string) Expression {
+	return ftsMatchExpr{ref: c.ColBase, tsFn: "plainto_tsquery", config: config, query: query, hasConfig: true}
+}
+
+// MatchesPhrase returns col @@ phraseto_tsquery($1) — matches an exact phrase.
+//
+//	ArticlesT.SearchVector.MatchesPhrase("fast full text")
+//	// → "articles"."search_vector" @@ phraseto_tsquery($1)
+func (c TsvectorColumn) MatchesPhrase(query string) Expression {
+	return ftsMatchExpr{ref: c.ColBase, tsFn: "phraseto_tsquery", query: query}
+}
+
+// MatchesPhraseWithConfig returns col @@ phraseto_tsquery($1, $2).
+// config is bound as $1 and query as $2, matching the PostgreSQL call signature.
+func (c TsvectorColumn) MatchesPhraseWithConfig(config, query string) Expression {
+	return ftsMatchExpr{ref: c.ColBase, tsFn: "phraseto_tsquery", config: config, query: query, hasConfig: true}
+}
+
+// MatchesWebSearch returns col @@ websearch_to_tsquery($1) — converts a web-search-style
+// query string (quoting, minus, OR) to a tsquery.
+//
+//	ArticlesT.SearchVector.MatchesWebSearch("grizzle -orm")
+//	// → "articles"."search_vector" @@ websearch_to_tsquery($1)
+func (c TsvectorColumn) MatchesWebSearch(query string) Expression {
+	return ftsMatchExpr{ref: c.ColBase, tsFn: "websearch_to_tsquery", query: query}
+}
+
+// MatchesWebSearchWithConfig returns col @@ websearch_to_tsquery($1, $2).
+// config is bound as $1 and query as $2, matching the PostgreSQL call signature.
+func (c TsvectorColumn) MatchesWebSearchWithConfig(config, query string) Expression {
+	return ftsMatchExpr{ref: c.ColBase, tsFn: "websearch_to_tsquery", config: config, query: query, hasConfig: true}
 }

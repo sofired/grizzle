@@ -31,16 +31,34 @@ func TestSQLiteCreateSQL_TypeTranslations(t *testing.T) {
 
 	checks := []struct{ desc, want string }{
 		{"table header", `CREATE TABLE IF NOT EXISTS "things"`},
-		{"uuid col present", `"id" uuid`},
-		{"varchar col present", `"name" varchar(128)`},
-		{"boolean col present", `"enabled" boolean`},
+		// Canonical PG types must be translated to SQLite-native types.
+		{"uuid → TEXT", `"id" TEXT`},
+		{"varchar → TEXT", `"name" TEXT`},
+		{"text → TEXT", `"bio" TEXT`},
+		{"boolean → INTEGER", `"enabled" INTEGER`},
+		{"numeric → NUMERIC", `"score" NUMERIC`},
+		{"jsonb → TEXT", `"meta" TEXT`},
+		{"timestamptz → TEXT", `"created_at" TEXT`},
 		{"serial → INTEGER PRIMARY KEY AUTOINCREMENT", "INTEGER PRIMARY KEY AUTOINCREMENT"},
+		// Default expressions must also be translated.
 		{"now() → CURRENT_TIMESTAMP", "CURRENT_TIMESTAMP"},
 		{"boolean default true → 1", "DEFAULT 1"},
+		// Canonical type names must NOT appear in DDL.
 	}
 	for _, c := range checks {
 		if !strings.Contains(ddl, c.want) {
 			t.Errorf("%s: DDL missing %q\n---\n%s\n---", c.desc, c.want, ddl)
+		}
+	}
+
+	// Ensure no raw canonical PostgreSQL type names leak into the DDL.
+	// Strip known-good occurrences of "timestamp" within "CURRENT_TIMESTAMP" before
+	// checking, so that the forbidden-word scan doesn't false-positive on it.
+	ddlForCheck := strings.ReplaceAll(strings.ToLower(ddl), "current_timestamp", "")
+	forbidden := []string{"uuid", "boolean", "timestamptz", "timestamp", "jsonb", "varchar", "bigint"}
+	for _, f := range forbidden {
+		if strings.Contains(ddlForCheck, f) {
+			t.Errorf("canonical type %q must not appear in SQLite DDL\n---\n%s\n---", f, ddl)
 		}
 	}
 }
@@ -129,7 +147,7 @@ func TestSQLite_MigrateAndStatus(t *testing.T) {
 	db := openSQLiteMemory(t)
 	ctx := context.Background()
 
-	schema := []*pg.TableDef{
+	schema := []pg.TableDefiner{
 		pg.Table("realms",
 			pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
 			pg.C("name", pg.Varchar(255).NotNull()),
@@ -179,7 +197,7 @@ func TestSQLite_DryRun(t *testing.T) {
 	db := openSQLiteMemory(t)
 	ctx := context.Background()
 
-	schema := []*pg.TableDef{
+	schema := []pg.TableDefiner{
 		pg.Table("things",
 			pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
 			pg.C("name", pg.Varchar(255).NotNull()),
@@ -212,7 +230,7 @@ func TestSQLite_AddColumn_Migration(t *testing.T) {
 	ctx := context.Background()
 
 	// Initial schema.
-	v1 := []*pg.TableDef{
+	v1 := []pg.TableDefiner{
 		pg.Table("users",
 			pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
 			pg.C("username", pg.Varchar(255).NotNull()),
@@ -223,7 +241,7 @@ func TestSQLite_AddColumn_Migration(t *testing.T) {
 	}
 
 	// Add a column.
-	v2 := []*pg.TableDef{
+	v2 := []pg.TableDefiner{
 		pg.Table("users",
 			pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
 			pg.C("username", pg.Varchar(255).NotNull()),

@@ -8,23 +8,48 @@ import (
 	"github.com/sofired/grizzle/expr"
 )
 
+// LockStrength is the row-level locking mode for SELECT … FOR … statements.
+type LockStrength string
+
+const (
+	LockForUpdate      LockStrength = "FOR UPDATE"
+	LockForNoKeyUpdate LockStrength = "FOR NO KEY UPDATE"
+	LockForShare       LockStrength = "FOR SHARE"
+	LockForKeyShare    LockStrength = "FOR KEY SHARE"
+)
+
+// LockOption is a modifier for the row-level locking clause.
+type LockOption string
+
+const (
+	// NoWait causes the query to fail immediately if any selected row cannot
+	// be locked. Supported by PostgreSQL and MySQL 8.0+; silently dropped for SQLite.
+	NoWait LockOption = "NOWAIT"
+	// SkipLocked causes the query to skip rows that are already locked, returning
+	// only the rows that could be locked. Supported by PostgreSQL and MySQL 8.0+;
+	// silently dropped for SQLite.
+	SkipLocked LockOption = "SKIP LOCKED"
+)
+
 // SelectBuilder constructs a SELECT query.
 // Each method returns a modified copy, so builders can be shared and
 // extended without mutating the original.
 type SelectBuilder struct {
-	ctes      []cteClause             // optional WITH clauses (prepended as CTEs)
-	distinct  bool                    // SELECT DISTINCT
-	cols      []expr.SelectableColumn // nil = SELECT *
-	from      TableSource
-	joins     []joinClause
-	where     expr.Expression
-	orderBy   []expr.OrderExpr
-	groupBy   []expr.SelectableColumn
-	having    expr.Expression
-	limit     int  // 0 = no limit
-	offset    int  // 0 = no offset
-	forUpdate bool // append FOR UPDATE
-	forShare  bool // append FOR SHARE
+	ctes         []cteClause             // optional WITH clauses (prepended as CTEs)
+	distinct     bool                    // SELECT DISTINCT
+	distinctOn   []expr.SelectableColumn // DISTINCT ON cols (PostgreSQL only)
+	cols         []expr.SelectableColumn // nil = SELECT *
+	from         TableSource
+	joins        []joinClause
+	where        expr.Expression
+	orderBy      []expr.OrderExpr
+	groupBy      []expr.SelectableColumn
+	having       expr.Expression
+	limit        int           // 0 = no limit
+	offset       int           // 0 = no offset
+	lockStrength LockStrength  // row-level lock mode (empty = no lock)
+	lockOpts     []LockOption  // NOWAIT / SKIP LOCKED modifiers
+	lockOf       []TableSource // OF table list for row-level locking (PostgreSQL/MySQL)
 }
 
 // cteClause holds a single WITH name AS (...) entry.
@@ -57,23 +82,132 @@ func (b *SelectBuilder) Distinct() *SelectBuilder {
 	return &cp
 }
 
-// ForUpdate appends FOR UPDATE to the query, locking selected rows against
-// concurrent updates. PostgreSQL and MySQL only — not supported by SQLite.
+// For sets the row-level locking mode for the query. strength must be one of
+// LockForUpdate, LockForNoKeyUpdate, LockForShare, or LockForKeyShare.
+// Zero or more LockOption modifiers (NoWait, SkipLocked) may be appended.
 //
-//	query.Select().From(UsersT).Where(UsersT.ID.EQ(id)).ForUpdate()
-func (b *SelectBuilder) ForUpdate() *SelectBuilder {
+// Dialect behaviour:
+//   - PostgreSQL: all four modes are emitted.
+//   - MySQL: only LockForUpdate (FOR UPDATE) and LockForShare (LOCK IN SHARE MODE)
+//     are emitted; LockForNoKeyUpdate and LockForKeyShare are silently dropped.
+//   - SQLite: the entire clause is silently dropped (SQLite has no row-level locking).
+//   - NoWait / SkipLocked are supported by PostgreSQL and MySQL 8.0+; silently
+//     dropped for SQLite.
+//
+// Example:
+//
+//	query.Select().From(db.UsersT).For(query.LockForUpdate)
+//	query.Select().From(db.UsersT).For(query.LockForUpdate, query.SkipLocked)
+//	query.Select().From(db.UsersT).For(query.LockForShare, query.NoWait)
+func (b *SelectBuilder) For(strength LockStrength, opts ...LockOption) *SelectBuilder {
 	cp := *b
-	cp.forUpdate = true
-	cp.forShare = false
+	cp.lockStrength = strength
+	cp.lockOpts = append([]LockOption(nil), opts...)
 	return &cp
+}
+
+// DistinctOn adds a PostgreSQL-specific SELECT DISTINCT ON (cols) clause,
+// returning only the first row of each group defined by the given columns.
+// The DISTINCT ON expressions do not need to appear in the SELECT list, but
+// ORDER BY must start with those columns to make the "first row" deterministic.
+//
+//	query.Select(UsersT.RealmID, UsersT.Username).
+//	    From(UsersT).
+//	    DistinctOn(UsersT.RealmID).
+//	    OrderBy(UsersT.RealmID.Asc(), UsersT.CreatedAt.Desc())
+//	// SELECT DISTINCT ON ("users"."realm_id") "users"."realm_id", ...
+//
+// Dialect behaviour:
+//   - PostgreSQL: rendered as DISTINCT ON (cols).
+//   - MySQL / SQLite: SupportsDistinctOn() is false; the DISTINCT ON columns
+//     are silently dropped and the query degrades to SELECT DISTINCT.
+//
+// Warning: the degraded form is semantically different. SELECT DISTINCT ON
+// deduplicates within each DISTINCT ON group (returning one row per group);
+// SELECT DISTINCT deduplicates across all selected columns. The result set
+// will differ in most real queries, so portable code should avoid DistinctOn
+// or handle the dialect difference explicitly.
+func (b *SelectBuilder) DistinctOn(cols ...expr.SelectableColumn) *SelectBuilder {
+	cp := *b
+	cp.distinct = true
+	cp.distinctOn = append(append([]expr.SelectableColumn(nil), cp.distinctOn...), cols...)
+	return &cp
+}
+
+// ForUpdate appends FOR UPDATE to the query, locking selected rows against
+// concurrent updates. Supported by PostgreSQL and MySQL; silently dropped for
+// SQLite, which uses file-level locking only.
+//
+// ForUpdate is a convenience wrapper around For(LockForUpdate).
+func (b *SelectBuilder) ForUpdate() *SelectBuilder {
+	return b.For(LockForUpdate)
 }
 
 // ForShare appends FOR SHARE (PostgreSQL) / LOCK IN SHARE MODE (MySQL) to
 // the query, locking rows for read while allowing other readers.
+// PostgreSQL and MySQL only — SQLite silently drops the clause.
+//
+// ForShare is a convenience wrapper around For(LockForShare).
 func (b *SelectBuilder) ForShare() *SelectBuilder {
+	return b.For(LockForShare)
+}
+
+// ForNoKeyUpdate appends FOR NO KEY UPDATE to the query. This PostgreSQL-specific
+// lock mode is weaker than FOR UPDATE: it does not block INSERT of child rows that
+// reference this row via a foreign key. Silently dropped for dialects that do not
+// support this locking mode (e.g. MySQL, SQLite).
+//
+// ForNoKeyUpdate is a convenience wrapper around For(LockForNoKeyUpdate).
+func (b *SelectBuilder) ForNoKeyUpdate() *SelectBuilder {
+	return b.For(LockForNoKeyUpdate)
+}
+
+// ForKeyShare appends FOR KEY SHARE to the query. This PostgreSQL-specific
+// lock mode is the weakest row lock: it only blocks DELETE and FOR UPDATE
+// operations that would delete or change key values. Silently dropped for
+// dialects that do not support this locking mode (e.g. MySQL, SQLite).
+//
+// ForKeyShare is a convenience wrapper around For(LockForKeyShare).
+func (b *SelectBuilder) ForKeyShare() *SelectBuilder {
+	return b.For(LockForKeyShare)
+}
+
+// Of restricts the locking clause to specific tables, rendering
+// OF "alias1", "alias2" after the lock mode keyword.
+//
+// Each table is rendered using its alias (the value returned by
+// GrizTableAlias()), not the underlying table name. PostgreSQL requires the
+// alias when the table is aliased; using the base name in that case produces
+// an error.
+//
+// Generated table handles always return the base table name from
+// GrizTableAlias() — they do not carry a runtime alias. To use a custom alias,
+// construct a value that implements TableSource with the desired alias:
+//
+//	type ordersAlias struct{}
+//	func (ordersAlias) GrizTableName() string  { return "orders" }
+//	func (ordersAlias) GrizTableAlias() string { return "o" }
+//
+//	o := ordersAlias{}
+//	query.Select().
+//	    From(o).
+//	    ForUpdate().
+//	    Of(o)
+//	// SELECT * FROM "orders" AS "o" FOR UPDATE OF "o"
+//
+// Of works with all four lock modes (LockForUpdate, LockForNoKeyUpdate,
+// LockForShare, LockForKeyShare). Dialect-specific behaviour:
+//   - PostgreSQL: all specified tables are emitted for all four lock modes.
+//   - MySQL: all specified tables are emitted for FOR UPDATE (MySQL 8.0+).
+//     For LOCK IN SHARE MODE (LockForShare on MySQL), OF is not supported and is
+//     silently dropped. LockForNoKeyUpdate and LockForKeyShare are dropped entirely
+//     on MySQL, so OF has no effect for those modes.
+//   - SQLite: OF is silently ignored (SQLite has no row-level locking).
+//
+// The call order relative to For/ForUpdate/ForShare does not matter.
+func (b *SelectBuilder) Of(tables ...TableSource) *SelectBuilder {
 	cp := *b
-	cp.forShare = true
-	cp.forUpdate = false
+	cp.lockOf = append(append([]TableSource(nil), cp.lockOf...), tables...)
 	return &cp
 }
 
@@ -81,13 +215,20 @@ func (b *SelectBuilder) ForShare() *SelectBuilder {
 // The CTE is rendered as WITH name AS (sub) before the SELECT.
 // Multiple CTEs are accumulated in order and rendered as WITH a AS (...), b AS (...).
 //
+// CTE support requires SupportsCTE() on the dialect. All built-in dialects
+// (PostgreSQL, MySQL 8.0+, SQLite 3.8.3+) return true. When building against a
+// dialect where SupportsCTE() is false, the WITH clause is omitted from the
+// output SQL. Any CTERef used in From() or Join() remains as a plain table
+// name, which will cause a runtime database error (unknown table). This is
+// intentional: failing loudly is safer than silently returning wrong results.
+//
 // Example:
 //
 //	recent := query.Select(PostsT.ID, PostsT.AuthorID).
 //	    From(PostsT).
 //	    Where(PostsT.CreatedAt.GTE(cutoff))
 //
-//	query.Select(expr.Raw("recent.id")).
+//	query.Select(expr.ColBase{TableAlias: "recent", ColName: "id"}).
 //	    With("recent", recent).
 //	    From(query.CTERef("recent"))
 func (b *SelectBuilder) With(name string, sub *SelectBuilder) *SelectBuilder {
@@ -100,6 +241,13 @@ func (b *SelectBuilder) With(name string, sub *SelectBuilder) *SelectBuilder {
 // The CTE body is rendered as "anchor UNION ALL recursive", which is the
 // standard SQL form for a recursive CTE that iterates until no new rows
 // are produced.
+//
+// CTE support requires SupportsCTE() on the dialect. All built-in dialects
+// (PostgreSQL, MySQL 8.0+, SQLite 3.8.3+) return true. When building against a
+// dialect where SupportsCTE() is false, the WITH RECURSIVE clause is omitted
+// from the output SQL. Any CTERef used in From() or Join() remains as a plain
+// table name, producing a runtime database error (unknown table). This is
+// intentional: failing loudly is safer than silently returning wrong results.
 //
 // Example — traverse an org-chart by manager_id:
 //
@@ -178,6 +326,14 @@ func (b *SelectBuilder) RightJoin(t TableSource, on expr.Expression) *SelectBuil
 }
 
 // FullJoin adds a FULL JOIN clause.
+// FULL JOIN requires SupportsFullJoin() on the dialect. When building against a
+// dialect where SupportsFullJoin() is false (MySQL, SQLite), the join is
+// silently dropped from the output SQL.
+//
+// Warning: dropping a FULL JOIN is a semantic change, not just a syntax
+// difference. Rows that would have been included via the outer side of the join
+// are omitted entirely. Do not rely on the silent-drop behaviour for portable
+// code; use a dialect check or restructure the query for non-PostgreSQL targets.
 func (b *SelectBuilder) FullJoin(t TableSource, on expr.Expression) *SelectBuilder {
 	cp := *b
 	cp.joins = append(append([]joinClause(nil), cp.joins...), joinClause{kind: joinFull, table: t, on: on})
@@ -260,8 +416,8 @@ func (b *SelectBuilder) Build(d dialect.Dialect) (string, []any) {
 func (b *SelectBuilder) buildWith(ctx *expr.BuildContext) string {
 	var sb strings.Builder
 
-	// WITH [RECURSIVE] (CTEs)
-	if len(b.ctes) > 0 {
+	// WITH [RECURSIVE] (CTEs) — only emitted for dialects that support CTEs.
+	if len(b.ctes) > 0 && ctx.Dialect().SupportsCTE() {
 		hasRecursive := false
 		for _, cte := range b.ctes {
 			if cte.anchor != nil {
@@ -293,19 +449,51 @@ func (b *SelectBuilder) buildWith(ctx *expr.BuildContext) string {
 		sb.WriteString(" ")
 	}
 
-	// SELECT [DISTINCT]
+	// SELECT [DISTINCT [ON (cols)]]
 	sb.WriteString("SELECT ")
 	if b.distinct {
-		sb.WriteString("DISTINCT ")
+		if len(b.distinctOn) > 0 && ctx.Dialect().SupportsDistinctOn() {
+			// PostgreSQL DISTINCT ON: SELECT DISTINCT ON (col1, col2) ...
+			// Use distinctColSQL (not selectColSQL) to avoid emitting "AS alias"
+			// when the caller passes an AliasedCol; DISTINCT ON does not accept aliases.
+			sb.WriteString("DISTINCT ON (")
+			for i, c := range b.distinctOn {
+				if i > 0 {
+					sb.WriteString(", ")
+				}
+				sb.WriteString(distinctColSQL(ctx, c))
+			}
+			sb.WriteString(") ")
+		} else {
+			sb.WriteString("DISTINCT ")
+		}
 	}
 	if len(b.cols) == 0 {
 		sb.WriteString("*")
 	} else {
-		for i, c := range b.cols {
-			if i > 0 {
+		// Window functions are dropped for dialects that do not support them.
+		// AliasedCol is unwrapped one level (via Unwrap()) so that
+		// expr.ColAs(expr.RowNumber(), "rn") is also correctly gated.
+		written := 0
+		for _, c := range b.cols {
+			if !ctx.Dialect().SupportsWindowFunctions() && isWindowFunction(c) {
+				continue
+			}
+			if written > 0 {
 				sb.WriteString(", ")
 			}
 			sb.WriteString(selectColSQL(ctx, c))
+			written++
+		}
+		if written == 0 {
+			// All selected columns were window functions dropped by the dialect.
+			// Fall back to SELECT * to produce a runnable query rather than a
+			// syntax error. Note: SELECT * returns all table columns, including
+			// any that were intentionally excluded from the original SELECT list.
+			// Callers that rely on column restriction for correctness or data
+			// access control must check d.SupportsWindowFunctions() before
+			// building the query in this configuration.
+			sb.WriteString("*")
 		}
 	}
 
@@ -327,8 +515,11 @@ func (b *SelectBuilder) buildWith(ctx *expr.BuildContext) string {
 		}
 	}
 
-	// JOINs
+	// JOINs — FULL JOIN is silently dropped for dialects that do not support it.
 	for _, j := range b.joins {
+		if j.kind == joinFull && !ctx.Dialect().SupportsFullJoin() {
+			continue
+		}
 		sb.WriteString(" ")
 		sb.WriteString(string(j.kind))
 		sb.WriteString(" ")
@@ -346,8 +537,9 @@ func (b *SelectBuilder) buildWith(ctx *expr.BuildContext) string {
 	// WHERE
 	sb.WriteString(buildWhere(ctx, b.where))
 
-	// GROUP BY — use distinctColSQL to strip any AS alias from AliasedCol values;
-	// GROUP BY does not accept AS clauses.
+	// GROUP BY
+	// Use distinctColSQL (not selectColSQL) to avoid emitting "AS alias" when
+	// the caller passes an AliasedCol — GROUP BY does not accept aliases (#131).
 	if len(b.groupBy) > 0 {
 		sb.WriteString(" GROUP BY ")
 		for i, c := range b.groupBy {
@@ -377,18 +569,94 @@ func (b *SelectBuilder) buildWith(ctx *expr.BuildContext) string {
 		fmt.Fprintf(&sb, " OFFSET %d", b.offset)
 	}
 
-	// Locking clauses — dialect-aware
-	if b.forUpdate {
-		sb.WriteString(" FOR UPDATE")
-	} else if b.forShare {
-		if ctx.Dialect().Name() == "mysql" {
-			sb.WriteString(" LOCK IN SHARE MODE")
-		} else {
-			sb.WriteString(" FOR SHARE")
+	// Locking clauses — only emitted for dialects that support row-level locking.
+	if b.lockStrength != "" && ctx.Dialect().SupportsForUpdate() {
+		switch b.lockStrength {
+		case LockForNoKeyUpdate, LockForKeyShare:
+			// PostgreSQL-only modes: gate on SupportsForNoKeyUpdate.
+			if !ctx.Dialect().SupportsForNoKeyUpdate() {
+				break
+			}
+			sb.WriteString(" " + string(b.lockStrength))
+			// OF table list: PostgreSQL supports it for all modes.
+			if len(b.lockOf) > 0 {
+				sb.WriteString(" OF ")
+				for i, t := range b.lockOf {
+					if i > 0 {
+						sb.WriteString(", ")
+					}
+					sb.WriteString(ctx.Quote(t.GrizTableAlias()))
+				}
+			}
+			// NOWAIT / SKIP LOCKED modifiers.
+			for _, opt := range b.lockOpts {
+				sb.WriteString(" " + string(opt))
+			}
+		case LockForShare:
+			sb.WriteString(" " + ctx.Dialect().ForShareClause())
+			// OF table list: only emitted when the dialect declares support for it
+			// (e.g. PostgreSQL FOR SHARE). MySQL's LOCK IN SHARE MODE does not
+			// accept an OF clause, so SupportsForShareOf() returns false there.
+			if len(b.lockOf) > 0 && ctx.Dialect().SupportsForShareOf() {
+				sb.WriteString(" OF ")
+				for i, t := range b.lockOf {
+					if i > 0 {
+						sb.WriteString(", ")
+					}
+					sb.WriteString(ctx.Quote(t.GrizTableAlias()))
+				}
+			}
+			// NOWAIT / SKIP LOCKED modifiers.
+			for _, opt := range b.lockOpts {
+				sb.WriteString(" " + string(opt))
+			}
+		default: // LockForUpdate (and any future modes)
+			sb.WriteString(" " + string(b.lockStrength))
+			// OF table list: supported by PostgreSQL and MySQL 8.0+ FOR UPDATE.
+			if len(b.lockOf) > 0 {
+				sb.WriteString(" OF ")
+				for i, t := range b.lockOf {
+					if i > 0 {
+						sb.WriteString(", ")
+					}
+					sb.WriteString(ctx.Quote(t.GrizTableAlias()))
+				}
+			}
+			// NOWAIT / SKIP LOCKED modifiers.
+			for _, opt := range b.lockOpts {
+				sb.WriteString(" " + string(opt))
+			}
 		}
 	}
 
 	return sb.String()
+}
+
+// isWindowFunction reports whether c is a window function expression.
+// It handles both expr.WindowExpr (value) and *expr.WindowExpr (pointer) so
+// that callers who pass a pointer satisfying SelectableColumn are also detected.
+// It also unwraps one level of AliasedCol so that expr.ColAs(expr.RowNumber(), "rn")
+// is correctly identified alongside a bare WindowExpr.
+func isWindowFunction(c expr.SelectableColumn) bool {
+	if isWindowExprType(c) {
+		return true
+	}
+	type unwrapper interface{ Unwrap() expr.SelectableColumn }
+	if u, ok := c.(unwrapper); ok {
+		return isWindowExprType(u.Unwrap())
+	}
+	return false
+}
+
+// isWindowExprType reports whether c is an expr.WindowExpr or *expr.WindowExpr.
+func isWindowExprType(c expr.SelectableColumn) bool {
+	if _, ok := c.(expr.WindowExpr); ok {
+		return true
+	}
+	if _, ok := c.(*expr.WindowExpr); ok {
+		return true
+	}
+	return false
 }
 
 // selectColSQL produces the SQL fragment for a selectable column.
@@ -407,6 +675,7 @@ func selectColSQL(ctx *expr.BuildContext, c expr.SelectableColumn) string {
 // AliasedCol values are unwrapped one level so only the bare column reference
 // is emitted; all other expression types are rendered via ToSQL as usual.
 func distinctColSQL(ctx *expr.BuildContext, c expr.SelectableColumn) string {
+	// Unwrap one level of AliasedCol so we render the inner column, not the alias.
 	type unwrapper interface{ Unwrap() expr.SelectableColumn }
 	if u, ok := c.(unwrapper); ok {
 		c = u.Unwrap()

@@ -82,7 +82,8 @@ func applyBaseType(info *ColumnInfo, chain *parser.ChainResult) error {
 		info.GoTypePtr = "*uuid.UUID"
 		info.NeedsImport = "github.com/google/uuid"
 
-	case "Varchar", "Text", "Char":
+	// MySQL-specific: Enum and Set are string-typed columns.
+	case "Varchar", "Text", "Char", "Enum", "Set":
 		info.ColType = "expr.StringColumn"
 		info.GoType = "string"
 		info.GoTypePtr = "*string"
@@ -92,7 +93,8 @@ func applyBaseType(info *ColumnInfo, chain *parser.ChainResult) error {
 		info.GoType = "bool"
 		info.GoTypePtr = "*bool"
 
-	case "Integer", "SmallInt", "Serial", "SmallSerial":
+	// MySQL-specific: TinyInt (1-byte), MediumInt (3-byte), Year map to IntColumn.
+	case "Integer", "SmallInt", "Serial", "SmallSerial", "TinyInt", "MediumInt", "Year":
 		info.ColType = "expr.IntColumn"
 		info.GoType = "int"
 		info.GoTypePtr = "*int"
@@ -102,7 +104,9 @@ func applyBaseType(info *ColumnInfo, chain *parser.ChainResult) error {
 		info.GoType = "int64"
 		info.GoTypePtr = "*int64"
 
-	case "Numeric", "Real", "DoublePrecision":
+	// MySQL-specific: Double maps to FloatColumn.
+	// SQLite-specific: Real maps to FloatColumn (SQLite REAL storage class).
+	case "Numeric", "Real", "DoublePrecision", "Double":
 		info.ColType = "expr.FloatColumn"
 		info.GoType = "float64"
 		info.GoTypePtr = "*float64"
@@ -112,6 +116,12 @@ func applyBaseType(info *ColumnInfo, chain *parser.ChainResult) error {
 		info.GoType = "time.Time"
 		info.GoTypePtr = "*time.Time"
 		info.NeedsImport = "time"
+
+	// SQLite-specific: Blob maps to BytesColumn (raw binary data, []byte in Go).
+	case "Blob":
+		info.ColType = "expr.BytesColumn"
+		info.GoType = "[]byte"
+		info.GoTypePtr = "*[]byte"
 
 	case "JSONB", "JSON":
 		// Default JSONB generic type is map[string]any.

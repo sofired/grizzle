@@ -158,9 +158,15 @@ query.Select().From(db.UsersT).
     InnerJoin(db.RealmsT, db.RealmsT.ID.EQCol(db.UsersT.RealmID))
 
 // RIGHT JOIN / FULL JOIN also available
+query.Select().From(db.UsersT).
+    FullJoin(db.RealmsT, db.RealmsT.ID.EQCol(db.UsersT.RealmID))
 ```
 
 When you've pre-defined relations, use `JoinRel` / `InnerJoinRel` instead — see [Relations](/guide/relations).
+
+::: warning Dialect compatibility for FULL JOIN
+`FULL JOIN` is only supported by PostgreSQL. When building against MySQL or SQLite (`SupportsFullJoin()` returns false), the FULL JOIN clause is **silently dropped** from the SQL. This is a semantic change — rows that would have been included via the outer side of the join are omitted from the result set. Avoid FULL JOIN in queries that must run across multiple dialects, or check `d.SupportsFullJoin()` before building.
+:::
 
 ## Executing queries
 
@@ -205,3 +211,83 @@ query.Select().From(db.UsersT).
 ::: warning
 Never pass user-controlled input to `expr.Raw`. Use parameterized expressions whenever possible.
 :::
+
+## Pessimistic locking
+
+Use `ForUpdate()` or the lower-level `For(LockForUpdate)` to lock rows for the duration of a transaction.
+
+```go
+// Lock selected rows against concurrent updates (PostgreSQL, MySQL).
+// Convenience form:
+users, err := pgxdb.ScanAll[db.UserSelect](
+    d.Query(ctx,
+        query.Select().
+            From(db.UsersT).
+            Where(db.UsersT.Status.EQ("active")).
+            ForUpdate(),
+    ),
+)
+
+// Equivalent explicit form:
+query.Select().From(db.UsersT).For(query.LockForUpdate)
+```
+
+### SKIP LOCKED / NOWAIT
+
+Pass `query.SkipLocked` or `query.NoWait` as a second argument to `For()` to control behaviour when locked rows are encountered:
+
+```go
+// Skip rows that are already locked (e.g. queue-style job dispatch).
+query.Select().From(db.JobsT).For(query.LockForUpdate, query.SkipLocked)
+
+// Fail immediately if any row cannot be locked.
+query.Select().From(db.UsersT).For(query.LockForShare, query.NoWait)
+```
+
+Both modifiers are supported by PostgreSQL and MySQL 8.0+. They are silently dropped for SQLite.
+
+### Restricting locks with OF
+
+Pass `Of(table)` to lock only specific tables in a multi-table join. `Of()` works with all four lock modes.
+
+```go
+// Generated table handles always return the base table name from
+// GrizTableAlias(). To use a custom alias in the FROM/JOIN and OF clauses,
+// implement TableSource with the desired alias:
+type ordersAlias struct{}
+func (ordersAlias) GrizTableName() string  { return "orders" }
+func (ordersAlias) GrizTableAlias() string { return "o" }
+
+type itemsAlias struct{}
+func (itemsAlias) GrizTableName() string  { return "items" }
+func (itemsAlias) GrizTableAlias() string { return "i" }
+
+o, i := ordersAlias{}, itemsAlias{}
+
+// Only lock orders rows, not the joined items rows.
+sql, args := query.Select().
+    From(o).
+    LeftJoin(i, db.ItemsT.OrderID.EQCol(db.OrdersT.ID)).
+    ForUpdate().
+    Of(o).
+    Build(dialect.Postgres)
+// SELECT * FROM "orders" AS "o" LEFT JOIN "items" AS "i" ON ... FOR UPDATE OF "o"
+
+// Of() also works with the other lock modes (all four on PostgreSQL).
+query.Select().From(o).For(query.LockForNoKeyUpdate).Of(o)
+// SELECT * FROM "orders" AS "o" FOR NO KEY UPDATE OF "o"
+```
+
+Each table passed to `Of()` is identified by its **alias** (the value returned by `GrizTableAlias()`), not the underlying table name. Using the base table name when an alias is in scope causes a PostgreSQL error.
+
+`Of()` and `For()`/`ForUpdate()`/`ForShare()` can be called in any order.
+
+### Dialect behaviour
+
+| | `FOR UPDATE` | `FOR SHARE` | `FOR NO KEY UPDATE` | `FOR KEY SHARE` | `OF` | `NOWAIT` / `SKIP LOCKED` |
+|---|---|---|---|---|---|---|
+| **PostgreSQL** | `FOR UPDATE` | `FOR SHARE` | `FOR NO KEY UPDATE` | `FOR KEY SHARE` | Emits all tables (all modes) | Supported |
+| **MySQL** | `FOR UPDATE` | `LOCK IN SHARE MODE` | Silently dropped | Silently dropped | Emitted for `FOR UPDATE`; dropped for `LOCK IN SHARE MODE` | Supported (8.0+) |
+| **SQLite** | Silently dropped | Silently dropped | Silently dropped | Silently dropped | Silently dropped | Silently dropped |
+
+See [Dialect comparison](../reference/dialects.md) for the full feature table.
