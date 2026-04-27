@@ -260,7 +260,7 @@ func diffTable(tableName string, old, new *TableSnap, tableRenames map[string]st
 	// new column name) still holds the same constraint name.
 	normalizedOldCons := make([]pg.Constraint, len(old.Constraints))
 	for i, oc := range old.Constraints {
-		normalizedOldCons[i] = normalizeConstraintRefs(oc, colRenamedFrom, tableRenames)
+		normalizedOldCons[i] = normalizeConstraintRefs(oc, tableName, colRenamedFrom, tableRenames)
 	}
 	oldCons := constraintMap(normalizedOldCons)
 	newCons := constraintMap(new.Constraints)
@@ -365,12 +365,21 @@ func constraintMap(cons []pg.Constraint) map[string]pg.Constraint {
 // normalizeConstraintRefs rewrites constraint column/table references using
 // rename maps so that a post-rename old constraint compares equal to the new
 // constraint definition. colRenames maps old column name → new column name
-// within the same table; tableRenames maps old table name → new table name
-// (used for FK target normalization).
-func normalizeConstraintRefs(c pg.Constraint, colRenames, tableRenames map[string]string) pg.Constraint {
+// within the current table only; tableRenames maps old table name → new table
+// name (used for FK target normalization). currentTable is the new (post-rename)
+// name of the table being diffed and is used to scope colRenames to FKColumns
+// only for self-referential FKs — applying local column renames to a foreign
+// table's referenced columns is incorrect.
+func normalizeConstraintRefs(c pg.Constraint, currentTable string, colRenames, tableRenames map[string]string) pg.Constraint {
 	if len(colRenames) > 0 {
 		c.Columns = applyRenames(c.Columns, colRenames)
-		c.FKColumns = applyRenames(c.FKColumns, colRenames)
+		// Apply colRenames to FKColumns only for self-referential FKs. colRenames
+		// captures column renames within currentTable; the FKTable in the old
+		// constraint uses the pre-rename table name, so check both the current
+		// name and any old name that maps to it.
+		if c.FKTable == currentTable || tableRenames[c.FKTable] == currentTable {
+			c.FKColumns = applyRenames(c.FKColumns, colRenames)
+		}
 	}
 	if len(tableRenames) > 0 {
 		if newTable, ok := tableRenames[c.FKTable]; ok {

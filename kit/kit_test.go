@@ -1243,3 +1243,58 @@ func TestDiff_ColumnRename_UnrelatedDropAddUnaffected(t *testing.T) {
 		t.Errorf("expected 1 AddColumn for email, got %d: %v", adds, changes)
 	}
 }
+
+// TestDiff_LocalColumnRename_FKToSameNamedColumn verifies that renaming a local
+// column does not spuriously rewrite FK references to a column with the same name
+// on a different (non-self-referential) table. colRenames are scoped to the
+// current table only; they must not bleed into foreign table column references.
+func TestDiff_LocalColumnRename_FKToSameNamedColumn(t *testing.T) {
+	// "orders" has a local column "id" that gets renamed to "order_id".
+	// It also has a FK referencing "users"."id" — a completely separate "id"
+	// column on a different table. The FK should be unchanged after the rename.
+	oldOrders := pg.Table("orders",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("user_id", pg.UUID().NotNull()),
+	).WithConstraints(func(t pg.TableRef) []pg.Constraint {
+		return []pg.Constraint{
+			pg.ForeignKey("orders_user_fk").
+				From(t.Col("user_id")).
+				References("users", "id").
+				Build(),
+		}
+	})
+	newOrders := pg.Table("orders",
+		pg.C("order_id", pg.UUID().PrimaryKey().DefaultRandom().RenamedFrom("id")),
+		pg.C("user_id", pg.UUID().NotNull()),
+	).WithConstraints(func(t pg.TableRef) []pg.Constraint {
+		return []pg.Constraint{
+			// FK is unchanged: still references users.id.
+			pg.ForeignKey("orders_user_fk").
+				From(t.Col("user_id")).
+				References("users", "id").
+				Build(),
+		}
+	})
+	oldUsers := pg.Table("users",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+	).Build()
+	newUsers := pg.Table("users",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+	).Build()
+
+	changes := kit.Diff(
+		kit.FromDefs(oldOrders, oldUsers),
+		kit.FromDefs(newOrders, newUsers),
+	)
+
+	drops := countKind(changes, kit.ChangeDropConstraint)
+	adds := countKind(changes, kit.ChangeAddConstraint)
+	renames := countKind(changes, kit.ChangeRenameColumn)
+
+	if renames != 1 {
+		t.Errorf("expected 1 RenameColumn, got %d: %v", renames, changes)
+	}
+	if drops != 0 || adds != 0 {
+		t.Errorf("expected 0 FK constraint changes (FK references a different table's column), got %d drops %d adds: %v", drops, adds, changes)
+	}
+}
