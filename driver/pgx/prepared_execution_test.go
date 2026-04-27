@@ -137,9 +137,9 @@ func (f *fakePgxTx) Exec(_ context.Context, sql string, args ...any) (pgconn.Com
 	f.gotArgs = args
 	return pgconn.NewCommandTag("UPDATE 1"), nil
 }
-func (f *fakePgxTx) Begin(_ context.Context) (pgx.Tx, error)       { panic("unexpected") }
-func (f *fakePgxTx) Commit(_ context.Context) error                  { panic("unexpected") }
-func (f *fakePgxTx) Rollback(_ context.Context) error                { panic("unexpected") }
+func (f *fakePgxTx) Begin(_ context.Context) (pgx.Tx, error) { panic("unexpected") }
+func (f *fakePgxTx) Commit(_ context.Context) error          { panic("unexpected") }
+func (f *fakePgxTx) Rollback(_ context.Context) error        { panic("unexpected") }
 func (f *fakePgxTx) CopyFrom(_ context.Context, _ pgx.Identifier, _ []string, _ pgx.CopyFromSource) (int64, error) {
 	panic("unexpected")
 }
@@ -152,7 +152,7 @@ func (f *fakePgxTx) Query(_ context.Context, _ string, _ ...any) (pgx.Rows, erro
 	panic("unexpected")
 }
 func (f *fakePgxTx) QueryRow(_ context.Context, _ string, _ ...any) pgx.Row { panic("unexpected") }
-func (f *fakePgxTx) Conn() *pgx.Conn                                         { panic("unexpected") }
+func (f *fakePgxTx) Conn() *pgx.Conn                                        { panic("unexpected") }
 
 // TestPreparedExec_ExecTxUsesSQLNotName guards the ExecTx public entry point.
 // ExecTx calls execWith(ctx, tx.tx) — this test constructs a Tx with a fake
