@@ -136,7 +136,12 @@ func applyBaseType(info *ColumnInfo, chain *parser.ChainResult) error {
 		info.GoTypePtr = "*string"
 
 	case "Enum":
-		info.ColType = "expr.EnumColumn"
+		// MySQL inline enum is string-typed; PostgreSQL custom enum uses EnumColumn.
+		if chain.BasePkg == "mysql" {
+			info.ColType = "expr.StringColumn"
+		} else {
+			info.ColType = "expr.EnumColumn"
+		}
 		info.GoType = "string"
 		info.GoTypePtr = "*string"
 
@@ -145,8 +150,18 @@ func applyBaseType(info *ColumnInfo, chain *parser.ChainResult) error {
 		info.GoType = "string"
 		info.GoTypePtr = "*string"
 
-	case "Tsvector", "Tsquery":
+	case "Tsvector":
 		info.ColType = "expr.TsvectorColumn"
+		info.GoType = "string"
+		info.GoTypePtr = "*string"
+
+	case "Tsquery":
+		info.ColType = "expr.StringColumn"
+		info.GoType = "string"
+		info.GoTypePtr = "*string"
+
+	case "Int4Range", "Int8Range", "NumRange", "TsRange", "TstzRange", "DateRange":
+		info.ColType = "expr.StringColumn"
 		info.GoType = "string"
 		info.GoTypePtr = "*string"
 

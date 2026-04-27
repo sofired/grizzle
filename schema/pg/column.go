@@ -101,13 +101,10 @@ func (b *colBuilder) setDefault(expr string) {
 	b.def.HasDefault = true
 	b.def.DefaultExpr = expr
 }
-func (b *colBuilder) setReferences(table, col string, onDelete, onUpdate FKAction) { //nolint:unused
-	b.def.References = &FKRef{
-		Table:    table,
-		Column:   col,
-		OnDelete: onDelete,
-		OnUpdate: onUpdate,
-	}
+
+// quoteSQLLiteral wraps val in single quotes, doubling any embedded single quotes.
+func quoteSQLLiteral(val string) string {
+	return "'" + strings.ReplaceAll(val, "'", "''") + "'"
 }
 
 func (b *colBuilder) setPrimaryKey() {
@@ -498,7 +495,7 @@ func Date() *DateBuilder {
 
 func (b *DateBuilder) NotNull() *DateBuilder { b.setNotNull(); return b }
 func (b *DateBuilder) Default(val string) *DateBuilder {
-	b.setDefault(fmt.Sprintf("'%s'", val))
+	b.setDefault(quoteSQLLiteral(val))
 	return b
 }
 func (b *DateBuilder) Build(name string) ColumnDef { return b.build(name) }
@@ -526,7 +523,7 @@ func (b *TimeBuilder) WithTimezone() *TimeBuilder {
 
 func (b *TimeBuilder) NotNull() *TimeBuilder { b.setNotNull(); return b }
 func (b *TimeBuilder) Default(val string) *TimeBuilder {
-	b.setDefault(fmt.Sprintf("'%s'", val))
+	b.setDefault(quoteSQLLiteral(val))
 	return b
 }
 func (b *TimeBuilder) Build(name string) ColumnDef { return b.build(name) }
@@ -549,7 +546,7 @@ func Interval() *IntervalBuilder {
 
 func (b *IntervalBuilder) NotNull() *IntervalBuilder { b.setNotNull(); return b }
 func (b *IntervalBuilder) Default(val string) *IntervalBuilder {
-	b.setDefault(fmt.Sprintf("'%s'::interval", val))
+	b.setDefault(quoteSQLLiteral(val) + "::interval")
 	return b
 }
 func (b *IntervalBuilder) Build(name string) ColumnDef { return b.build(name) }
@@ -601,7 +598,7 @@ func Char(length int) *CharBuilder {
 
 func (b *CharBuilder) NotNull() *CharBuilder { b.setNotNull(); return b }
 func (b *CharBuilder) Default(val string) *CharBuilder {
-	b.setDefault(fmt.Sprintf("'%s'", val))
+	b.setDefault(quoteSQLLiteral(val))
 	return b
 }
 func (b *CharBuilder) Build(name string) ColumnDef { return b.build(name) }
@@ -657,7 +654,7 @@ func Macaddr() *NetworkBuilder {
 
 func (b *NetworkBuilder) NotNull() *NetworkBuilder { b.setNotNull(); return b }
 func (b *NetworkBuilder) Default(val string) *NetworkBuilder {
-	b.setDefault(fmt.Sprintf("'%s'", val))
+	b.setDefault(quoteSQLLiteral(val))
 	return b
 }
 func (b *NetworkBuilder) Build(name string) ColumnDef { return b.build(name) }
@@ -819,7 +816,7 @@ func Array(inner ColumnBuilder) *ArrayBuilder {
 
 func (b *ArrayBuilder) NotNull() *ArrayBuilder { b.setNotNull(); return b }
 func (b *ArrayBuilder) Default(val string) *ArrayBuilder {
-	b.setDefault(fmt.Sprintf("'%s'::%s", val, b.def.SQLType))
+	b.setDefault(quoteSQLLiteral(val) + "::" + b.def.SQLType)
 	return b
 }
 func (b *ArrayBuilder) DefaultEmpty() *ArrayBuilder {
