@@ -382,7 +382,7 @@ func TestDiff_Ordering_EnumBeforeTable(t *testing.T) {
 
 	changes := kit.Diff(old, new)
 
-	var enumIdx, tableIdx int = -1, -1
+	enumIdx, tableIdx := -1, -1
 	for i, c := range changes {
 		if c.Kind == kit.ChangeCreateEnum {
 			enumIdx = i
@@ -408,7 +408,7 @@ func TestDiff_Ordering_ViewCreatedAfterTable(t *testing.T) {
 
 	changes := kit.Diff(old, new)
 
-	var viewIdx, tableIdx int = -1, -1
+	viewIdx, tableIdx := -1, -1
 	for i, c := range changes {
 		if c.Kind == kit.ChangeCreateView {
 			viewIdx = i
@@ -434,7 +434,7 @@ func TestDiff_Ordering_ViewDroppedBeforeTable(t *testing.T) {
 
 	changes := kit.Diff(old, new)
 
-	var viewIdx, tableIdx int = -1, -1
+	viewIdx, tableIdx := -1, -1
 	for i, c := range changes {
 		if c.Kind == kit.ChangeDropView {
 			viewIdx = i
