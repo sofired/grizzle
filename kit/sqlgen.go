@@ -55,7 +55,7 @@ func GenerateChangeSQL(snap Snapshot, c Change) []string {
 		return []string{fmt.Sprintf(
 			"ALTER TABLE %s RENAME TO %s",
 			quoteTable(c.TableName),
-			qi(unqualifiedName(c.RenameTarget)),
+			quoteUnqualifiedTable(c.RenameTarget),
 		)}
 
 	case ChangeAddColumn:
@@ -338,6 +338,14 @@ func unqualifiedName(name string) string {
 		return parts[1]
 	}
 	return name
+}
+
+// quoteUnqualifiedTable quotes only the unqualified (non-schema-prefixed) part
+// of a potentially schema-qualified name. Use where PostgreSQL DDL rejects a
+// schema-qualified identifier — e.g. RENAME TO.
+// "public.users" → `"users"`, "users" → `"users"`.
+func quoteUnqualifiedTable(name string) string {
+	return qi(unqualifiedName(name))
 }
 
 // quoteColList returns a comma-separated list of quoted column names.

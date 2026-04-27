@@ -70,7 +70,7 @@ func GenerateChangeSQLSQLite(snap Snapshot, c Change) []string {
 		return []string{fmt.Sprintf(
 			"ALTER TABLE %s RENAME TO %s",
 			quoteTableSQLite(c.TableName),
-			qiSQLite(unqualifiedName(c.RenameTarget)),
+			quoteTableSQLite(c.RenameTarget),
 		)}
 
 	case ChangeAddColumn:
