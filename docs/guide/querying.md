@@ -223,7 +223,7 @@ func initQueries(ctx context.Context, d *pgxdb.DB) error {
 }
 
 // At query time — no SQL construction overhead.
-users, err := activeUsers.QueryAll(ctx, db)
+users, err := activeUsers.QueryAll(ctx, d)
 ```
 
 For multiple statements, use a `Registry` to validate them all in one shot:

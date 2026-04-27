@@ -19,16 +19,14 @@ import (
 )
 
 // stubQuerier is a poolQuerier stub that records the SQL string passed to
-// Query and always returns an empty row set.
+// Query and returns pgx.ErrNoRows. These tests only verify which SQL string
+// reaches the stub; they intentionally ignore scan/query errors.
 type stubQuerier struct {
 	gotSQL string
 }
 
 func (s *stubQuerier) Query(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
 	s.gotSQL = sql
-	// Return a closed, empty pgx.Rows by constructing one from a nil error.
-	// pgx.CollectRows on nil rows returns an error, but we only care that
-	// the right SQL reached the stub — the scan result is irrelevant.
 	return nil, pgx.ErrNoRows
 }
 
