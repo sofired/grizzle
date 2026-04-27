@@ -499,6 +499,72 @@ func TestRenameColumn_NilGuard(t *testing.T) {
 	}
 }
 
+// TestRenameColumn_SQLGen_Postgres verifies that GenerateChangeSQL emits the
+// correct PostgreSQL RENAME COLUMN DDL for a ChangeRenameColumn change.
+func TestRenameColumn_SQLGen_Postgres(t *testing.T) {
+	snap := kit.FromDefs(usersDef)
+	old := pg.ColumnDef{Name: "username", SQLType: "varchar(255)", NotNull: true}
+	newCol := pg.ColumnDef{Name: "handle", SQLType: "varchar(255)", NotNull: true}
+	change := kit.Change{
+		Kind:      kit.ChangeRenameColumn,
+		TableName: "users",
+		OldCol:    &old,
+		NewCol:    &newCol,
+	}
+	stmts := kit.GenerateChangeSQL(snap, change)
+	if len(stmts) != 1 {
+		t.Fatalf("expected 1 statement, got %d: %v", len(stmts), stmts)
+	}
+	want := `ALTER TABLE "users" RENAME COLUMN "username" TO "handle"`
+	if stmts[0] != want {
+		t.Errorf("got:  %s\nwant: %s", stmts[0], want)
+	}
+}
+
+// TestRenameColumn_SQLGen_MySQL verifies that GenerateChangeSQLMySQL emits the
+// correct MySQL RENAME COLUMN DDL for a ChangeRenameColumn change.
+func TestRenameColumn_SQLGen_MySQL(t *testing.T) {
+	snap := kit.FromDefs(usersDef)
+	old := pg.ColumnDef{Name: "username", SQLType: "varchar(255)", NotNull: true}
+	newCol := pg.ColumnDef{Name: "handle", SQLType: "varchar(255)", NotNull: true}
+	change := kit.Change{
+		Kind:      kit.ChangeRenameColumn,
+		TableName: "users",
+		OldCol:    &old,
+		NewCol:    &newCol,
+	}
+	stmts := kit.GenerateChangeSQLMySQL(snap, change)
+	if len(stmts) != 1 {
+		t.Fatalf("expected 1 statement, got %d: %v", len(stmts), stmts)
+	}
+	want := "ALTER TABLE `users` RENAME COLUMN `username` TO `handle`"
+	if stmts[0] != want {
+		t.Errorf("got:  %s\nwant: %s", stmts[0], want)
+	}
+}
+
+// TestRenameColumn_SQLGen_SQLite verifies that GenerateChangeSQLSQLite emits
+// the correct SQLite RENAME COLUMN DDL for a ChangeRenameColumn change.
+func TestRenameColumn_SQLGen_SQLite(t *testing.T) {
+	snap := kit.FromDefs(usersDef)
+	old := pg.ColumnDef{Name: "username", SQLType: "varchar(255)", NotNull: true}
+	newCol := pg.ColumnDef{Name: "handle", SQLType: "varchar(255)", NotNull: true}
+	change := kit.Change{
+		Kind:      kit.ChangeRenameColumn,
+		TableName: "users",
+		OldCol:    &old,
+		NewCol:    &newCol,
+	}
+	stmts := kit.GenerateChangeSQLSQLite(snap, change)
+	if len(stmts) != 1 {
+		t.Fatalf("expected 1 statement, got %d: %v", len(stmts), stmts)
+	}
+	want := `ALTER TABLE "users" RENAME COLUMN "username" TO "handle"`
+	if stmts[0] != want {
+		t.Errorf("got:  %s\nwant: %s", stmts[0], want)
+	}
+}
+
 // -------------------------------------------------------------------
 // Fix #8 — Diff() deterministic output
 // -------------------------------------------------------------------
@@ -655,5 +721,580 @@ func TestDiff_FK_OnUpdateChange_DetectedAsChange(t *testing.T) {
 	adds := countKind(changes, kit.ChangeAddConstraint)
 	if drops != 1 || adds != 1 {
 		t.Errorf("expected 1 drop + 1 add for FK ON UPDATE change, got %d drops %d adds: %v", drops, adds, changes)
+	}
+}
+
+// -------------------------------------------------------------------
+// Issue #43 — Rename detection: table renames
+// -------------------------------------------------------------------
+
+func TestDiff_TableRename_DetectedAsRename(t *testing.T) {
+	// Old snapshot has "accounts" table.
+	oldDef := pg.Table("accounts",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("name", pg.Varchar(255).NotNull()),
+	).Build()
+
+	// New snapshot declares "users" with PreviousName = "accounts".
+	newDef := pg.Table("users",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("name", pg.Varchar(255).NotNull()),
+	).RenamedFrom("accounts").Build()
+
+	changes := kit.Diff(kit.FromDefs(oldDef), kit.FromDefs(newDef))
+
+	renames := countKind(changes, kit.ChangeRenameTable)
+	drops := countKind(changes, kit.ChangeDropTable)
+	creates := countKind(changes, kit.ChangeCreateTable)
+
+	if renames != 1 {
+		t.Errorf("expected 1 RenameTable, got %d: %v", renames, changes)
+	}
+	if drops != 0 {
+		t.Errorf("expected 0 DropTable (no data loss), got %d: %v", drops, changes)
+	}
+	if creates != 0 {
+		t.Errorf("expected 0 CreateTable (no data loss), got %d: %v", creates, changes)
+	}
+
+	// Verify the rename change carries correct old and new names.
+	var renameChange kit.Change
+	for _, c := range changes {
+		if c.Kind == kit.ChangeRenameTable {
+			renameChange = c
+			break
+		}
+	}
+	if renameChange.TableName != "accounts" {
+		t.Errorf("expected TableName=accounts (old), got %q", renameChange.TableName)
+	}
+	if renameChange.RenameTarget != "users" {
+		t.Errorf("expected RenameTarget=users (new), got %q", renameChange.RenameTarget)
+	}
+}
+
+func TestDiff_TableRename_SQLGen_Postgres(t *testing.T) {
+	snap := kit.FromDefs(pg.Table("accounts",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+	).Build())
+
+	change := kit.Change{
+		Kind:         kit.ChangeRenameTable,
+		TableName:    "accounts",
+		RenameTarget: "users",
+	}
+	stmts := kit.GenerateChangeSQL(snap, change)
+	if len(stmts) != 1 {
+		t.Fatalf("expected 1 statement, got %d: %v", len(stmts), stmts)
+	}
+	want := `ALTER TABLE "accounts" RENAME TO "users"`
+	if stmts[0] != want {
+		t.Errorf("got:  %s\nwant: %s", stmts[0], want)
+	}
+}
+
+func TestDiff_TableRename_SQLGen_MySQL(t *testing.T) {
+	snap := kit.FromDefs(pg.Table("accounts",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+	).Build())
+
+	change := kit.Change{
+		Kind:         kit.ChangeRenameTable,
+		TableName:    "accounts",
+		RenameTarget: "users",
+	}
+	stmts := kit.GenerateChangeSQLMySQL(snap, change)
+	if len(stmts) != 1 {
+		t.Fatalf("expected 1 statement, got %d: %v", len(stmts), stmts)
+	}
+	want := "RENAME TABLE `accounts` TO `users`"
+	if stmts[0] != want {
+		t.Errorf("got:  %s\nwant: %s", stmts[0], want)
+	}
+}
+
+func TestDiff_TableRename_SQLGen_SQLite(t *testing.T) {
+	snap := kit.FromDefs(pg.Table("accounts",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+	).Build())
+
+	change := kit.Change{
+		Kind:         kit.ChangeRenameTable,
+		TableName:    "accounts",
+		RenameTarget: "users",
+	}
+	stmts := kit.GenerateChangeSQLSQLite(snap, change)
+	if len(stmts) != 1 {
+		t.Fatalf("expected 1 statement, got %d: %v", len(stmts), stmts)
+	}
+	want := `ALTER TABLE "accounts" RENAME TO "users"`
+	if stmts[0] != want {
+		t.Errorf("got:  %s\nwant: %s", stmts[0], want)
+	}
+}
+
+func TestDiff_TableRename_NilGuard(t *testing.T) {
+	snap := kit.EmptySnapshot()
+	// Missing RenameTarget must not panic and returns nil.
+	c := kit.Change{Kind: kit.ChangeRenameTable, TableName: "accounts"}
+	if stmts := kit.GenerateChangeSQL(snap, c); stmts != nil {
+		t.Errorf("expected nil for empty RenameTarget, got %v", stmts)
+	}
+}
+
+func TestDiff_TableRename_UnrelatedDropCreateUnaffected(t *testing.T) {
+	// Renaming one table must not suppress an unrelated drop or create.
+	oldA := pg.Table("accounts",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+	).Build()
+	oldB := pg.Table("orders",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+	).Build()
+
+	// "accounts" is renamed to "users"; "orders" is dropped; "products" is added.
+	newA := pg.Table("users",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+	).RenamedFrom("accounts").Build()
+	newC := pg.Table("products",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+	).Build()
+
+	changes := kit.Diff(kit.FromDefs(oldA, oldB), kit.FromDefs(newA, newC))
+
+	renames := countKind(changes, kit.ChangeRenameTable)
+	drops := countKind(changes, kit.ChangeDropTable)
+	creates := countKind(changes, kit.ChangeCreateTable)
+
+	if renames != 1 {
+		t.Errorf("expected 1 RenameTable, got %d: %v", renames, changes)
+	}
+	if drops != 1 {
+		t.Errorf("expected 1 DropTable for orders, got %d: %v", drops, changes)
+	}
+	if creates != 1 {
+		t.Errorf("expected 1 CreateTable for products, got %d: %v", creates, changes)
+	}
+}
+
+// -------------------------------------------------------------------
+// Issue #43 — Rename detection: column renames
+// -------------------------------------------------------------------
+
+func TestDiff_ColumnRename_DetectedAsRename(t *testing.T) {
+	oldDef := pg.Table("users",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("username", pg.Varchar(255).NotNull()),
+	).Build()
+
+	newDef := pg.Table("users",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("login_name", pg.Varchar(255).NotNull().RenamedFrom("username")),
+	).Build()
+
+	changes := kit.Diff(kit.FromDefs(oldDef), kit.FromDefs(newDef))
+
+	renames := countKind(changes, kit.ChangeRenameColumn)
+	drops := countKind(changes, kit.ChangeDropColumn)
+	adds := countKind(changes, kit.ChangeAddColumn)
+
+	if renames != 1 {
+		t.Errorf("expected 1 RenameColumn, got %d: %v", renames, changes)
+	}
+	if drops != 0 {
+		t.Errorf("expected 0 DropColumn (no data loss), got %d: %v", drops, changes)
+	}
+	if adds != 0 {
+		t.Errorf("expected 0 AddColumn (no data loss), got %d: %v", adds, changes)
+	}
+
+	// Verify the rename change carries the correct old and new column names.
+	var renameChange kit.Change
+	for _, c := range changes {
+		if c.Kind == kit.ChangeRenameColumn {
+			renameChange = c
+			break
+		}
+	}
+	if renameChange.OldCol == nil || renameChange.OldCol.Name != "username" {
+		t.Errorf("expected OldCol.Name=username, got: %+v", renameChange.OldCol)
+	}
+	if renameChange.NewCol == nil || renameChange.NewCol.Name != "login_name" {
+		t.Errorf("expected NewCol.Name=login_name, got: %+v", renameChange.NewCol)
+	}
+}
+
+// TestDiff_Phase1_RenamesBeforeCreates verifies that rename changes are always
+// emitted before create-table changes, regardless of alphabetical ordering of
+// the new table names. This ensures FK creation against the renamed table name
+// is safe.
+func TestDiff_Phase1_RenamesBeforeCreates(t *testing.T) {
+	// "accounts" (old) renamed to "users" (new); "aardvark" (new) is a brand new
+	// table. Alphabetically "aardvark" sorts before "users", so without explicit
+	// ordering the CREATE would appear before the RENAME.
+	oldDef := pg.Table("accounts",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+	).Build()
+
+	newAardvark := pg.Table("aardvark",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+	).Build()
+
+	newUsers := pg.Table("users",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+	).RenamedFrom("accounts").Build()
+
+	changes := kit.Diff(kit.FromDefs(oldDef), kit.FromDefs(newAardvark, newUsers))
+
+	if len(changes) < 2 {
+		t.Fatalf("expected at least 2 changes, got %d: %v", len(changes), changes)
+	}
+	if changes[0].Kind != kit.ChangeRenameTable {
+		t.Errorf("expected first change to be RenameTable, got %s", changes[0].Kind)
+	}
+	if changes[1].Kind != kit.ChangeCreateTable {
+		t.Errorf("expected second change to be CreateTable, got %s", changes[1].Kind)
+	}
+}
+
+// TestDiff_ColumnRename_WithTypeChange verifies that when a column is renamed
+// and its type (or nullability/default) also changes, both the ChangeRenameColumn
+// and the appropriate AlterColumn* changes are emitted.
+func TestDiff_ColumnRename_WithTypeChange(t *testing.T) {
+	oldDef := pg.Table("users",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("username", pg.Varchar(255).NotNull()),
+	).Build()
+
+	// login_name was username; type widened and nullability relaxed.
+	newDef := pg.Table("users",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("login_name", pg.Varchar(512).RenamedFrom("username")),
+	).Build()
+
+	changes := kit.Diff(kit.FromDefs(oldDef), kit.FromDefs(newDef))
+
+	renames := countKind(changes, kit.ChangeRenameColumn)
+	typeAlters := countKind(changes, kit.ChangeAlterColumnType)
+	nullAlters := countKind(changes, kit.ChangeAlterColumnNull)
+
+	if renames != 1 {
+		t.Errorf("expected 1 RenameColumn, got %d: %v", renames, changes)
+	}
+	if typeAlters != 1 {
+		t.Errorf("expected 1 AlterColumnType (varchar(255)→varchar(512)), got %d: %v", typeAlters, changes)
+	}
+	if nullAlters != 1 {
+		t.Errorf("expected 1 AlterColumnNull (NOT NULL→nullable), got %d: %v", nullAlters, changes)
+	}
+	// Rename must come before the alter changes.
+	firstRename := -1
+	for i, c := range changes {
+		if c.Kind == kit.ChangeRenameColumn {
+			firstRename = i
+			break
+		}
+	}
+	for _, c := range changes[firstRename+1:] {
+		if c.Kind == kit.ChangeAlterColumnType || c.Kind == kit.ChangeAlterColumnNull {
+			if c.NewCol == nil || c.NewCol.Name != "login_name" {
+				t.Errorf("AlterColumn after rename should target new name 'login_name', got: %+v", c.NewCol)
+			}
+		}
+	}
+}
+
+// TestRenameTable_SQLGen_SchemaQualified_Postgres verifies that PostgreSQL
+// RENAME TO uses only the unqualified new name even when RenameTarget is
+// schema-qualified.
+func TestRenameTable_SQLGen_SchemaQualified_Postgres(t *testing.T) {
+	snap := kit.EmptySnapshot()
+	change := kit.Change{
+		Kind:         kit.ChangeRenameTable,
+		TableName:    "public.accounts",
+		RenameTarget: "public.users",
+	}
+	stmts := kit.GenerateChangeSQL(snap, change)
+	if len(stmts) != 1 {
+		t.Fatalf("expected 1 statement, got %d: %v", len(stmts), stmts)
+	}
+	// RENAME TO must carry only the unqualified target name.
+	want := `ALTER TABLE "public"."accounts" RENAME TO "users"`
+	if stmts[0] != want {
+		t.Errorf("got:  %s\nwant: %s", stmts[0], want)
+	}
+}
+
+// TestRenameTable_SQLGen_CrossSchema_Postgres verifies that a PostgreSQL rename
+// spanning two schemas emits RENAME TO (within source schema) followed by
+// SET SCHEMA, so the table lands in the target schema rather than silently
+// staying in the source schema under the new name.
+func TestRenameTable_SQLGen_CrossSchema_Postgres(t *testing.T) {
+	snap := kit.EmptySnapshot()
+	change := kit.Change{
+		Kind:         kit.ChangeRenameTable,
+		TableName:    "auth.accounts",
+		RenameTarget: "public.users",
+	}
+	stmts := kit.GenerateChangeSQL(snap, change)
+	if len(stmts) != 2 {
+		t.Fatalf("expected 2 statements for cross-schema rename, got %d: %v", len(stmts), stmts)
+	}
+	wantRename := `ALTER TABLE "auth"."accounts" RENAME TO "users"`
+	if stmts[0] != wantRename {
+		t.Errorf("stmt[0] got:  %s\nwant: %s", stmts[0], wantRename)
+	}
+	wantSetSchema := `ALTER TABLE "auth"."users" SET SCHEMA "public"`
+	if stmts[1] != wantSetSchema {
+		t.Errorf("stmt[1] got:  %s\nwant: %s", stmts[1], wantSetSchema)
+	}
+}
+
+// TestRenameTable_SQLGen_MixedPublicSchema_Postgres verifies that a rename where
+// one side uses the explicit "public." qualifier and the other is unqualified is
+// treated as a same-schema rename (not cross-schema), so no SET SCHEMA is emitted
+// and "" never appears as a schema name in the output.
+func TestRenameTable_SQLGen_MixedPublicSchema_Postgres(t *testing.T) {
+	snap := kit.EmptySnapshot()
+	cases := []struct {
+		src, dst string
+	}{
+		{"public.accounts", "users"},
+		{"accounts", "public.users"},
+	}
+	for _, tc := range cases {
+		change := kit.Change{
+			Kind:         kit.ChangeRenameTable,
+			TableName:    tc.src,
+			RenameTarget: tc.dst,
+		}
+		stmts := kit.GenerateChangeSQL(snap, change)
+		if len(stmts) != 1 {
+			t.Errorf("src=%q dst=%q: expected 1 statement (same-schema), got %d: %v",
+				tc.src, tc.dst, len(stmts), stmts)
+			continue
+		}
+		for _, s := range stmts {
+			if strings.Contains(s, `SET SCHEMA ""`) || strings.Contains(s, "SET SCHEMA \"\"") {
+				t.Errorf("src=%q dst=%q: emitted invalid SET SCHEMA \"\": %s", tc.src, tc.dst, s)
+			}
+		}
+	}
+}
+
+// TestRenameTable_SQLGen_SchemaQualified_MySQL verifies that MySQL RENAME TABLE
+// preserves the schema qualifier on both sides when the TableName and
+// RenameTarget are schema-qualified.
+func TestRenameTable_SQLGen_SchemaQualified_MySQL(t *testing.T) {
+	snap := kit.EmptySnapshot()
+	change := kit.Change{
+		Kind:         kit.ChangeRenameTable,
+		TableName:    "public.accounts",
+		RenameTarget: "public.users",
+	}
+	stmts := kit.GenerateChangeSQLMySQL(snap, change)
+	if len(stmts) != 1 {
+		t.Fatalf("expected 1 statement, got %d: %v", len(stmts), stmts)
+	}
+	// MySQL RENAME TABLE preserves the schema on both source and target.
+	want := "RENAME TABLE `public`.`accounts` TO `public`.`users`"
+	if stmts[0] != want {
+		t.Errorf("got:  %s\nwant: %s", stmts[0], want)
+	}
+}
+
+// TestRenameTable_SQLGen_SchemaQualified_SQLite verifies that SQLite RENAME TO
+// uses only the unqualified names even when TableName/RenameTarget are qualified.
+func TestRenameTable_SQLGen_SchemaQualified_SQLite(t *testing.T) {
+	snap := kit.EmptySnapshot()
+	change := kit.Change{
+		Kind:         kit.ChangeRenameTable,
+		TableName:    "main.accounts",
+		RenameTarget: "main.users",
+	}
+	stmts := kit.GenerateChangeSQLSQLite(snap, change)
+	if len(stmts) != 1 {
+		t.Fatalf("expected 1 statement, got %d: %v", len(stmts), stmts)
+	}
+	want := `ALTER TABLE "accounts" RENAME TO "users"`
+	if stmts[0] != want {
+		t.Errorf("got:  %s\nwant: %s", stmts[0], want)
+	}
+}
+
+// TestDiff_ColumnRename_ConstraintUnchanged verifies that a unique index on the
+// renamed column is not emitted as a spurious drop+add. After RENAME COLUMN the
+// database automatically updates constraint column references, so Diff() should
+// produce no constraint changes when only the column name changed.
+func TestDiff_ColumnRename_ConstraintUnchanged(t *testing.T) {
+	oldDef := pg.Table("users",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("email", pg.Varchar(255).NotNull()),
+	).WithConstraints(func(t pg.TableRef) []pg.Constraint {
+		return []pg.Constraint{
+			pg.UniqueIndex("users_email_key").On(t.Col("email")).Build(),
+		}
+	})
+
+	newDef := pg.Table("users",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("email_address", pg.Varchar(255).NotNull().RenamedFrom("email")),
+	).WithConstraints(func(t pg.TableRef) []pg.Constraint {
+		return []pg.Constraint{
+			// Same constraint, column name updated to match the rename.
+			pg.UniqueIndex("users_email_key").On(t.Col("email_address")).Build(),
+		}
+	})
+
+	changes := kit.Diff(kit.FromDefs(oldDef), kit.FromDefs(newDef))
+
+	drops := countKind(changes, kit.ChangeDropConstraint)
+	adds := countKind(changes, kit.ChangeAddConstraint)
+	renames := countKind(changes, kit.ChangeRenameColumn)
+
+	if renames != 1 {
+		t.Errorf("expected 1 RenameColumn, got %d: %v", renames, changes)
+	}
+	if drops != 0 || adds != 0 {
+		t.Errorf("expected 0 constraint changes (DB auto-updates after RENAME COLUMN), got %d drops %d adds: %v", drops, adds, changes)
+	}
+}
+
+// TestDiff_TableRename_FKConstraintUnchanged verifies that a foreign key on
+// another table that references the renamed table is not emitted as a spurious
+// drop+add. After RENAME TABLE the database automatically updates FK references,
+// so Diff() should produce no constraint changes for that FK.
+func TestDiff_TableRename_FKConstraintUnchanged(t *testing.T) {
+	oldAccounts := pg.Table("accounts",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+	).Build()
+	oldOrders := pg.Table("orders",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("account_id", pg.UUID().NotNull()),
+	).WithConstraints(func(t pg.TableRef) []pg.Constraint {
+		return []pg.Constraint{
+			pg.ForeignKey("orders_account_fk").
+				From(t.Col("account_id")).
+				References("accounts", "id").
+				Build(),
+		}
+	})
+
+	newUsers := pg.Table("users",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+	).RenamedFrom("accounts").Build()
+	newOrders := pg.Table("orders",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("account_id", pg.UUID().NotNull()),
+	).WithConstraints(func(t pg.TableRef) []pg.Constraint {
+		return []pg.Constraint{
+			// FK updated to reference the renamed table.
+			pg.ForeignKey("orders_account_fk").
+				From(t.Col("account_id")).
+				References("users", "id").
+				Build(),
+		}
+	})
+
+	changes := kit.Diff(
+		kit.FromDefs(oldAccounts, oldOrders),
+		kit.FromDefs(newUsers, newOrders),
+	)
+
+	drops := countKind(changes, kit.ChangeDropConstraint)
+	adds := countKind(changes, kit.ChangeAddConstraint)
+	renames := countKind(changes, kit.ChangeRenameTable)
+
+	if renames != 1 {
+		t.Errorf("expected 1 RenameTable, got %d: %v", renames, changes)
+	}
+	if drops != 0 || adds != 0 {
+		t.Errorf("expected 0 constraint changes (DB auto-updates FK after RENAME TABLE), got %d drops %d adds: %v", drops, adds, changes)
+	}
+}
+
+func TestDiff_ColumnRename_UnrelatedDropAddUnaffected(t *testing.T) {
+	// Renaming one column must not suppress unrelated add/drop for other columns.
+	oldDef := pg.Table("users",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("username", pg.Varchar(255).NotNull()),
+		pg.C("bio", pg.Text()),
+	).Build()
+
+	newDef := pg.Table("users",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("login_name", pg.Varchar(255).NotNull().RenamedFrom("username")),
+		pg.C("email", pg.Varchar(255)), // new column, not a rename
+		// "bio" is dropped
+	).Build()
+
+	changes := kit.Diff(kit.FromDefs(oldDef), kit.FromDefs(newDef))
+
+	renames := countKind(changes, kit.ChangeRenameColumn)
+	drops := countKind(changes, kit.ChangeDropColumn)
+	adds := countKind(changes, kit.ChangeAddColumn)
+
+	if renames != 1 {
+		t.Errorf("expected 1 RenameColumn, got %d: %v", renames, changes)
+	}
+	if drops != 1 {
+		t.Errorf("expected 1 DropColumn for bio, got %d: %v", drops, changes)
+	}
+	if adds != 1 {
+		t.Errorf("expected 1 AddColumn for email, got %d: %v", adds, changes)
+	}
+}
+
+// TestDiff_LocalColumnRename_FKToSameNamedColumn verifies that renaming a local
+// column does not spuriously rewrite FK references to a column with the same name
+// on a different (non-self-referential) table. colRenames are scoped to the
+// current table only; they must not bleed into foreign table column references.
+func TestDiff_LocalColumnRename_FKToSameNamedColumn(t *testing.T) {
+	// "orders" has a local column "id" that gets renamed to "order_id".
+	// It also has a FK referencing "users"."id" — a completely separate "id"
+	// column on a different table. The FK should be unchanged after the rename.
+	oldOrders := pg.Table("orders",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("user_id", pg.UUID().NotNull()),
+	).WithConstraints(func(t pg.TableRef) []pg.Constraint {
+		return []pg.Constraint{
+			pg.ForeignKey("orders_user_fk").
+				From(t.Col("user_id")).
+				References("users", "id").
+				Build(),
+		}
+	})
+	newOrders := pg.Table("orders",
+		pg.C("order_id", pg.UUID().PrimaryKey().DefaultRandom().RenamedFrom("id")),
+		pg.C("user_id", pg.UUID().NotNull()),
+	).WithConstraints(func(t pg.TableRef) []pg.Constraint {
+		return []pg.Constraint{
+			// FK is unchanged: still references users.id.
+			pg.ForeignKey("orders_user_fk").
+				From(t.Col("user_id")).
+				References("users", "id").
+				Build(),
+		}
+	})
+	oldUsers := pg.Table("users",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+	).Build()
+	newUsers := pg.Table("users",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+	).Build()
+
+	changes := kit.Diff(
+		kit.FromDefs(oldOrders, oldUsers),
+		kit.FromDefs(newOrders, newUsers),
+	)
+
+	drops := countKind(changes, kit.ChangeDropConstraint)
+	adds := countKind(changes, kit.ChangeAddConstraint)
+	renames := countKind(changes, kit.ChangeRenameColumn)
+
+	if renames != 1 {
+		t.Errorf("expected 1 RenameColumn, got %d: %v", renames, changes)
+	}
+	if drops != 0 || adds != 0 {
+		t.Errorf("expected 0 FK constraint changes (FK references a different table's column), got %d drops %d adds: %v", drops, adds, changes)
 	}
 }
