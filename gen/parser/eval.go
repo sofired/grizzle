@@ -367,7 +367,7 @@ func applyMethod(def *pg.ColumnDef, m MethodCall) error { //nolint:unparam
 				case def.SQLType == "interval":
 					def.DefaultExpr = quoted + "::interval"
 				case def.SQLType == "jsonb" || def.SQLType == "json":
-					def.DefaultExpr = quoted + "::jsonb"
+					def.DefaultExpr = quoted + "::" + def.SQLType
 				case strings.HasSuffix(def.SQLType, "[]"):
 					def.DefaultExpr = quoted + "::" + def.SQLType
 				case isCustomSQLType(def.SQLType):

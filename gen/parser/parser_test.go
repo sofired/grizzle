@@ -499,6 +499,13 @@ func TestEvalTable_Default_JSONB(t *testing.T) {
 	}
 }
 
+func TestEvalTable_Default_JSON(t *testing.T) {
+	c := evalOne(t, `pg.C("meta", pg.JSON().Default("{\"k\":\"v\"}"))`)
+	if c.DefaultExpr != `'{"k":"v"}'::json` {
+		t.Errorf("DefaultExpr: got %q, want %q", c.DefaultExpr, `'{"k":"v"}'::json`)
+	}
+}
+
 func TestEvalTable_Default_EnumType(t *testing.T) {
 	c := evalOne(t, `pg.C("status", pg.Enum("user_status", "active", "inactive").Default("active"))`)
 	if c.DefaultExpr != "'active'::user_status" {
