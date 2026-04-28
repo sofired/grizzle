@@ -286,7 +286,7 @@ func createTableSQL(t *pg.TableDef) string {
 			fkCols := quoteColList(c.Columns)
 			refCols := quoteColList(c.FKColumns)
 			fk := fmt.Sprintf("  CONSTRAINT %s FOREIGN KEY (%s) REFERENCES %s (%s)",
-				qi(c.Name), fkCols, qi(c.FKTable), refCols)
+				qi(c.Name), fkCols, quoteTable(c.FKTable), refCols)
 			if c.FKOnDelete != "" && c.FKOnDelete != pg.FKActionNoAction {
 				fk += " ON DELETE " + string(c.FKOnDelete)
 			}
@@ -326,7 +326,7 @@ func columnDefSQL(col pg.ColumnDef) string {
 	}
 	if col.References != nil {
 		ref := col.References
-		fmt.Fprintf(&sb, " REFERENCES %s (%s)", qi(ref.Table), qi(ref.Column))
+		fmt.Fprintf(&sb, " REFERENCES %s (%s)", quoteTable(ref.Table), qi(ref.Column))
 		if ref.OnDelete != "" && ref.OnDelete != pg.FKActionNoAction {
 			sb.WriteString(" ON DELETE " + string(ref.OnDelete))
 		}
@@ -382,7 +382,7 @@ func addConstraintSQL(tableName string, c pg.Constraint) []string {
 		sql := fmt.Sprintf(
 			"ALTER TABLE %s ADD CONSTRAINT %s FOREIGN KEY (%s) REFERENCES %s (%s)",
 			quoteTable(tableName), qi(c.Name),
-			quoteColList(c.Columns), qi(c.FKTable), quoteColList(c.FKColumns),
+			quoteColList(c.Columns), quoteTable(c.FKTable), quoteColList(c.FKColumns),
 		)
 		if c.FKOnDelete != "" && c.FKOnDelete != pg.FKActionNoAction {
 			sql += " ON DELETE " + string(c.FKOnDelete)
