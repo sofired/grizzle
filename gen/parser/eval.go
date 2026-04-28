@@ -313,6 +313,11 @@ func applyBaseType(def *pg.ColumnDef, basePkg, baseFn string, args []any) error 
 		if err := applyBaseType(&innerDef, innerChain.BasePkg, innerChain.BaseFn, innerChain.BaseArgs); err != nil {
 			return fmt.Errorf("pg.Array inner type: %w", err)
 		}
+		for _, m := range innerChain.Methods {
+			if err := applyMethod(&innerDef, m); err != nil {
+				return fmt.Errorf("pg.Array inner method .%s: %w", m.Name, err)
+			}
+		}
 		def.SQLType = innerDef.SQLType + "[]"
 		def.GoType = pg.GoTypeAny
 
@@ -350,12 +355,12 @@ func applyMethod(def *pg.ColumnDef, m MethodCall) error { //nolint:unparam
 		if strings.HasSuffix(def.SQLType, "[]") {
 			def.DefaultExpr = "ARRAY[]::" + def.SQLType
 		} else {
-			def.DefaultExpr = "'{}'::jsonb"
+			def.DefaultExpr = "'{}'::"+def.SQLType
 		}
 
 	case "DefaultEmptyArray":
 		def.HasDefault = true
-		def.DefaultExpr = "'[]'::jsonb"
+		def.DefaultExpr = "'[]'::" + def.SQLType
 
 	case "Default":
 		def.HasDefault = true

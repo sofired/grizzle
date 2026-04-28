@@ -485,6 +485,27 @@ func TestEvalTable_Array_DefaultEmpty_Int(t *testing.T) {
 	}
 }
 
+func TestEvalTable_JSON_DefaultEmpty(t *testing.T) {
+	c := evalOne(t, `pg.C("meta", pg.JSON().DefaultEmpty())`)
+	if c.DefaultExpr != "'{}'::json" {
+		t.Errorf("DefaultExpr: got %q, want \"'{}'::json\"", c.DefaultExpr)
+	}
+}
+
+func TestEvalTable_JSON_DefaultEmptyArray(t *testing.T) {
+	c := evalOne(t, `pg.C("items", pg.JSON().DefaultEmptyArray())`)
+	if c.DefaultExpr != "'[]'::json" {
+		t.Errorf("DefaultExpr: got %q, want \"'[]'::json\"", c.DefaultExpr)
+	}
+}
+
+func TestEvalTable_Array_TimestamptzInner(t *testing.T) {
+	c := evalOne(t, `pg.C("ts_list", pg.Array(pg.Timestamp().WithTimezone()))`)
+	if c.SQLType != "timestamptz[]" {
+		t.Errorf("SQLType: got %q, want \"timestamptz[]\"", c.SQLType)
+	}
+}
+
 func TestEvalTable_Default_Interval(t *testing.T) {
 	c := evalOne(t, `pg.C("dur", pg.Interval().Default("1 day"))`)
 	if c.DefaultExpr != "'1 day'::interval" {

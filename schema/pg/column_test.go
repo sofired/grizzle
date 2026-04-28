@@ -282,6 +282,34 @@ func TestArrayDefault(t *testing.T) {
 	}
 }
 
+func TestJSONBDefaultEmpty(t *testing.T) {
+	def := pg.JSONB().DefaultEmpty().Build("meta")
+	if def.DefaultExpr != "'{}'::jsonb" {
+		t.Errorf("DefaultExpr = %q, want '{}'::jsonb", def.DefaultExpr)
+	}
+}
+
+func TestJSONDefaultEmpty(t *testing.T) {
+	def := pg.JSON().DefaultEmpty().Build("meta")
+	if def.DefaultExpr != "'{}'::json" {
+		t.Errorf("DefaultExpr = %q, want '{}'::json", def.DefaultExpr)
+	}
+}
+
+func TestJSONBDefaultEmptyArray(t *testing.T) {
+	def := pg.JSONB().DefaultEmptyArray().Build("items")
+	if def.DefaultExpr != "'[]'::jsonb" {
+		t.Errorf("DefaultExpr = %q, want '[]'::jsonb", def.DefaultExpr)
+	}
+}
+
+func TestJSONDefaultEmptyArray(t *testing.T) {
+	def := pg.JSON().DefaultEmptyArray().Build("items")
+	if def.DefaultExpr != "'[]'::json" {
+		t.Errorf("DefaultExpr = %q, want '[]'::json", def.DefaultExpr)
+	}
+}
+
 func TestCheck(t *testing.T) {
 	c := pg.Check("age_check", "age >= 0")
 	if c.Kind != pg.KindCheck {

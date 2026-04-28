@@ -416,11 +416,11 @@ func (b *JSONBBuilder) Default(jsonExpr string) *JSONBBuilder {
 	return b
 }
 func (b *JSONBBuilder) DefaultEmpty() *JSONBBuilder {
-	b.setDefault("'{}' ::jsonb")
+	b.setDefault("'{}'::"+b.def.SQLType)
 	return b
 }
 func (b *JSONBBuilder) DefaultEmptyArray() *JSONBBuilder {
-	b.setDefault("'[]'::jsonb")
+	b.setDefault("'[]'::" + b.def.SQLType)
 	return b
 }
 
