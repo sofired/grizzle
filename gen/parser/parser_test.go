@@ -485,6 +485,34 @@ func TestEvalTable_Array_DefaultEmpty_Int(t *testing.T) {
 	}
 }
 
+func TestEvalTable_Default_Interval(t *testing.T) {
+	c := evalOne(t, `pg.C("dur", pg.Interval().Default("1 day"))`)
+	if c.DefaultExpr != "'1 day'::interval" {
+		t.Errorf("DefaultExpr: got %q, want \"'1 day'::interval\"", c.DefaultExpr)
+	}
+}
+
+func TestEvalTable_Default_JSONB(t *testing.T) {
+	c := evalOne(t, `pg.C("meta", pg.JSONB().Default("{\"k\":\"v\"}"))`)
+	if c.DefaultExpr != `'{"k":"v"}'::jsonb` {
+		t.Errorf("DefaultExpr: got %q, want %q", c.DefaultExpr, `'{"k":"v"}'::jsonb`)
+	}
+}
+
+func TestEvalTable_Default_EnumType(t *testing.T) {
+	c := evalOne(t, `pg.C("status", pg.Enum("user_status", "active", "inactive").Default("active"))`)
+	if c.DefaultExpr != "'active'::user_status" {
+		t.Errorf("DefaultExpr: got %q, want \"'active'::user_status\"", c.DefaultExpr)
+	}
+}
+
+func TestEvalTable_Default_Array(t *testing.T) {
+	c := evalOne(t, `pg.C("tags", pg.Array(pg.Text()).Default("{a,b}"))`)
+	if c.DefaultExpr != "'{a,b}'::text[]" {
+		t.Errorf("DefaultExpr: got %q, want \"'{a,b}'::text[]\"", c.DefaultExpr)
+	}
+}
+
 func TestEvalTable_Unique(t *testing.T) {
 	c := evalOne(t, `pg.C("email", pg.Varchar(255).NotNull().Unique())`)
 	if !c.Unique {

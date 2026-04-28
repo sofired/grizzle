@@ -2,6 +2,7 @@ package parser
 
 import (
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/sofired/grizzle/schema/mysql"
@@ -356,7 +357,19 @@ func applyMethod(def *pg.ColumnDef, m MethodCall) error { //nolint:unparam
 				if v == "true" || v == "false" {
 					def.DefaultExpr = v
 				} else {
-					def.DefaultExpr = "'" + strings.ReplaceAll(v, "'", "''") + "'"
+					quoted := "'" + strings.ReplaceAll(v, "'", "''") + "'"
+					switch {
+					case def.SQLType == "interval":
+						def.DefaultExpr = quoted + "::interval"
+					case def.SQLType == "jsonb" || def.SQLType == "json":
+						def.DefaultExpr = quoted + "::jsonb"
+					case strings.HasSuffix(def.SQLType, "[]"):
+						def.DefaultExpr = quoted + "::" + def.SQLType
+					case isCustomSQLType(def.SQLType):
+						def.DefaultExpr = quoted + "::" + def.SQLType
+					default:
+						def.DefaultExpr = quoted
+					}
 				}
 			case bool:
 				if v {
@@ -367,7 +380,16 @@ func applyMethod(def *pg.ColumnDef, m MethodCall) error { //nolint:unparam
 			case int64:
 				def.DefaultExpr = fmt.Sprintf("%d", v)
 			case float64:
-				def.DefaultExpr = fmt.Sprintf("%g", v)
+				switch {
+				case math.IsNaN(v):
+					def.DefaultExpr = fmt.Sprintf("'NaN'::%s", def.SQLType)
+				case math.IsInf(v, 1):
+					def.DefaultExpr = fmt.Sprintf("'Infinity'::%s", def.SQLType)
+				case math.IsInf(v, -1):
+					def.DefaultExpr = fmt.Sprintf("'-Infinity'::%s", def.SQLType)
+				default:
+					def.DefaultExpr = fmt.Sprintf("%g", v)
+				}
 			default:
 				def.DefaultExpr = fmt.Sprintf("%v", v)
 			}
@@ -424,6 +446,33 @@ func applyMethod(def *pg.ColumnDef, m MethodCall) error { //nolint:unparam
 		// added to the DSL won't break the evaluator on old code.
 	}
 	return nil
+}
+
+// knownBuiltinSQLTypes is the complete set of parameterless built-in SQL types
+// produced by this package's column builders. Any SQLType not in this set and
+// containing no '(' or space is treated as a user-defined type (e.g. a pg.Enum
+// type name) and receives an explicit ::cast suffix in DEFAULT expressions.
+var knownBuiltinSQLTypes = map[string]bool{
+	"uuid": true, "text": true, "boolean": true, "integer": true,
+	"bigint": true, "serial": true, "bigserial": true, "smallint": true,
+	"tinyint": true, "real": true, "blob": true, "json": true,
+	"timestamp": true, "timestamptz": true, "jsonb": true, "mediumint": true,
+	"year": true, "date": true, "time": true, "timetz": true,
+	"interval": true, "bytea": true, "inet": true, "cidr": true,
+	"macaddr": true, "tsvector": true, "tsquery": true, "int4range": true,
+	"int8range": true, "numrange": true, "tsrange": true, "tstzrange": true,
+	"daterange": true, "double precision": true,
+}
+
+// isCustomSQLType reports whether sqlType is a user-defined type name (e.g. a
+// pg.Enum type) that needs an explicit ::cast suffix in DEFAULT expressions.
+// Parameterized types (containing '(') and multi-word types (containing space)
+// are never custom.
+func isCustomSQLType(sqlType string) bool {
+	if strings.ContainsAny(sqlType, "( ") {
+		return false
+	}
+	return !knownBuiltinSQLTypes[sqlType]
 }
 
 // isKnownDialectPkg reports whether pkg is one of the three recognised schema
