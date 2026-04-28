@@ -55,7 +55,7 @@ func evalColumn(pc ParsedColumn) (pg.ColumnDef, error) {
 	def := pg.ColumnDef{Name: pc.Name}
 
 	// Apply base type.
-	if err := applyBaseType(&def, chain.BaseFn, chain.BaseArgs); err != nil {
+	if err := applyBaseType(&def, chain.BasePkg, chain.BaseFn, chain.BaseArgs); err != nil {
 		return pg.ColumnDef{}, err
 	}
 
@@ -69,7 +69,7 @@ func evalColumn(pc ParsedColumn) (pg.ColumnDef, error) {
 }
 
 // applyBaseType maps the builder function name to the SQL type and Go type hint.
-func applyBaseType(def *pg.ColumnDef, baseFn string, args []any) error {
+func applyBaseType(def *pg.ColumnDef, basePkg, baseFn string, args []any) error {
 	switch baseFn {
 	case "UUID":
 		def.SQLType = "uuid"
@@ -170,21 +170,34 @@ func applyBaseType(def *pg.ColumnDef, baseFn string, args []any) error {
 		def.SQLType = "year"
 		def.GoType = pg.GoTypeInt
 
-	// MySQL-specific: ENUM('v1','v2',...) — inline enumeration.
+	// Enum: pg.Enum(typeName, val1, val2, ...) vs MySQL inline ENUM('v1','v2',...).
 	case "Enum":
-		if len(args) == 0 {
-			return fmt.Errorf("enum requires at least one value")
-		}
-		parts := make([]string, 0, len(args))
-		for i, a := range args {
-			s, ok := a.(string)
-			if !ok {
-				return fmt.Errorf("enum: argument %d must be a string, got %T", i, a)
+		if basePkg == "pg" {
+			if len(args) < 2 {
+				return fmt.Errorf("pg.Enum requires a type name and at least one value")
 			}
-			parts = append(parts, "'"+strings.ReplaceAll(s, "'", "''")+"'")
+			typeName, ok := args[0].(string)
+			if !ok {
+				return fmt.Errorf("pg.Enum: first argument (type name) must be a string, got %T", args[0])
+			}
+			def.SQLType = typeName
+			def.GoType = pg.GoTypeString
+		} else {
+			// MySQL-specific: ENUM('v1','v2',...) — inline enumeration.
+			if len(args) == 0 {
+				return fmt.Errorf("enum requires at least one value")
+			}
+			parts := make([]string, 0, len(args))
+			for i, a := range args {
+				s, ok := a.(string)
+				if !ok {
+					return fmt.Errorf("enum: argument %d must be a string, got %T", i, a)
+				}
+				parts = append(parts, "'"+strings.ReplaceAll(s, "'", "''")+"'")
+			}
+			def.SQLType = "enum(" + strings.Join(parts, ",") + ")"
+			def.GoType = pg.GoTypeString
 		}
-		def.SQLType = "enum(" + strings.Join(parts, ",") + ")"
-		def.GoType = pg.GoTypeString
 
 	// MySQL-specific: SET('v1','v2',...) — multi-value set column.
 	case "Set":
@@ -201,6 +214,97 @@ func applyBaseType(def *pg.ColumnDef, baseFn string, args []any) error {
 		}
 		def.SQLType = "set(" + strings.Join(parts, ",") + ")"
 		def.GoType = pg.GoTypeString
+
+	// PostgreSQL-specific builders added in this PR.
+
+	case "Date":
+		def.SQLType = "date"
+		def.GoType = pg.GoTypeTime
+
+	case "Time":
+		def.SQLType = "time"
+		def.GoType = pg.GoTypeTime
+
+	case "Interval":
+		def.SQLType = "interval"
+		def.GoType = pg.GoTypeString
+
+	case "DoublePrecision":
+		def.SQLType = "double precision"
+		def.GoType = pg.GoTypeFloat64
+
+	case "Char":
+		n := int64(1)
+		if len(args) > 0 {
+			if v, ok := args[0].(int64); ok {
+				n = v
+			}
+		}
+		def.SQLType = fmt.Sprintf("char(%d)", n)
+		def.GoType = pg.GoTypeString
+
+	case "Bytea":
+		def.SQLType = "bytea"
+		def.GoType = pg.GoTypeByteSlice
+
+	case "Inet":
+		def.SQLType = "inet"
+		def.GoType = pg.GoTypeString
+
+	case "Cidr":
+		def.SQLType = "cidr"
+		def.GoType = pg.GoTypeString
+
+	case "Macaddr":
+		def.SQLType = "macaddr"
+		def.GoType = pg.GoTypeString
+
+	case "Tsvector":
+		def.SQLType = "tsvector"
+		def.GoType = pg.GoTypeString
+
+	case "Tsquery":
+		def.SQLType = "tsquery"
+		def.GoType = pg.GoTypeString
+
+	case "Int4Range":
+		def.SQLType = "int4range"
+		def.GoType = pg.GoTypeString
+
+	case "Int8Range":
+		def.SQLType = "int8range"
+		def.GoType = pg.GoTypeString
+
+	case "NumRange":
+		def.SQLType = "numrange"
+		def.GoType = pg.GoTypeString
+
+	case "TsRange":
+		def.SQLType = "tsrange"
+		def.GoType = pg.GoTypeString
+
+	case "TstzRange":
+		def.SQLType = "tstzrange"
+		def.GoType = pg.GoTypeString
+
+	case "DateRange":
+		def.SQLType = "daterange"
+		def.GoType = pg.GoTypeString
+
+	case "Array":
+		if len(args) == 0 {
+			return fmt.Errorf("pg.Array requires an inner column builder argument")
+		}
+		innerChain, ok := args[0].(*ChainResult)
+		if !ok {
+			return fmt.Errorf("pg.Array: argument must be a column builder chain, got %T", args[0])
+		}
+		var innerDef pg.ColumnDef
+		if err := applyBaseType(&innerDef, innerChain.BasePkg, innerChain.BaseFn, innerChain.BaseArgs); err != nil {
+			return fmt.Errorf("pg.Array inner type: %w", err)
+		}
+		def.SQLType = innerDef.SQLType + "[]"
+		def.GoType = pg.GoTypeAny
 
 	default:
 		return fmt.Errorf("unknown column builder %q", baseFn)
@@ -266,9 +370,11 @@ func applyMethod(def *pg.ColumnDef, m MethodCall) error { //nolint:unparam
 		}
 
 	case "WithTimezone":
-		// Switch timestamp → timestamptz.
-		if def.SQLType == "timestamp" {
+		switch def.SQLType {
+		case "timestamp":
 			def.SQLType = "timestamptz"
+		case "time":
+			def.SQLType = "timetz"
 		}
 
 	case "OnUpdate":

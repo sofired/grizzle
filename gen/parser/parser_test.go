@@ -967,3 +967,165 @@ func TestEvalTable_MysqlSet_NonStringArg_ReturnsError(t *testing.T) {
 		t.Fatal("expected error for Set with non-string arg, got nil")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// EvalTable — PostgreSQL builders added in this PR
+// ---------------------------------------------------------------------------
+
+func TestEvalTable_PG_Date(t *testing.T) {
+	c := evalOne(t, `pg.C("created", pg.Date().NotNull())`)
+	if c.SQLType != "date" {
+		t.Errorf("SQLType = %q, want date", c.SQLType)
+	}
+	if c.GoType != pg.GoTypeTime {
+		t.Errorf("GoType = %q, want %q", c.GoType, pg.GoTypeTime)
+	}
+}
+
+func TestEvalTable_PG_Time(t *testing.T) {
+	c := evalOne(t, `pg.C("slot", pg.Time())`)
+	if c.SQLType != "time" {
+		t.Errorf("SQLType = %q, want time", c.SQLType)
+	}
+}
+
+func TestEvalTable_PG_TimeWithTimezone(t *testing.T) {
+	c := evalOne(t, `pg.C("slot", pg.Time().WithTimezone())`)
+	if c.SQLType != "timetz" {
+		t.Errorf("SQLType = %q, want timetz", c.SQLType)
+	}
+}
+
+func TestEvalTable_PG_Interval(t *testing.T) {
+	c := evalOne(t, `pg.C("dur", pg.Interval())`)
+	if c.SQLType != "interval" {
+		t.Errorf("SQLType = %q, want interval", c.SQLType)
+	}
+	if c.GoType != pg.GoTypeString {
+		t.Errorf("GoType = %q, want string", c.GoType)
+	}
+}
+
+func TestEvalTable_PG_DoublePrecision(t *testing.T) {
+	c := evalOne(t, `pg.C("score", pg.DoublePrecision())`)
+	if c.SQLType != "double precision" {
+		t.Errorf("SQLType = %q, want double precision", c.SQLType)
+	}
+	if c.GoType != pg.GoTypeFloat64 {
+		t.Errorf("GoType = %q, want float64", c.GoType)
+	}
+}
+
+func TestEvalTable_PG_Char(t *testing.T) {
+	c := evalOne(t, `pg.C("code", pg.Char(3))`)
+	if c.SQLType != "char(3)" {
+		t.Errorf("SQLType = %q, want char(3)", c.SQLType)
+	}
+}
+
+func TestEvalTable_PG_Bytea(t *testing.T) {
+	c := evalOne(t, `pg.C("data", pg.Bytea())`)
+	if c.SQLType != "bytea" {
+		t.Errorf("SQLType = %q, want bytea", c.SQLType)
+	}
+	if c.GoType != pg.GoTypeByteSlice {
+		t.Errorf("GoType = %q, want []byte", c.GoType)
+	}
+}
+
+func TestEvalTable_PG_NetworkTypes(t *testing.T) {
+	for _, tc := range []struct{ decl, sqlType string }{
+		{`pg.C("ip", pg.Inet())`, "inet"},
+		{`pg.C("net", pg.Cidr())`, "cidr"},
+		{`pg.C("mac", pg.Macaddr())`, "macaddr"},
+	} {
+		t.Run(tc.sqlType, func(t *testing.T) {
+			c := evalOne(t, tc.decl)
+			if c.SQLType != tc.sqlType {
+				t.Errorf("SQLType = %q, want %q", c.SQLType, tc.sqlType)
+			}
+		})
+	}
+}
+
+func TestEvalTable_PG_TextSearch(t *testing.T) {
+	for _, tc := range []struct{ decl, sqlType string }{
+		{`pg.C("doc", pg.Tsvector())`, "tsvector"},
+		{`pg.C("q", pg.Tsquery())`, "tsquery"},
+	} {
+		t.Run(tc.sqlType, func(t *testing.T) {
+			c := evalOne(t, tc.decl)
+			if c.SQLType != tc.sqlType {
+				t.Errorf("SQLType = %q, want %q", c.SQLType, tc.sqlType)
+			}
+		})
+	}
+}
+
+func TestEvalTable_PG_RangeTypes(t *testing.T) {
+	for _, tc := range []struct{ decl, sqlType string }{
+		{`pg.C("r", pg.Int4Range())`, "int4range"},
+		{`pg.C("r", pg.Int8Range())`, "int8range"},
+		{`pg.C("r", pg.NumRange())`, "numrange"},
+		{`pg.C("r", pg.TsRange())`, "tsrange"},
+		{`pg.C("r", pg.TstzRange())`, "tstzrange"},
+		{`pg.C("r", pg.DateRange())`, "daterange"},
+	} {
+		t.Run(tc.sqlType, func(t *testing.T) {
+			c := evalOne(t, tc.decl)
+			if c.SQLType != tc.sqlType {
+				t.Errorf("SQLType = %q, want %q", c.SQLType, tc.sqlType)
+			}
+			if c.GoType != pg.GoTypeString {
+				t.Errorf("GoType = %q, want string", c.GoType)
+			}
+		})
+	}
+}
+
+func TestEvalTable_PG_Array(t *testing.T) {
+	c := evalOne(t, `pg.C("tags", pg.Array(pg.Text()))`)
+	if c.SQLType != "text[]" {
+		t.Errorf("SQLType = %q, want text[]", c.SQLType)
+	}
+	if c.GoType != pg.GoTypeAny {
+		t.Errorf("GoType = %q, want any", c.GoType)
+	}
+}
+
+func TestEvalTable_PG_ArrayOfUUID(t *testing.T) {
+	c := evalOne(t, `pg.C("ids", pg.Array(pg.UUID()))`)
+	if c.SQLType != "uuid[]" {
+		t.Errorf("SQLType = %q, want uuid[]", c.SQLType)
+	}
+}
+
+func TestEvalTable_PG_Enum(t *testing.T) {
+	c := evalOne(t, `pg.C("status", pg.Enum("status_type", "active", "inactive"))`)
+	if c.SQLType != "status_type" {
+		t.Errorf("SQLType = %q, want status_type", c.SQLType)
+	}
+	if c.GoType != pg.GoTypeString {
+		t.Errorf("GoType = %q, want string", c.GoType)
+	}
+}
+
+func TestEvalTable_PGEnum_TooFewArgs_ReturnsError(t *testing.T) {
+	pt := &parser.ParsedTable{
+		TableName: "t",
+		Columns: []parser.ParsedColumn{
+			{
+				Name: "status",
+				Chain: &parser.ChainResult{
+					BasePkg:  "pg",
+					BaseFn:   "Enum",
+					BaseArgs: []any{"only_type_name"},
+				},
+			},
+		},
+	}
+	_, err := parser.EvalTable(pt)
+	if err == nil {
+		t.Fatal("expected error for pg.Enum with only type name and no values")
+	}
+}
