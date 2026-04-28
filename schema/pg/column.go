@@ -9,7 +9,7 @@
 //	    pg.C("realm_id",   pg.UUID().NotNull().References("realms", "id", pg.OnDelete("restrict"))),
 //	    pg.C("username",   pg.Varchar(255).NotNull()),
 //	    pg.C("email",      pg.Varchar(255)),
-//	    pg.C("enabled",    pg.Boolean().NotNull().Default("true")),
+//	    pg.C("enabled",    pg.Boolean().NotNull().Default(true)),
 //	    pg.C("created_at", pg.Timestamp().WithTimezone().NotNull().DefaultNow()),
 //	    pg.C("deleted_at", pg.Timestamp().WithTimezone()),
 //	).WithConstraints(func(t pg.TableRef) []pg.Constraint {
