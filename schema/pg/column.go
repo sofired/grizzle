@@ -408,6 +408,7 @@ func (b *JSONBBuilder) Default(jsonExpr string) *JSONBBuilder {
 	b.setDefault(fmt.Sprintf("'%s'::jsonb", jsonExpr))
 	return b
 }
+
 // RenamedFrom declares that this column was renamed from oldName.
 // Diff() will emit ChangeRenameColumn instead of drop+add when oldName
 // matches a dropped column in the old snapshot. Leave empty for new columns
