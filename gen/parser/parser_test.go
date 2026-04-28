@@ -1171,3 +1171,57 @@ func TestEvalTable_PGEnum_TooFewArgs_ReturnsError(t *testing.T) {
 		t.Fatal("expected error for pg.Enum with only type name and no values")
 	}
 }
+
+func TestEvalTable_PGEnum_EmptyValueArg_ReturnsError(t *testing.T) {
+	pt := &parser.ParsedTable{
+		TableName: "t",
+		Columns: []parser.ParsedColumn{
+			{
+				Name: "status",
+				Chain: &parser.ChainResult{
+					BasePkg:  "pg",
+					BaseFn:   "Enum",
+					BaseArgs: []any{"status_type", "active", ""},
+				},
+			},
+		},
+	}
+	_, err := parser.EvalTable(pt)
+	if err == nil {
+		t.Fatal("expected error for pg.Enum with empty string value")
+	}
+}
+
+func TestEvalTable_PGEnum_NonStringValueArg_ReturnsError(t *testing.T) {
+	pt := &parser.ParsedTable{
+		TableName: "t",
+		Columns: []parser.ParsedColumn{
+			{
+				Name: "status",
+				Chain: &parser.ChainResult{
+					BasePkg:  "pg",
+					BaseFn:   "Enum",
+					BaseArgs: []any{"status_type", "active", int64(42)},
+				},
+			},
+		},
+	}
+	_, err := parser.EvalTable(pt)
+	if err == nil {
+		t.Fatal("expected error for pg.Enum with non-string value arg")
+	}
+}
+
+func TestEvalTable_VarcharDefaultStringTrue_IsQuoted(t *testing.T) {
+	c := evalOne(t, `pg.C("flag", pg.Varchar(10).Default("true"))`)
+	if c.DefaultExpr != "'true'" {
+		t.Errorf("DefaultExpr = %q, want %q", c.DefaultExpr, "'true'")
+	}
+}
+
+func TestEvalTable_VarcharDefaultStringFalse_IsQuoted(t *testing.T) {
+	c := evalOne(t, `pg.C("flag", pg.Varchar(10).Default("false"))`)
+	if c.DefaultExpr != "'false'" {
+		t.Errorf("DefaultExpr = %q, want %q", c.DefaultExpr, "'false'")
+	}
+}

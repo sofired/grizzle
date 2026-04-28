@@ -181,6 +181,15 @@ func applyBaseType(def *pg.ColumnDef, basePkg, baseFn string, args []any) error 
 			if !ok {
 				return fmt.Errorf("pg.Enum: first argument (type name) must be a string, got %T", args[0])
 			}
+			for i, a := range args[1:] {
+				s, ok := a.(string)
+				if !ok {
+					return fmt.Errorf("pg.Enum: argument %d must be a string, got %T", i+1, a)
+				}
+				if s == "" {
+					return fmt.Errorf("pg.Enum: argument %d must not be empty", i+1)
+				}
+			}
 			def.SQLType = typeName
 			def.GoType = pg.GoTypeString
 		} else {
@@ -353,23 +362,18 @@ func applyMethod(def *pg.ColumnDef, m MethodCall) error { //nolint:unparam
 		if len(m.Args) > 0 {
 			switch v := m.Args[0].(type) {
 			case string:
-				// Distinguish between boolean defaults and string literals.
-				if v == "true" || v == "false" {
-					def.DefaultExpr = v
-				} else {
-					quoted := "'" + strings.ReplaceAll(v, "'", "''") + "'"
-					switch {
-					case def.SQLType == "interval":
-						def.DefaultExpr = quoted + "::interval"
-					case def.SQLType == "jsonb" || def.SQLType == "json":
-						def.DefaultExpr = quoted + "::jsonb"
-					case strings.HasSuffix(def.SQLType, "[]"):
-						def.DefaultExpr = quoted + "::" + def.SQLType
-					case isCustomSQLType(def.SQLType):
-						def.DefaultExpr = quoted + "::" + def.SQLType
-					default:
-						def.DefaultExpr = quoted
-					}
+				quoted := "'" + strings.ReplaceAll(v, "'", "''") + "'"
+				switch {
+				case def.SQLType == "interval":
+					def.DefaultExpr = quoted + "::interval"
+				case def.SQLType == "jsonb" || def.SQLType == "json":
+					def.DefaultExpr = quoted + "::jsonb"
+				case strings.HasSuffix(def.SQLType, "[]"):
+					def.DefaultExpr = quoted + "::" + def.SQLType
+				case isCustomSQLType(def.SQLType):
+					def.DefaultExpr = quoted + "::" + def.SQLType
+				default:
+					def.DefaultExpr = quoted
 				}
 			case bool:
 				if v {
