@@ -78,6 +78,15 @@ func IntrospectPostgres(ctx context.Context, pool *pgxpool.Pool, schemas ...stri
 		t.Constraints = append(t.Constraints, checks...)
 	}
 
+	// --- 5. Foreign key constraints ---
+	for _, t := range live.Tables {
+		fks, err := queryForeignKeys(ctx, pool, t.Schema, t.Name)
+		if err != nil {
+			return live, fmt.Errorf("introspect foreign keys for %s: %w", t.QualifiedName(), err)
+		}
+		t.Constraints = append(t.Constraints, fks...)
+	}
+
 	return live, nil
 }
 
@@ -279,6 +288,112 @@ func parseIndexDef(name, def string) pg.Constraint {
 	}
 
 	return c
+}
+
+// queryForeignKeys returns all FK constraints for the given table, including
+// local columns, referenced table/columns, and ON DELETE / ON UPDATE actions.
+// It uses information_schema to stay portable across PostgreSQL versions.
+func queryForeignKeys(ctx context.Context, pool *pgxpool.Pool, schema, table string) ([]pg.Constraint, error) {
+	q := `
+		SELECT
+			fk_kcu.constraint_name,
+			fk_kcu.column_name          AS local_col,
+			ref_kcu.table_schema        AS ref_schema,
+			ref_kcu.table_name          AS ref_table,
+			ref_kcu.column_name         AS ref_col,
+			rc.delete_rule,
+			rc.update_rule
+		FROM information_schema.key_column_usage fk_kcu
+		JOIN information_schema.referential_constraints rc
+		  ON rc.constraint_name     = fk_kcu.constraint_name
+		 AND rc.constraint_schema   = fk_kcu.constraint_schema
+		JOIN information_schema.key_column_usage ref_kcu
+		  ON ref_kcu.constraint_name   = rc.unique_constraint_name
+		 AND ref_kcu.constraint_schema = rc.unique_constraint_schema
+		 AND ref_kcu.ordinal_position  = fk_kcu.position_in_unique_constraint
+		WHERE fk_kcu.table_schema = $1
+		  AND fk_kcu.table_name   = $2
+		ORDER BY fk_kcu.constraint_name, fk_kcu.ordinal_position`
+
+	rows, err := pool.Query(ctx, q, schema, table)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	type fkRow struct {
+		name       string
+		localCol   string
+		refSchema  string
+		refTable   string
+		refCol     string
+		deleteRule string
+		updateRule string
+	}
+
+	var raws []fkRow
+	for rows.Next() {
+		var r fkRow
+		if err := rows.Scan(&r.name, &r.localCol, &r.refSchema, &r.refTable, &r.refCol, &r.deleteRule, &r.updateRule); err != nil {
+			return nil, err
+		}
+		raws = append(raws, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Group rows by constraint name, preserving first-seen order.
+	type fkEntry struct {
+		name       string
+		localCols  []string
+		refSchema  string
+		refTable   string
+		refCols    []string
+		deleteRule string
+		updateRule string
+	}
+
+	var order []string
+	entries := make(map[string]*fkEntry)
+	for _, r := range raws {
+		e, ok := entries[r.name]
+		if !ok {
+			e = &fkEntry{
+				name:       r.name,
+				refSchema:  r.refSchema,
+				refTable:   r.refTable,
+				deleteRule: r.deleteRule,
+				updateRule: r.updateRule,
+			}
+			entries[r.name] = e
+			order = append(order, r.name)
+		}
+		e.localCols = append(e.localCols, r.localCol)
+		e.refCols = append(e.refCols, r.refCol)
+	}
+
+	constraints := make([]pg.Constraint, 0, len(order))
+	for _, name := range order {
+		e := entries[name]
+		// Use the unqualified table name for the default (public) schema so that
+		// introspected FK references match user-defined ones, which conventionally
+		// omit the "public." prefix. Non-public schemas are fully qualified.
+		refTable := e.refTable
+		if e.refSchema != "" && e.refSchema != "public" {
+			refTable = e.refSchema + "." + e.refTable
+		}
+		constraints = append(constraints, pg.Constraint{
+			Kind:       pg.KindForeignKey,
+			Name:       name,
+			Columns:    e.localCols,
+			FKTable:    refTable,
+			FKColumns:  e.refCols,
+			FKOnDelete: pg.FKAction(normalizeFKAction(e.deleteRule)),
+			FKOnUpdate: pg.FKAction(normalizeFKAction(e.updateRule)),
+		})
+	}
+	return constraints, nil
 }
 
 func queryCheckConstraints(ctx context.Context, pool *pgxpool.Pool, schema, table string) ([]pg.Constraint, error) {
