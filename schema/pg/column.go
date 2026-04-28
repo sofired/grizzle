@@ -777,8 +777,7 @@ func (b *EnumColumnBuilder) NotNull() *EnumColumnBuilder { b.setNotNull(); retur
 // Default sets the DEFAULT value for the enum column.
 // Single quotes in the value are doubled to produce valid SQL.
 func (b *EnumColumnBuilder) Default(val string) *EnumColumnBuilder {
-	escaped := strings.ReplaceAll(val, "'", "''")
-	b.setDefault(fmt.Sprintf("'%s'::%s", escaped, b.typeName))
+	b.setDefault(quoteSQLLiteral(val) + "::" + b.typeName)
 	return b
 }
 

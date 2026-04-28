@@ -82,7 +82,7 @@ func applyBaseType(info *ColumnInfo, chain *parser.ChainResult) error {
 		info.GoTypePtr = "*uuid.UUID"
 		info.NeedsImport = "github.com/google/uuid"
 
-	// MySQL-specific: Set is a string-typed column. Enum is handled separately below.
+	// Set is MySQL-specific; Varchar, Text, and Char are cross-dialect. Enum is handled separately below.
 	case "Varchar", "Text", "Char", "Set":
 		info.ColType = "expr.StringColumn"
 		info.GoType = "string"

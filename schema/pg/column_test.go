@@ -254,6 +254,43 @@ func TestArrayDefault(t *testing.T) {
 	}
 }
 
+func TestCheck(t *testing.T) {
+	c := pg.Check("age_check", "age >= 0")
+	if c.Kind != pg.KindCheck {
+		t.Errorf("Kind = %q, want %q", c.Kind, pg.KindCheck)
+	}
+	if c.Name != "age_check" {
+		t.Errorf("Name = %q, want %q", c.Name, "age_check")
+	}
+	if c.CheckExpr != "age >= 0" {
+		t.Errorf("CheckExpr = %q, want %q", c.CheckExpr, "age >= 0")
+	}
+}
+
+func TestDefaultEscapesSingleQuote(t *testing.T) {
+	tests := []struct {
+		name string
+		def  pg.ColumnDef
+		want string
+	}{
+		{"Date", pg.Date().Default("2024-01-'01").Build("col"), "'2024-01-''01'"},
+		{"Time", pg.Time().Default("12:34'Z").Build("col"), "'12:34''Z'"},
+		{"Char", pg.Char(10).Default("it's").Build("col"), "'it''s'"},
+		{"Network", pg.Inet().Default("192.0.2.'1").Build("col"), "'192.0.2.''1'"},
+		{"Interval", pg.Interval().Default("1 hour'").Build("col"), "'1 hour'''::interval"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if !tt.def.HasDefault {
+				t.Error("HasDefault should be true")
+			}
+			if tt.def.DefaultExpr != tt.want {
+				t.Errorf("DefaultExpr = %q, want %q", tt.def.DefaultExpr, tt.want)
+			}
+		})
+	}
+}
+
 func TestColumnNameInjected(t *testing.T) {
 	for _, tc := range []struct {
 		name string
