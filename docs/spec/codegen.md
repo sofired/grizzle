@@ -84,27 +84,6 @@ Implemented for PostgreSQL, MySQL, and SQLite.
 
 ### Known limitations
 
-**`GrizTableAlias()` always returns the canonical table name** — self-joins and aliased table references are currently impossible with generated types, because `GrizTableAlias()` is hard-coded to the table name in the generator template:
-
-```go
-func (UsersTable) GrizTableAlias() string { return "users" }
-```
-
-There is no clean workaround in the current code-generation design. The manual workaround is to define a separate aliased struct:
-
-```go
-// Manual alias — define alongside the generated type
-type UsersAliasTable struct { UsersTable }
-func (UsersAliasTable) GrizTableAlias() string { return "u2" }
-
-var UsersAlias = UsersAliasTable{UsersT}
-
-// Usage:
-query.Select(UsersT.ID, UsersAlias.Username).
-    From(UsersT).
-    LeftJoin(UsersAlias, UsersAlias.ID.EQCol(UsersT.ManagerID))
-```
-
 **`json:` struct tags are not generated** — the generator emits only `db:` struct tags. The examples in this file reflect that: all generated structs use only `db:` tags. If your application serialises generated structs to JSON, add `json:` tags manually or embed them in a wrapper struct. A `--json-tags` flag is not yet planned.
 
 ---

@@ -69,7 +69,7 @@ Anything not labelled targets PARITY.
 | Kit — rename detection | Implemented via `RenamedFrom()` schema annotation — GRIZZLE-ONLY (documented in schema.md) | — |
 | Relations — JOIN helpers (`JoinRel`, `InnerJoinRel`) | Implemented — GRIZZLE-ONLY (documented in query-builder.md) | — |
 | Relations — relational query API (`findMany`) | Not started — DEVIATION:GAP (not designed); manual batch-loading is the current approach | Not milestoned |
-| Code generation (`grizzle gen`) | Implemented for PostgreSQL, MySQL, and SQLite — see [codegen.md](./codegen.md); known limitation: `GrizTableAlias()` hardcoded (self-join workaround documented) | — |
+| Code generation (`grizzle gen`) | Implemented for PostgreSQL, MySQL, and SQLite — see [codegen.md](./codegen.md) | — |
 | Transactions — core API | Implemented — PARITY | — |
 | Transactions — isolation levels | Not started — DEVIATION:GAP (designed) | M6 (#159, P1) |
 | Transactions — savepoints / nested transactions | Not started — DEVIATION:GAP (designed) | M6 (#143, P1) |

@@ -221,7 +221,7 @@ Only PostgreSQL-valid clauses are emitted for the PostgreSQL dialect and MySQL-v
 | `set` with `excluded` reference | `.DoUpdateSetExcluded(cols...)` | PARITY |
 | `set` with arbitrary value | `.DoUpdateSet(col, val)` | PARITY |
 | `where` on the conflict clause | DEVIATION:GAP (designed) | — |
-| *(no Drizzle equivalent)* | `.DoUpdateSetStruct(row)` | GRIZZLE-ONLY — see below |
+| *(no Drizzle equivalent)* | `.DoUpdateSetStruct(row)` | DEVIATION:LANGUAGE — see below |
 
 ### INSERT IGNORE (MySQL / SQLite)
 
