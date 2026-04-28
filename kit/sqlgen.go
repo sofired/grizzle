@@ -190,8 +190,21 @@ func GenerateChangeSQL(snap Snapshot, c Change) []string {
 			return nil
 		}
 		added := enumAddedValues(c.OldEnum, c.NewEnum)
+		removedVals, reordered := enumDrift(c.OldEnum, c.NewEnum)
 		typeName := quoteTable(c.NewEnum.QualifiedName())
-		stmts := make([]string, 0, len(added))
+		stmts := make([]string, 0, len(added)+len(removedVals)+1)
+		for _, v := range removedVals {
+			stmts = append(stmts, fmt.Sprintf(
+				"-- WARNING: enum value %q was removed from type %s; PostgreSQL cannot remove enum values — manual intervention required",
+				v, typeName,
+			))
+		}
+		if reordered {
+			stmts = append(stmts, fmt.Sprintf(
+				"-- WARNING: enum values for type %s have been reordered; PostgreSQL cannot reorder enum values — manual intervention required",
+				typeName,
+			))
+		}
 		for _, a := range added {
 			val := strings.ReplaceAll(a.Value, "'", "''")
 			if a.After != "" {

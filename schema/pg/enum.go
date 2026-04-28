@@ -12,7 +12,7 @@ type EnumDef struct {
 
 // QualifiedName returns the schema-qualified type name for use in SQL.
 func (e *EnumDef) QualifiedName() string {
-	if e.Schema != "" {
+	if e.Schema != "" && e.Schema != "public" {
 		return e.Schema + "." + e.Name
 	}
 	return e.Name

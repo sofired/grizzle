@@ -41,6 +41,13 @@ func TestSchemaView_QualifiedName(t *testing.T) {
 	}
 }
 
+func TestSchemaView_PublicSchema_IsUnqualified(t *testing.T) {
+	v := pg.SchemaView("public", "v", "SELECT 1")
+	if v.QualifiedName() != "v" {
+		t.Errorf("expected 'v' for public schema (matches introspection keying), got %q", v.QualifiedName())
+	}
+}
+
 // -------------------------------------------------------------------
 // pg DSL: EnumDef
 // -------------------------------------------------------------------
@@ -62,6 +69,13 @@ func TestSchemaCreateEnum_QualifiedName(t *testing.T) {
 	e := pg.SchemaCreateEnum("auth", "role", "admin", "user")
 	if e.QualifiedName() != "auth.role" {
 		t.Errorf("expected 'auth.role', got %q", e.QualifiedName())
+	}
+}
+
+func TestSchemaCreateEnum_PublicSchema_IsUnqualified(t *testing.T) {
+	e := pg.SchemaCreateEnum("public", "status", "a", "b")
+	if e.QualifiedName() != "status" {
+		t.Errorf("expected 'status' for public schema (matches introspection keying), got %q", e.QualifiedName())
 	}
 }
 
@@ -275,15 +289,13 @@ func TestDiff_AlterView(t *testing.T) {
 	})
 
 	changes := kit.Diff(old, new)
-	// Expect: DROP VIEW v, then CREATE VIEW v
-	if len(changes) != 2 {
-		t.Fatalf("expected 2 changes (drop+recreate), got %d: %v", len(changes), changes)
+	// Expect: only CREATE OR REPLACE VIEW (no preceding DROP — it is dangerous when
+	// other views depend on this view and redundant since OR REPLACE handles the update).
+	if len(changes) != 1 {
+		t.Fatalf("expected 1 change (CREATE OR REPLACE VIEW), got %d: %v", len(changes), changes)
 	}
-	if changes[0].Kind != kit.ChangeDropView {
-		t.Errorf("expected ChangeDropView first, got %s", changes[0].Kind)
-	}
-	if changes[1].Kind != kit.ChangeCreateView {
-		t.Errorf("expected ChangeCreateView second, got %s", changes[1].Kind)
+	if changes[0].Kind != kit.ChangeCreateView {
+		t.Errorf("expected ChangeCreateView, got %s", changes[0].Kind)
 	}
 }
 
@@ -384,6 +396,64 @@ func TestDiff_NoChange_Enum(t *testing.T) {
 	changes := kit.Diff(snap, snap)
 	if len(changes) != 0 {
 		t.Errorf("expected no changes for identical enum, got %d", len(changes))
+	}
+}
+
+func TestDiff_AlterEnum_RemovedValue(t *testing.T) {
+	old := kit.FromSchema(kit.SchemaObjects{
+		Enums: []*pg.EnumDef{pg.CreateEnum("status", "pending", "active", "archived")},
+	})
+	new := kit.FromSchema(kit.SchemaObjects{
+		Enums: []*pg.EnumDef{pg.CreateEnum("status", "pending", "active")},
+	})
+	changes := kit.Diff(old, new)
+	if len(changes) != 1 {
+		t.Fatalf("expected 1 change for removed enum value, got %d: %v", len(changes), changes)
+	}
+	if changes[0].Kind != kit.ChangeAlterEnum {
+		t.Errorf("expected ChangeAlterEnum, got %s", changes[0].Kind)
+	}
+	// SQL should include a warning comment for the removed value.
+	snap := kit.FromSchema(kit.SchemaObjects{Enums: []*pg.EnumDef{pg.CreateEnum("status", "pending", "active")}})
+	stmts := kit.GenerateChangeSQL(snap, changes[0])
+	if len(stmts) == 0 {
+		t.Fatal("expected at least one SQL statement (warning comment)")
+	}
+	found := false
+	for _, s := range stmts {
+		if strings.Contains(s, "-- WARNING") && strings.Contains(s, "archived") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected WARNING comment mentioning 'archived', got: %v", stmts)
+	}
+}
+
+func TestDiff_AlterEnum_ReorderedValues(t *testing.T) {
+	old := kit.FromSchema(kit.SchemaObjects{
+		Enums: []*pg.EnumDef{pg.CreateEnum("status", "a", "b", "c")},
+	})
+	new := kit.FromSchema(kit.SchemaObjects{
+		Enums: []*pg.EnumDef{pg.CreateEnum("status", "a", "c", "b")},
+	})
+	changes := kit.Diff(old, new)
+	if len(changes) != 1 {
+		t.Fatalf("expected 1 change for reordered enum values, got %d: %v", len(changes), changes)
+	}
+	if changes[0].Kind != kit.ChangeAlterEnum {
+		t.Errorf("expected ChangeAlterEnum, got %s", changes[0].Kind)
+	}
+	snap := kit.FromSchema(kit.SchemaObjects{Enums: []*pg.EnumDef{pg.CreateEnum("status", "a", "c", "b")}})
+	stmts := kit.GenerateChangeSQL(snap, changes[0])
+	found := false
+	for _, s := range stmts {
+		if strings.Contains(s, "-- WARNING") && strings.Contains(s, "reordered") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected WARNING comment about reordering, got: %v", stmts)
 	}
 }
 

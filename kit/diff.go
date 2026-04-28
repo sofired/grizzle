@@ -76,9 +76,11 @@ type Change struct {
 //  2. Rename or create new tables (renames before creates; creates are ordered
 //     by FK dependency so referenced tables are created before their dependants).
 //  3. Create new views — views SELECT FROM tables, which must already exist.
-//  4. Alter existing tables (columns + constraints, including drops).
-//  5. Alter existing enums (add values only; value removal is unsupported).
-//  6. Replace changed views (DROP then CREATE OR REPLACE in sequence).
+//  4. Alter existing enums (add values only; value removal requires manual intervention).
+//     Emitted before table diffs so newly-added labels are available if an ALTER TABLE
+//     in phase 5 references them (e.g. ALTER COLUMN SET DEFAULT).
+//  5. Alter existing tables (columns + constraints, including drops).
+//  6. Replace changed views (CREATE OR REPLACE in sequence).
 //  7. Drop removed views — before tables, since views depend on tables.
 //  8. Drop removed tables (unless renamed away).
 //  9. Drop removed enums — after tables that may reference them are gone.
@@ -183,16 +185,20 @@ func Diff(old, new Snapshot) []Change {
 		}
 	}
 
-	// Phase 4: enums in both → diff values (additions only; removal requires pg_catalog surgery).
+	// Phase 4: enums in both → diff values.
 	// Emitted before table diffs so that newly-added enum labels are available if a table
 	// ALTER (e.g. ALTER COLUMN SET DEFAULT) references them in the same migration.
+	// Also emitted when values are removed or reordered so callers receive warning SQL
+	// comments — PostgreSQL cannot remove or reorder enum values without manual work.
 	for _, name := range sortedKeys(new.Enums) {
 		oldE, exists := old.Enums[name]
 		if !exists {
 			continue // handled above
 		}
 		newE := new.Enums[name]
-		if addedVals := enumAddedValues(oldE, newE); len(addedVals) > 0 {
+		addedVals := enumAddedValues(oldE, newE)
+		removedVals, reordered := enumDrift(oldE, newE)
+		if len(addedVals) > 0 || len(removedVals) > 0 || reordered {
 			o, n := *oldE, *newE
 			changes = append(changes, Change{
 				Kind:      ChangeAlterEnum,
@@ -214,7 +220,10 @@ func Diff(old, new Snapshot) []Change {
 		}
 	}
 
-	// Phase 6: views present in both — DROP + recreate if SQL differs.
+	// Phase 6: views present in both — update via CREATE OR REPLACE VIEW if SQL differs.
+	// Only ChangeCreateView is emitted; CREATE OR REPLACE handles the update in PostgreSQL
+	// and MySQL without needing a preceding DROP. Emitting DROP first is dangerous because
+	// PostgreSQL will reject it if other views depend on this view.
 	for _, name := range sortedKeys(new.Views) {
 		oldV, exists := old.Views[name]
 		if !exists {
@@ -224,7 +233,6 @@ func Diff(old, new Snapshot) []Change {
 		if normalizeViewSQL(oldV.SQL) != normalizeViewSQL(newV.SQL) {
 			n := *newV
 			changes = append(changes,
-				Change{Kind: ChangeDropView, TableName: name, View: &ViewSnap{Name: oldV.Name, Schema: oldV.Schema, SQL: oldV.SQL}},
 				Change{Kind: ChangeCreateView, TableName: name, View: &n},
 			)
 		}
@@ -330,6 +338,50 @@ func enumAddedValues(oldE, newE *EnumSnap) []enumValueAddition {
 		}
 	}
 	return added
+}
+
+// enumDrift returns the list of values present in oldE but absent in newE
+// (removed values), and reports whether any retained values have been reordered
+// relative to their positions in oldE. PostgreSQL cannot remove or reorder enum
+// values, so callers use this to surface warning SQL comments.
+func enumDrift(oldE, newE *EnumSnap) (removed []string, reordered bool) {
+	newSet := make(map[string]bool, len(newE.Values))
+	for _, v := range newE.Values {
+		newSet[v] = true
+	}
+	oldSet := make(map[string]bool, len(oldE.Values))
+	for _, v := range oldE.Values {
+		oldSet[v] = true
+		if !newSet[v] {
+			removed = append(removed, v)
+		}
+	}
+	// Build the subsequence of newE values that exist in old, then compare
+	// with the subsequence of oldE values that exist in new. Any mismatch
+	// means a reorder occurred.
+	var inNewOrder []string
+	for _, v := range newE.Values {
+		if oldSet[v] {
+			inNewOrder = append(inNewOrder, v)
+		}
+	}
+	var inOldOrder []string
+	for _, v := range oldE.Values {
+		if newSet[v] {
+			inOldOrder = append(inOldOrder, v)
+		}
+	}
+	if len(inOldOrder) != len(inNewOrder) {
+		reordered = true
+		return
+	}
+	for i := range inOldOrder {
+		if inOldOrder[i] != inNewOrder[i] {
+			reordered = true
+			return
+		}
+	}
+	return
 }
 
 // normalizeViewSQL strips leading/trailing whitespace and trailing semicolons

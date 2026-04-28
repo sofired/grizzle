@@ -10,7 +10,7 @@ type ViewDef struct {
 
 // QualifiedName returns the schema-qualified view name for use in SQL.
 func (v *ViewDef) QualifiedName() string {
-	if v.Schema != "" {
+	if v.Schema != "" && v.Schema != "public" {
 		return v.Schema + "." + v.Name
 	}
 	return v.Name

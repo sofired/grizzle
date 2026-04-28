@@ -62,7 +62,7 @@ type ViewSnap struct {
 
 // QualifiedName returns the schema-qualified name used as the map key.
 func (v *ViewSnap) QualifiedName() string {
-	if v.Schema != "" {
+	if v.Schema != "" && v.Schema != "public" {
 		return v.Schema + "." + v.Name
 	}
 	return v.Name
@@ -77,7 +77,7 @@ type EnumSnap struct {
 
 // QualifiedName returns the schema-qualified name used as the map key.
 func (e *EnumSnap) QualifiedName() string {
-	if e.Schema != "" {
+	if e.Schema != "" && e.Schema != "public" {
 		return e.Schema + "." + e.Name
 	}
 	return e.Name

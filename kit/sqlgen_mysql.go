@@ -173,21 +173,21 @@ func GenerateChangeSQLMySQL(snap Snapshot, c Change) []string {
 		)}
 
 	case ChangeCreateEnum:
-		// MySQL does not have a named enum type; enum is a column-level attribute.
+		// MySQL does not have named enum types; ENUM is defined inline on columns.
 		return []string{fmt.Sprintf(
-			"-- MySQL: CREATE TYPE AS ENUM is not supported; define ENUM inline on the column for %s",
+			"-- MySQL: CREATE TYPE AS ENUM is not supported for enum type %s; update affected columns to use inline ENUM(...) or equivalent CHECK constraints manually",
 			c.TableName,
 		)}
 
 	case ChangeAlterEnum:
 		return []string{fmt.Sprintf(
-			"-- MySQL: ALTER TYPE ADD VALUE is not supported; modify the column definition for %s",
+			"-- MySQL: ALTER TYPE ADD VALUE is not supported for enum type %s; update affected columns' inline ENUM(...) or equivalent CHECK constraints manually",
 			c.TableName,
 		)}
 
 	case ChangeDropEnum:
 		return []string{fmt.Sprintf(
-			"-- MySQL: DROP TYPE is not supported; no action needed for %s",
+			"-- MySQL: DROP TYPE is not supported for enum type %s; remove or adjust affected columns' inline ENUM(...) or equivalent CHECK constraints manually if needed",
 			c.TableName,
 		)}
 	}

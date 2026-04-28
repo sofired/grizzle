@@ -152,21 +152,21 @@ func GenerateChangeSQLSQLite(snap Snapshot, c Change) []string {
 		)}
 
 	case ChangeCreateEnum:
-		// SQLite does not have named enum types; enum values are enforced via CHECK constraints.
+		// SQLite does not have named enum types; enforce allowed values via CHECK constraints.
 		return []string{fmt.Sprintf(
-			"-- SQLite: CREATE TYPE AS ENUM is not supported; use a CHECK constraint for %s",
+			"-- SQLite: CREATE TYPE AS ENUM is not supported for enum type %s; enforce allowed values on each referencing column via a CHECK constraint",
 			c.TableName,
 		)}
 
 	case ChangeAlterEnum:
 		return []string{fmt.Sprintf(
-			"-- SQLite: ALTER TYPE ADD VALUE is not supported; modify the CHECK constraint for %s",
+			"-- SQLite: ALTER TYPE ADD VALUE is not supported for enum type %s; update the CHECK constraint on each referencing column to allow the new value",
 			c.TableName,
 		)}
 
 	case ChangeDropEnum:
 		return []string{fmt.Sprintf(
-			"-- SQLite: DROP TYPE is not supported; no action needed for %s",
+			"-- SQLite: DROP TYPE is not supported for enum type %s; remove or update CHECK constraints on each referencing column as needed",
 			c.TableName,
 		)}
 	}
