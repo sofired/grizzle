@@ -65,25 +65,27 @@ In Drizzle, the column name is the first argument to the type function: `uuid('i
 | `numeric(name, {precision, scale})` | `pg.Numeric(p, s)` | PARITY |
 | `json(name)` | `pg.JSON()` | PARITY |
 | `jsonb(name)` | `pg.JSONB()` | PARITY |
-| `date(name)` | DEVIATION:GAP (designed) | — |
-| `time(name, opts)` | DEVIATION:GAP (designed) | — |
-| `interval(name)` | DEVIATION:GAP (not designed) | — |
-| `real(name)` | DEVIATION:GAP (designed) | — |
-| `doublePrecision(name)` | DEVIATION:GAP (designed) | — |
-| `char(name, {length})` | DEVIATION:GAP (designed) | — |
-| `inet(name)` | DEVIATION:GAP (designed) | — |
-| `cidr(name)` | DEVIATION:GAP (not designed) | — |
-| `macaddr(name)` | DEVIATION:GAP (not designed) | — |
-| `bytea(name)` | DEVIATION:GAP (designed) | — |
+| `date(name)` | `pg.Date()` | PARITY — generates `expr.DateColumn`; Go type `time.Time` |
+| `time(name, opts)` | `pg.Time()` / `pg.Time().WithTimezone()` | PARITY — generates `expr.TimestampColumn`; Go type `time.Time` |
+| `interval(name)` | `pg.Interval()` | PARITY — Go type `string`; see codegen.md for rationale |
+| `real(name)` | `pg.Real()` | PARITY — Go type `float64`; see codegen.md for rationale |
+| `doublePrecision(name)` | `pg.DoublePrecision()` | PARITY — Go type `float64` |
+| `char(name, {length})` | `pg.Char(n)` | PARITY — Go type `string` |
+| `inet(name)` | `pg.Inet()` | PARITY — Go type `string`; see codegen.md for rationale |
+| `cidr(name)` | `pg.Cidr()` | PARITY — Go type `string` |
+| `macaddr(name)` | `pg.Macaddr()` | PARITY — Go type `string` |
+| `bytea(name)` | `pg.Bytea()` | PARITY — Go type `[]byte` |
 | `point(name)` | DEVIATION:GAP (not designed) | — |
 | `line(name)` | DEVIATION:GAP (not designed) | — |
 | `geometry(name)` | DEVIATION:GAP (not designed) | — |
-| `pgEnum(name, vals)` | DEVIATION:GAP (not designed) | — |
+| `pgEnum(name, vals)` | `pg.Enum(typeName, vals...)` | PARITY — Go type `string`; enum type must already exist in the database |
 | `vector(name, {dim})` | DEVIATION:GAP (not designed) | — |
 | `halfvec(name, {dim})` | DEVIATION:GAP (not designed) | — |
-| `tsvector(name)` | DEVIATION:GAP (not designed) — tracked as #140 | — |
-| Array types (`.array()`) | DEVIATION:GAP (not designed) — tracked as #144 | — |
+| `tsvector(name)` | `pg.Tsvector()` | PARITY — Go type `string`; richer FTS operators (`@@`) tracked in #140 |
+| Array types (`.array()`) | `pg.Array(inner)` | PARITY — Go type `any`; typed `[]T` generation tracked in #144 |
 | Custom types (`.customType()`) | DEVIATION:GAP (not designed) | — |
+| *(no Drizzle equivalent)* | `pg.Tsquery()` | GRIZZLE-ONLY — PostgreSQL `tsquery` storage column; Go type `string` |
+| *(no Drizzle equivalent)* | `pg.Int4Range()`, `pg.Int8Range()`, `pg.NumRange()`, `pg.TsRange()`, `pg.TstzRange()`, `pg.DateRange()` | GRIZZLE-ONLY — PostgreSQL range types; Go type `string` |
 
 ### MySQL
 
