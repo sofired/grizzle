@@ -248,7 +248,7 @@ func applyMethod(def *pg.ColumnDef, m MethodCall) error { //nolint:unparam
 				if v == "true" || v == "false" {
 					def.DefaultExpr = v
 				} else {
-					def.DefaultExpr = fmt.Sprintf("'%s'", v)
+					def.DefaultExpr = "'" + strings.ReplaceAll(v, "'", "''") + "'"
 				}
 			case bool:
 				if v {

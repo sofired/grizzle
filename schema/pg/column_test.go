@@ -306,6 +306,8 @@ func TestDefaultEscapesSingleQuote(t *testing.T) {
 		{"Char", pg.Char(10).Default("it's").Build("col"), "'it''s'"},
 		{"Network", pg.Inet().Default("192.0.2.'1").Build("col"), "'192.0.2.''1'"},
 		{"Interval", pg.Interval().Default("1 hour'").Build("col"), "'1 hour'''::interval"},
+		{"Varchar", pg.Varchar(255).Default("O'Brien").Build("col"), "'O''Brien'"},
+		{"JSONB", pg.JSONB().Default(`{"key":"it's"}`).Build("col"), `'{"key":"it''s"}'::jsonb`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

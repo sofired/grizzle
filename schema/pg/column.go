@@ -412,7 +412,7 @@ func (b *JSONBBuilder) Type(typeExpr string) *JSONBBuilder {
 
 func (b *JSONBBuilder) NotNull() *JSONBBuilder { b.setNotNull(); return b }
 func (b *JSONBBuilder) Default(jsonExpr string) *JSONBBuilder {
-	b.setDefault(fmt.Sprintf("'%s'::jsonb", jsonExpr))
+	b.setDefault(quoteSQLLiteral(jsonExpr) + "::jsonb")
 	return b
 }
 func (b *JSONBBuilder) DefaultEmpty() *JSONBBuilder {

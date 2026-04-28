@@ -133,6 +133,17 @@ func TestJSON_ColumnDef(t *testing.T) {
 	}
 }
 
+func TestSQLiteJSONDefaultEscapesSingleQuote(t *testing.T) {
+	col := sqlite.JSON().Default(`{"key":"it's"}`).Build("meta")
+	if !col.HasDefault {
+		t.Error("HasDefault should be true")
+	}
+	want := `'{"key":"it''s"}'`
+	if col.DefaultExpr != want {
+		t.Errorf("DefaultExpr: got %q, want %q", col.DefaultExpr, want)
+	}
+}
+
 func TestBigInt_ColumnDef(t *testing.T) {
 	col := sqlite.BigInt().NotNull().Build("counter")
 	if col.SQLType != "bigint" {
