@@ -42,7 +42,6 @@ const (
 	GoTypeTime      GoTypeHint = "time.Time"
 	GoTypeUUID      GoTypeHint = "uuid.UUID"
 	GoTypeByteSlice GoTypeHint = "[]byte"
-	GoTypeFloat32   GoTypeHint = "float32"
 	GoTypeFloat64   GoTypeHint = "float64"
 	GoTypeAny       GoTypeHint = "any"
 )
@@ -212,7 +211,7 @@ func Text() *VarcharBuilder {
 func (b *VarcharBuilder) NotNull() *VarcharBuilder { b.setNotNull(); return b }
 func (b *VarcharBuilder) Unique() *VarcharBuilder  { b.def.Unique = true; return b }
 func (b *VarcharBuilder) Default(val string) *VarcharBuilder {
-	b.setDefault(fmt.Sprintf("'%s'", val))
+	b.setDefault(quoteSQLLiteral(val))
 	return b
 }
 func (b *VarcharBuilder) References(table, col string, opts ...FKOption) *VarcharBuilder {
@@ -559,7 +558,7 @@ func (b *IntervalBuilder) Build(name string) ColumnDef { return b.build(name) }
 // FloatBuilder builds a real or double precision column definition.
 type FloatBuilder struct{ colBuilder }
 
-// Real starts a single-precision (4-byte) floating-point column.
+// Real starts a real (single-precision 4-byte) column. Go type is float64 for API consistency with DoublePrecision and FloatBuilder.Default.
 func Real() *FloatBuilder {
 	b := &FloatBuilder{}
 	b.def.SQLType = "real"
