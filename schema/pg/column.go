@@ -408,15 +408,6 @@ func (b *JSONBBuilder) Default(jsonExpr string) *JSONBBuilder {
 	b.setDefault(fmt.Sprintf("'%s'::jsonb", jsonExpr))
 	return b
 }
-func (b *JSONBBuilder) DefaultEmpty() *JSONBBuilder {
-	b.setDefault("'{}' ::jsonb")
-	return b
-}
-func (b *JSONBBuilder) DefaultEmptyArray() *JSONBBuilder {
-	b.setDefault("'[]'::jsonb")
-	return b
-}
-
 // RenamedFrom declares that this column was renamed from oldName.
 // Diff() will emit ChangeRenameColumn instead of drop+add when oldName
 // matches a dropped column in the old snapshot. Leave empty for new columns

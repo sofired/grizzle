@@ -231,14 +231,6 @@ func applyMethod(def *pg.ColumnDef, m MethodCall) error { //nolint:unparam
 		def.HasDefault = true
 		def.DefaultExpr = "now()"
 
-	case "DefaultEmpty":
-		def.HasDefault = true
-		def.DefaultExpr = "'{}'::jsonb"
-
-	case "DefaultEmptyArray":
-		def.HasDefault = true
-		def.DefaultExpr = "'[]'::jsonb"
-
 	case "Default":
 		def.HasDefault = true
 		if len(m.Args) > 0 {

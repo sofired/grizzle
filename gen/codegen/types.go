@@ -39,7 +39,7 @@ func ResolveColumn(col parser.ParsedColumn) (ColumnInfo, error) {
 			info.IsPK = true
 		case "Unique":
 			// no effect on codegen types
-		case "Default", "DefaultRandom", "DefaultNow", "DefaultEmpty", "DefaultFalse", "DefaultTrue":
+		case "Default", "DefaultRandom", "DefaultNow", "DefaultFalse", "DefaultTrue":
 			info.HasDefault = true
 		case "References":
 			// FK — no type change

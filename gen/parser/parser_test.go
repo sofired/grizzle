@@ -457,20 +457,6 @@ func TestEvalTable_Default_FloatLiteral(t *testing.T) {
 	}
 }
 
-func TestEvalTable_DefaultEmpty(t *testing.T) {
-	c := evalOne(t, `pg.C("tags", pg.JSONB().DefaultEmpty())`)
-	if c.DefaultExpr != "'{}'::jsonb" {
-		t.Errorf("DefaultExpr: got %q, want '{}'::jsonb", c.DefaultExpr)
-	}
-}
-
-func TestEvalTable_DefaultEmptyArray(t *testing.T) {
-	c := evalOne(t, `pg.C("items", pg.JSONB().DefaultEmptyArray())`)
-	if c.DefaultExpr != "'[]'::jsonb" {
-		t.Errorf("DefaultExpr: got %q, want '[]'::jsonb", c.DefaultExpr)
-	}
-}
-
 func TestEvalTable_Unique(t *testing.T) {
 	c := evalOne(t, `pg.C("email", pg.Varchar(255).NotNull().Unique())`)
 	if !c.Unique {

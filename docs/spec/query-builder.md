@@ -24,6 +24,14 @@ query.Select(db.UsersT.ID, db.UsersT.Username).From(db.UsersT)
 
 **Status:** PARITY
 
+### Column aliasing in SELECT
+
+| Drizzle | Grizzle | Status |
+|---|---|---|
+| `col.as('alias')` in select object | `expr.ColAs(col, "alias")` | PARITY — Drizzle v1.0.0-beta.1+ exposes `.as()` on columns; Grizzle uses `expr.ColAs(col, alias)` |
+
+`expr.ColAs` wraps a `SelectableColumn` and adds an `AS alias` clause in the SELECT list. In ORDER BY and GROUP BY contexts the alias is stripped and only the underlying column reference is emitted, matching SQL standard behaviour. See the GROUP BY and subquery sections for details.
+
 ### WHERE
 
 | Drizzle | Grizzle | Status |
@@ -48,7 +56,7 @@ query.Select(db.UsersT.ID, db.UsersT.Username).From(db.UsersT)
 | `or(...exprs)` | `expr.Or(exprs...)` | PARITY |
 | `not(expr)` | `expr.Not(expr)` | PARITY |
 | `sql\`raw\`` | `expr.Raw(str)` | PARITY for unparameterized strings |
-| Parameterized `sql\`... ${val}\`` | DEVIATION:BROKEN — see bug #129 | — |
+| Parameterized `sql\`... ${val}\`` | `expr.RawArgs(sql, args...)` | DEVIATION:LANGUAGE — see below |
 | `exists(subquery)` | `query.Exists(sub)` | PARITY |
 | `notExists(subquery)` | `query.NotExists(sub)` | PARITY |
 
@@ -80,6 +88,8 @@ Note: Drizzle's TypeScript type system prevents passing an aliased column (e.g. 
 | `.rightJoin(tbl, on)` | `.RightJoin(tbl, on)` | PARITY |
 | `.fullJoin(tbl, on)` | `.FullJoin(tbl, on)` | PARITY |
 | `.crossJoin(tbl)` | DEVIATION:GAP (designed) — add `.CrossJoin(tbl)` with no ON condition | — |
+| *(no Drizzle equivalent)* | `.JoinRel(rel)` | GRIZZLE-ONLY — see below |
+| *(no Drizzle equivalent)* | `.InnerJoinRel(rel)` | GRIZZLE-ONLY — see below |
 
 ### DISTINCT
 
@@ -169,6 +179,10 @@ Only PostgreSQL-valid clauses are emitted for the PostgreSQL dialect and MySQL-v
 | `.partitionBy(cols)` | `.PartitionBy(cols...)` | PARITY |
 | `.orderBy(cols)` | `.OrderBy(cols...)` | PARITY |
 | Frame spec (ROWS/RANGE/GROUPS BETWEEN) | DEVIATION:GAP (designed) — tracked as #139 | — |
+| *(no Drizzle equivalent)* | `expr.WinSum(col)` | GRIZZLE-ONLY — see below |
+| *(no Drizzle equivalent)* | `expr.WinAvg(col)` | GRIZZLE-ONLY — see below |
+| *(no Drizzle equivalent)* | `expr.WinCount()` | GRIZZLE-ONLY — see below |
+| *(no Drizzle equivalent)* | `expr.UnboundedPreceding()` / `expr.CurrentRow()` / `expr.UnboundedFollowing()` | GRIZZLE-ONLY — sentinels for future frame API; see #139 |
 
 ### Aggregates
 
@@ -207,6 +221,7 @@ Only PostgreSQL-valid clauses are emitted for the PostgreSQL dialect and MySQL-v
 | `set` with `excluded` reference | `.DoUpdateSetExcluded(cols...)` | PARITY |
 | `set` with arbitrary value | `.DoUpdateSet(col, val)` | PARITY |
 | `where` on the conflict clause | DEVIATION:GAP (designed) | — |
+| *(no Drizzle equivalent)* | `.DoUpdateSetStruct(row)` | GRIZZLE-ONLY — see below |
 
 ### INSERT IGNORE (MySQL / SQLite)
 
@@ -221,6 +236,8 @@ Only PostgreSQL-valid clauses are emitted for the PostgreSQL dialect and MySQL-v
 | `.set({ col: val })` | `.Set(col, val)` | PARITY |
 | Struct-based set | `.SetStruct(struct)` | PARITY |
 | `UPDATE … FROM` (PostgreSQL) | DEVIATION:GAP (designed) | — |
+| `.limit(n)` (MySQL / SQLite) | `.Limit(n)` | PARITY — silently ignored for PostgreSQL |
+| *(no Drizzle equivalent)* | `.SetStruct(struct)` with struct-based ON CONFLICT via `DoUpdateSetStruct` | GRIZZLE-ONLY — see INSERT section |
 
 ### RETURNING
 
@@ -228,7 +245,11 @@ Only PostgreSQL-valid clauses are emitted for the PostgreSQL dialect and MySQL-v
 
 ## DELETE
 
-**Status:** PARITY — WHERE + RETURNING
+| Drizzle | Grizzle | Status |
+|---|---|---|
+| `db.delete(tbl).where(cond)` | `query.DeleteFrom(tbl).Where(cond)` | PARITY |
+| `RETURNING` | `.Returning(cols...)` | PARITY |
+| `.limit(n)` (MySQL / SQLite) | `.Limit(n)` | PARITY — silently ignored for PostgreSQL |
 
 ## Prepared statements — DEVIATION:GAP (not designed)
 
@@ -248,7 +269,7 @@ const result = await prepared.execute({ id: '...' })
 | Drizzle | Grizzle | Status |
 |---|---|---|
 | `` sql`raw sql` `` | `expr.Raw(str)` | PARITY for literal strings |
-| `` sql`... ${val} ...` `` parameterized | DEVIATION:BROKEN — bug #129: excess placeholders emit as literal `$?` | — |
+| `` sql`... ${val} ...` `` parameterized | `expr.RawArgs(sql, args...)` | DEVIATION:LANGUAGE — see below |
 | `db.execute(sql\`...\`)` | `db.ExecRaw(ctx, sql, args...)` | PARITY |
 
 ## Execution and scanning
@@ -259,3 +280,95 @@ const result = await prepared.execute({ id: '...' })
 | Single row or throw | `pgxdb.FromSelectOne[T](ctx, d, q)` | PARITY |
 | Optional single row | `pgxdb.FromSelectOpt[T](ctx, d, q)` | PARITY |
 | Cursor / streaming | DEVIATION:GAP (not designed) | — |
+
+---
+
+## GRIZZLE-ONLY additions
+
+The following APIs have no Drizzle equivalent. Each is kept because there is no practical Go way to achieve the same result without it.
+
+### `expr.RawArgs` — parameterized raw SQL (DEVIATION:LANGUAGE)
+
+Drizzle uses template literals (`` sql`SELECT ${col} WHERE id = ${val}` ``) to interpolate bound parameters into raw SQL. Go has no template literal types. `expr.RawArgs` is the idiomatic Go equivalent: it accepts a SQL fragment with `$?` placeholders and a matching list of arguments.
+
+```go
+// Drizzle:
+//   sql`ST_DWithin(location, ST_MakePoint(${lon}, ${lat}), ${radius})`
+//
+// Grizzle:
+expr.RawArgs("ST_DWithin(location, ST_MakePoint($?, $?), $?)", lon, lat, radius)
+```
+
+Each `$?` token is replaced with the next dialect placeholder (`$1`, `?`, etc.) and the corresponding argument is bound. Placeholder count must exactly match argument count; a mismatch panics at query-build time with a diagnostic message identifying the template.
+
+### `query.JoinRel` and `query.InnerJoinRel` — relation-based JOIN (GRIZZLE-ONLY)
+
+Drizzle requires an explicit ON expression for every JOIN: `.leftJoin(posts, eq(users.id, posts.userId))`. In Go, relation definitions (`RelationDef`) already encode the foreign table and ON condition. `JoinRel`/`InnerJoinRel` reuse this definition to avoid repeating the ON expression at every query call site.
+
+```go
+// Define once at schema level:
+var UserRealm = query.BelongsTo("realm", RealmsT, RealmsT.ID.EQCol(UsersT.RealmID))
+
+// Use at query call sites — ON condition not repeated:
+query.Select(UsersT.ID, RealmsT.Name).From(UsersT).JoinRel(UserRealm)
+// equivalent to: .LeftJoin(RealmsT, RealmsT.ID.EQCol(UsersT.RealmID))
+
+query.Select(UsersT.ID, RealmsT.Name).From(UsersT).InnerJoinRel(UserRealm)
+// equivalent to: .InnerJoin(RealmsT, RealmsT.ID.EQCol(UsersT.RealmID))
+```
+
+`JoinRel` produces a LEFT JOIN; `InnerJoinRel` produces an INNER JOIN.
+
+### `InsertBuilder.DoUpdateSetStruct` — struct-based ON CONFLICT DO UPDATE (DEVIATION:LANGUAGE)
+
+Drizzle infers the update set from TypeScript types. In Go, reflection is required. `DoUpdateSetStruct` accepts a db-tagged struct and adds a `SET col = val` assignment for every non-nil pointer field, using the same rules as `UpdateBuilder.SetStruct`.
+
+```go
+type UserUpsert struct {
+    Email   *string `db:"email"`
+    Enabled *bool   `db:"enabled"`
+}
+
+query.InsertInto(UsersT).Values(row).
+    OnConflict("realm_id", "username").
+    DoUpdateSetStruct(UserUpsert{Email: ptr("alice@example.com")})
+// emits: ON CONFLICT ("realm_id", "username") DO UPDATE SET "email" = $N
+```
+
+Nil pointer fields are skipped. If all fields are nil (or the struct is invalid), the conflict action falls back to `DO NOTHING` to avoid emitting an invalid empty SET list.
+
+### `expr.WinSum`, `expr.WinAvg`, `expr.WinCount` — window aggregates (GRIZZLE-ONLY)
+
+Drizzle users write `sql\`SUM(${col}) OVER (PARTITION BY ...)\`` for window aggregates. In Grizzle, `WinSum`, `WinAvg`, and `WinCount` return `WindowExpr` values that can be chained with `.PartitionBy()` and `.OrderBy()`, keeping the type-safe builder pattern consistent with the other window functions.
+
+```go
+expr.WinSum(OrdersT.Amount).PartitionBy(OrdersT.CustomerID).As("running_total")
+// → SUM("orders"."amount") OVER (PARTITION BY "orders"."customer_id") AS "running_total"
+
+expr.WinAvg(ScoresT.Value).PartitionBy(ScoresT.RealmID).OrderBy(ScoresT.CreatedAt.Asc()).As("avg_score")
+expr.WinCount().PartitionBy(UsersT.RealmID).As("realm_count")
+```
+
+### `expr.TsRank` and `expr.TsRankCd` — FTS ranking (GRIZZLE-ONLY)
+
+Drizzle users write `sql\`ts_rank(${col}, ${query})\`` for full-text search ranking. In Grizzle, `TsRank` and `TsRankCd` are typed wrappers that integrate with the existing FTS expression builders (`ToTsvector`, `PlainToTsquery`, etc.), keeping the whole FTS pipeline in a single consistent API.
+
+```go
+tsq := expr.PlainToTsquery("grizzle orm")
+expr.TsRank(ArticlesT.SearchVector, tsq).Desc()
+// → TS_RANK("articles"."search_vector", plainto_tsquery($1)) DESC
+
+expr.TsRankCd(ArticlesT.SearchVector, tsq).Desc()
+// → TS_RANK_CD("articles"."search_vector", plainto_tsquery($1)) DESC
+```
+
+### Window frame sentinels (GRIZZLE-ONLY — partial; see #139)
+
+`expr.UnboundedPreceding()`, `expr.CurrentRow()`, and `expr.UnboundedFollowing()` return `WindowFrameBound` sentinel values for specifying `ROWS/RANGE BETWEEN … AND …` frame boundaries. These types are exported and designed but are not yet wired to the `WindowExpr` builder (no `.Frame()` method exists). Full frame support is tracked in issue #139.
+
+```go
+// Intended future usage (not yet wired):
+expr.WinSum(col).Over(
+    expr.Frame("ROWS", expr.UnboundedPreceding(), expr.CurrentRow()),
+)
+```
