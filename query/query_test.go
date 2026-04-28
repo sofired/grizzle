@@ -2395,6 +2395,203 @@ func TestWithRecursive_AndRegularCTE(t *testing.T) {
 }
 
 // -------------------------------------------------------------------
+// CROSS JOIN tests
+// -------------------------------------------------------------------
+
+func TestCrossJoin_Basic(t *testing.T) {
+	assertSQL(t, "CROSS JOIN basic",
+		query.Select().From(ts.UsersT).CrossJoin(ts.RealmsT),
+		`SELECT * FROM "users" CROSS JOIN "realms"`,
+		nil,
+	)
+}
+
+func TestCrossJoin_WithColumns(t *testing.T) {
+	assertSQL(t, "CROSS JOIN with explicit columns",
+		query.Select(ts.UsersT.Username, ts.RealmsT.Name).
+			From(ts.UsersT).
+			CrossJoin(ts.RealmsT),
+		`SELECT "users"."username", "realms"."name" FROM "users" CROSS JOIN "realms"`,
+		nil,
+	)
+}
+
+func TestCrossJoin_WithWhere(t *testing.T) {
+	assertSQL(t, "CROSS JOIN with WHERE",
+		query.Select(ts.UsersT.ID, ts.RealmsT.Name).
+			From(ts.UsersT).
+			CrossJoin(ts.RealmsT).
+			Where(ts.UsersT.Enabled.IsTrue()),
+		`SELECT "users"."id", "realms"."name" FROM "users" CROSS JOIN "realms" WHERE "users"."enabled" = $1`,
+		[]any{true},
+	)
+}
+
+func TestCrossJoin_ChainedWithInnerJoin(t *testing.T) {
+	// A CROSS JOIN followed by an INNER JOIN should produce both clauses in order,
+	// using a distinct alias for the INNER JOIN side to avoid the duplicate-table-name
+	// error that Postgres raises when the same table appears twice without aliasing.
+	realms2 := ts.RealmsT.As("r2")
+	assertSQL(t, "CROSS JOIN chained with INNER JOIN",
+		query.Select().
+			From(ts.UsersT).
+			CrossJoin(ts.RealmsT).
+			InnerJoin(realms2, ts.UsersT.RealmID.EQCol(realms2.ID)),
+		`SELECT * FROM "users" CROSS JOIN "realms" INNER JOIN "realms" AS "r2" ON "users"."realm_id" = "r2"."id"`,
+		nil,
+	)
+}
+
+// -------------------------------------------------------------------
+// Table alias / self-join tests
+// -------------------------------------------------------------------
+
+func TestTableAlias_As_ReturnsAliasedCopy(t *testing.T) {
+	mgr := ts.EmployeesT.As("manager")
+	if mgr.GrizTableName() != "employees" {
+		t.Errorf("GrizTableName: got %q, want %q", mgr.GrizTableName(), "employees")
+	}
+	if mgr.GrizTableAlias() != "manager" {
+		t.Errorf("GrizTableAlias: got %q, want %q", mgr.GrizTableAlias(), "manager")
+	}
+}
+
+func TestTableAlias_ColumnRefsUseAlias(t *testing.T) {
+	mgr := ts.EmployeesT.As("manager")
+	ctx := expr.NewBuildContext(dialect.Postgres)
+	got := mgr.Name.EQ("Alice").ToSQL(ctx)
+	want := `"manager"."name" = $1`
+	if got != want {
+		t.Errorf("column ref with alias: got %q, want %q", got, want)
+	}
+}
+
+func TestTableAlias_OriginalUnchanged(t *testing.T) {
+	// Calling As() must not mutate the original singleton.
+	_ = ts.EmployeesT.As("manager")
+	if ts.EmployeesT.GrizTableAlias() != "employees" {
+		t.Errorf("As() mutated original: GrizTableAlias = %q", ts.EmployeesT.GrizTableAlias())
+	}
+	ctx := expr.NewBuildContext(dialect.Postgres)
+	got := ts.EmployeesT.Name.EQ("Alice").ToSQL(ctx)
+	want := `"employees"."name" = $1`
+	if got != want {
+		t.Errorf("original column ref changed: got %q, want %q", got, want)
+	}
+}
+
+func TestSelfJoin_LeftJoin(t *testing.T) {
+	// SELECT "employees"."name", "manager"."name" AS "manager_name"
+	//   FROM "employees"
+	//   LEFT JOIN "employees" AS "manager"
+	//     ON "employees"."manager_id" = "manager"."id"
+	mgr := ts.EmployeesT.As("manager")
+	assertSQL(t, "self-join via alias",
+		query.Select(
+			ts.EmployeesT.Name,
+			mgr.Name.As("manager_name"),
+		).From(ts.EmployeesT).
+			LeftJoin(mgr, ts.EmployeesT.ManagerID.EQCol(mgr.ID)),
+		`SELECT "employees"."name", "manager"."name" AS "manager_name" FROM "employees" LEFT JOIN "employees" AS "manager" ON "employees"."manager_id" = "manager"."id"`,
+		nil,
+	)
+}
+
+func TestSelfJoin_Where_UsesAlias(t *testing.T) {
+	// Filtering on the aliased table's columns should use the alias in SQL.
+	mgr := ts.EmployeesT.As("manager")
+	assertSQL(t, "self-join where uses alias",
+		query.Select(ts.EmployeesT.Name).
+			From(ts.EmployeesT).
+			LeftJoin(mgr, ts.EmployeesT.ManagerID.EQCol(mgr.ID)).
+			Where(mgr.Name.EQ("Alice")),
+		`SELECT "employees"."name" FROM "employees" LEFT JOIN "employees" AS "manager" ON "employees"."manager_id" = "manager"."id" WHERE "manager"."name" = $1`,
+		[]any{"Alice"},
+	)
+}
+
+func TestSelfJoin_CrossJoin(t *testing.T) {
+	// CROSS JOIN a table with itself using an alias.
+	alias := ts.EmployeesT.As("e2")
+	assertSQL(t, "self cross join via alias",
+		query.Select(ts.EmployeesT.Name, alias.Name.As("other_name")).
+			From(ts.EmployeesT).
+			CrossJoin(alias),
+		`SELECT "employees"."name", "e2"."name" AS "other_name" FROM "employees" CROSS JOIN "employees" AS "e2"`,
+		nil,
+	)
+}
+
+func TestTableAlias_InFromClause(t *testing.T) {
+	// An aliased table passed to From() should render "table" AS "alias".
+	e := ts.EmployeesT.As("e")
+	assertSQL(t, "aliased table in FROM",
+		query.Select(e.Name).From(e),
+		`SELECT "e"."name" FROM "employees" AS "e"`,
+		nil,
+	)
+}
+
+func TestTableAlias_ChainedAs(t *testing.T) {
+	// Calling As() twice should use the second alias, not the first.
+	a := ts.EmployeesT.As("first")
+	b := a.As("second")
+	if b.GrizTableAlias() != "second" {
+		t.Errorf("chained As: GrizTableAlias got %q, want %q", b.GrizTableAlias(), "second")
+	}
+	// The intermediate value must be independent.
+	if a.GrizTableAlias() != "first" {
+		t.Errorf("chained As mutated intermediate: GrizTableAlias got %q, want %q", a.GrizTableAlias(), "first")
+	}
+	ctx := expr.NewBuildContext(dialect.Postgres)
+	got := b.Name.EQ("Bob").ToSQL(ctx)
+	want := `"second"."name" = $1`
+	if got != want {
+		t.Errorf("chained As column ref: got %q, want %q", got, want)
+	}
+}
+
+func TestTableAlias_OriginalColumnHandlesUnchanged(t *testing.T) {
+	// Calling As() must not mutate the original singleton's column handles.
+	_ = ts.EmployeesT.As("manager")
+	if ts.EmployeesT.ID.TableName() != "employees" {
+		t.Errorf("As() mutated EmployeesT.ID.TableName: got %q", ts.EmployeesT.ID.TableName())
+	}
+	if ts.EmployeesT.ManagerID.TableName() != "employees" {
+		t.Errorf("As() mutated EmployeesT.ManagerID.TableName: got %q", ts.EmployeesT.ManagerID.TableName())
+	}
+}
+
+func TestTableAlias_EmptyStringIsNoOp(t *testing.T) {
+	// As("") must be a no-op: alias, table alias, and column refs must be
+	// identical to the original to avoid unqualified (ambiguous) column refs.
+	result := ts.EmployeesT.As("")
+	if result.GrizTableAlias() != "employees" {
+		t.Errorf("As(\"\") changed GrizTableAlias: got %q, want %q", result.GrizTableAlias(), "employees")
+	}
+	if result.Name.TableName() != "employees" {
+		t.Errorf("As(\"\") changed column TableAlias: got %q, want %q", result.Name.TableName(), "employees")
+	}
+	ctx := expr.NewBuildContext(dialect.Postgres)
+	got := result.Name.EQ("Alice").ToSQL(ctx)
+	want := `"employees"."name" = $1`
+	if got != want {
+		t.Errorf("As(\"\") column ref: got %q, want %q", got, want)
+	}
+}
+
+func TestAliasedCol_GroupBy_StripsAlias(t *testing.T) {
+	// Passing an AliasedCol to GroupBy must not emit the AS clause.
+	assertSQL(t, "AliasedCol in GROUP BY strips alias",
+		query.Select(ts.UsersT.RealmID, ts.UsersT.Email.As("e")).
+			From(ts.UsersT).
+			GroupBy(ts.UsersT.Email.As("e")),
+		`SELECT "users"."realm_id", "users"."email" AS "e" FROM "users" GROUP BY "users"."email"`,
+		nil,
+	)
+}
+
+// -------------------------------------------------------------------
 // Dialect-gating tests (issue #178)
 // -------------------------------------------------------------------
 

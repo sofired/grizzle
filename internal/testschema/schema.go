@@ -68,6 +68,7 @@ var Users = pg.Table("users",
 
 // RealmsTable is what the code generator would produce for the realms table.
 type RealmsTable struct {
+	tableAlias  string
 	ID          expr.UUIDColumn
 	Name        expr.StringColumn
 	DisplayName expr.StringColumn
@@ -77,8 +78,31 @@ type RealmsTable struct {
 	UpdatedAt   expr.TimestampColumn
 }
 
-func (RealmsTable) GrizTableName() string  { return "realms" }
-func (RealmsTable) GrizTableAlias() string { return "realms" }
+func (RealmsTable) GrizTableName() string { return "realms" }
+func (t RealmsTable) GrizTableAlias() string {
+	if t.tableAlias != "" {
+		return t.tableAlias
+	}
+	return "realms"
+}
+
+// As returns a renamed copy of RealmsTable for use in self-joins and aliased queries.
+// Column references on the returned value use alias instead of "realms".
+// Calling As with an empty string is a no-op and returns the receiver unchanged.
+func (t RealmsTable) As(alias string) RealmsTable {
+	if alias == "" {
+		return t
+	}
+	t.tableAlias = alias
+	t.ID = expr.UUIDColumn{ColBase: expr.ColBase{TableAlias: alias, ColName: "id"}}
+	t.Name = expr.StringColumn{ColBase: expr.ColBase{TableAlias: alias, ColName: "name"}}
+	t.DisplayName = expr.StringColumn{ColBase: expr.ColBase{TableAlias: alias, ColName: "display_name"}}
+	t.Enabled = expr.BoolColumn{ColBase: expr.ColBase{TableAlias: alias, ColName: "enabled"}}
+	t.Settings = expr.JSONBColumn[map[string]any]{ColBase: expr.ColBase{TableAlias: alias, ColName: "settings"}}
+	t.CreatedAt = expr.TimestampColumn{ColBase: expr.ColBase{TableAlias: alias, ColName: "created_at"}}
+	t.UpdatedAt = expr.TimestampColumn{ColBase: expr.ColBase{TableAlias: alias, ColName: "updated_at"}}
+	return t
+}
 
 // RealmsT is the singleton table handle used in queries.
 var RealmsT = RealmsTable{
@@ -93,6 +117,7 @@ var RealmsT = RealmsTable{
 
 // UsersTable is what the code generator would produce for the users table.
 type UsersTable struct {
+	tableAlias    string
 	ID            expr.UUIDColumn
 	RealmID       expr.UUIDColumn
 	Username      expr.StringColumn
@@ -106,8 +131,35 @@ type UsersTable struct {
 	PurgedAt      expr.TimestampColumn
 }
 
-func (UsersTable) GrizTableName() string  { return "users" }
-func (UsersTable) GrizTableAlias() string { return "users" }
+func (UsersTable) GrizTableName() string { return "users" }
+func (t UsersTable) GrizTableAlias() string {
+	if t.tableAlias != "" {
+		return t.tableAlias
+	}
+	return "users"
+}
+
+// As returns a renamed copy of UsersTable for use in self-joins and aliased queries.
+// Column references on the returned value use alias instead of "users".
+// Calling As with an empty string is a no-op and returns the receiver unchanged.
+func (t UsersTable) As(alias string) UsersTable {
+	if alias == "" {
+		return t
+	}
+	t.tableAlias = alias
+	t.ID = expr.UUIDColumn{ColBase: expr.ColBase{TableAlias: alias, ColName: "id"}}
+	t.RealmID = expr.UUIDColumn{ColBase: expr.ColBase{TableAlias: alias, ColName: "realm_id"}}
+	t.Username = expr.StringColumn{ColBase: expr.ColBase{TableAlias: alias, ColName: "username"}}
+	t.Email = expr.StringColumn{ColBase: expr.ColBase{TableAlias: alias, ColName: "email"}}
+	t.EmailVerified = expr.BoolColumn{ColBase: expr.ColBase{TableAlias: alias, ColName: "email_verified"}}
+	t.Enabled = expr.BoolColumn{ColBase: expr.ColBase{TableAlias: alias, ColName: "enabled"}}
+	t.Attributes = expr.JSONBColumn[map[string]any]{ColBase: expr.ColBase{TableAlias: alias, ColName: "attributes"}}
+	t.CreatedAt = expr.TimestampColumn{ColBase: expr.ColBase{TableAlias: alias, ColName: "created_at"}}
+	t.UpdatedAt = expr.TimestampColumn{ColBase: expr.ColBase{TableAlias: alias, ColName: "updated_at"}}
+	t.DeletedAt = expr.TimestampColumn{ColBase: expr.ColBase{TableAlias: alias, ColName: "deleted_at"}}
+	t.PurgedAt = expr.TimestampColumn{ColBase: expr.ColBase{TableAlias: alias, ColName: "purged_at"}}
+	return t
+}
 
 var UsersT = UsersTable{
 	ID:            expr.UUIDColumn{ColBase: expr.ColBase{TableAlias: "users", ColName: "id"}},
@@ -209,6 +261,46 @@ type UserUpdate struct {
 	DeletedAt *time.Time `db:"deleted_at"`
 	PurgedAt  *time.Time `db:"purged_at"`
 	UpdatedAt *time.Time `db:"updated_at"`
+}
+
+// EmployeesTable is a minimal hand-written table type used in self-join and
+// CROSS JOIN tests. Its ManagerID column (a UUID FK back to the same table)
+// exercises the self-join pattern: EmployeesT.As("manager").
+// This type follows the same structure that grizzle gen produces.
+type EmployeesTable struct {
+	tableAlias string
+	ID         expr.UUIDColumn
+	Name       expr.StringColumn
+	ManagerID  expr.UUIDColumn
+}
+
+func (EmployeesTable) GrizTableName() string { return "employees" }
+func (t EmployeesTable) GrizTableAlias() string {
+	if t.tableAlias != "" {
+		return t.tableAlias
+	}
+	return "employees"
+}
+
+// As returns a renamed copy of EmployeesTable for use in self-joins and aliased queries.
+// Column references on the returned value use alias instead of "employees".
+// Calling As with an empty string is a no-op and returns the receiver unchanged.
+func (t EmployeesTable) As(alias string) EmployeesTable {
+	if alias == "" {
+		return t
+	}
+	t.tableAlias = alias
+	t.ID = expr.UUIDColumn{ColBase: expr.ColBase{TableAlias: alias, ColName: "id"}}
+	t.Name = expr.StringColumn{ColBase: expr.ColBase{TableAlias: alias, ColName: "name"}}
+	t.ManagerID = expr.UUIDColumn{ColBase: expr.ColBase{TableAlias: alias, ColName: "manager_id"}}
+	return t
+}
+
+// EmployeesT is the singleton table handle used in queries.
+var EmployeesT = EmployeesTable{
+	ID:        expr.UUIDColumn{ColBase: expr.ColBase{TableAlias: "employees", ColName: "id"}},
+	Name:      expr.StringColumn{ColBase: expr.ColBase{TableAlias: "employees", ColName: "name"}},
+	ManagerID: expr.UUIDColumn{ColBase: expr.ColBase{TableAlias: "employees", ColName: "manager_id"}},
 }
 
 // -------------------------------------------------------------------
