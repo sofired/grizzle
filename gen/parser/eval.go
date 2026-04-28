@@ -337,7 +337,11 @@ func applyMethod(def *pg.ColumnDef, m MethodCall) error { //nolint:unparam
 
 	case "DefaultEmpty":
 		def.HasDefault = true
-		def.DefaultExpr = "'{}'::jsonb"
+		if strings.HasSuffix(def.SQLType, "[]") {
+			def.DefaultExpr = "ARRAY[]::" + def.SQLType
+		} else {
+			def.DefaultExpr = "'{}'::jsonb"
+		}
 
 	case "DefaultEmptyArray":
 		def.HasDefault = true

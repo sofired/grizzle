@@ -81,7 +81,7 @@ In Drizzle, the column name is the first argument to the type function: `uuid('i
 | `pgEnum(name, vals)` | `pg.Enum(typeName, vals...)` | PARITY — Go type `string`; enum type must already exist in the database |
 | `vector(name, {dim})` | DEVIATION:GAP (not designed) | — |
 | `halfvec(name, {dim})` | DEVIATION:GAP (not designed) | — |
-| `tsvector(name)` | `pg.Tsvector()` | PARITY — Go type `string`; richer FTS operators (`@@`) tracked in #140 |
+| `tsvector(name)` | `pg.Tsvector()` | PARITY — Go type `string`; `@@` matching already available via `Matches*` helpers on `TsvectorColumn`; additional FTS support tracked in #140 |
 | Array types (`.array()`) | `pg.Array(inner)` | PARITY — Go type `any`; typed `[]T` generation tracked in #144 |
 | Custom types (`.customType()`) | DEVIATION:GAP (not designed) | — |
 | *(no Drizzle equivalent)* | `pg.Tsquery()` | GRIZZLE-ONLY — PostgreSQL `tsquery` storage column; Go type `string` |

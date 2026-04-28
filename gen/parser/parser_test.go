@@ -471,6 +471,20 @@ func TestEvalTable_DefaultEmptyArray(t *testing.T) {
 	}
 }
 
+func TestEvalTable_Array_DefaultEmpty(t *testing.T) {
+	c := evalOne(t, `pg.C("tags", pg.Array(pg.Text()).DefaultEmpty())`)
+	if c.DefaultExpr != "ARRAY[]::text[]" {
+		t.Errorf("DefaultExpr: got %q, want \"ARRAY[]::text[]\"", c.DefaultExpr)
+	}
+}
+
+func TestEvalTable_Array_DefaultEmpty_Int(t *testing.T) {
+	c := evalOne(t, `pg.C("scores", pg.Array(pg.Integer()).DefaultEmpty())`)
+	if c.DefaultExpr != "ARRAY[]::integer[]" {
+		t.Errorf("DefaultExpr: got %q, want \"ARRAY[]::integer[]\"", c.DefaultExpr)
+	}
+}
+
 func TestEvalTable_Unique(t *testing.T) {
 	c := evalOne(t, `pg.C("email", pg.Varchar(255).NotNull().Unique())`)
 	if !c.Unique {
