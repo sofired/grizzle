@@ -55,7 +55,8 @@ type Change struct {
 // wins, and for columns, the first match in new.Columns slice order wins.
 //
 // Ordering is deterministic:
-//  1. Rename or create new tables (renames before creates, both sorted by new name).
+//  1. Rename or create new tables (renames before creates; creates are ordered
+//     by FK dependency so referenced tables are created before their dependants).
 //  2. Alter existing tables (columns first, then constraints).
 //  3. Drop removed tables.
 //
@@ -106,7 +107,7 @@ func Diff(old, new Snapshot) []Change {
 	// from a newly created table to the renamed table's new name are safe,
 	// regardless of alphabetical ordering.
 	var renames []Change
-	var creates []Change
+	var createNames []string
 	for _, name := range newNames {
 		if _, exists := old.Tables[name]; !exists {
 			if oldName, isRename := renamedTo[name]; isRename {
@@ -116,15 +117,17 @@ func Diff(old, new Snapshot) []Change {
 					RenameTarget: name,
 				})
 			} else {
-				creates = append(creates, Change{
-					Kind:      ChangeCreateTable,
-					TableName: name,
-				})
+				createNames = append(createNames, name)
 			}
 		}
 	}
 	changes = append(changes, renames...)
-	changes = append(changes, creates...)
+	for _, name := range orderNewTables(createNames, new.Tables) {
+		changes = append(changes, Change{
+			Kind:      ChangeCreateTable,
+			TableName: name,
+		})
+	}
 
 	// Phase 2: tables present in both → diff columns and constraints.
 	// Also handle tables that were renamed: diff the renamed table's contents.
@@ -265,6 +268,17 @@ func diffTable(tableName string, old, new *TableSnap, tableRenames map[string]st
 	oldCons := constraintMap(normalizedOldCons)
 	newCons := constraintMap(new.Constraints)
 
+	// Build a set of inline FK signatures from the target's column References.
+	// Single-column FKs defined via ColumnDef.References don't appear in
+	// Constraints, so we track them here to avoid emitting spurious
+	// ChangeDropConstraint when the live DB has a named FK for the same column.
+	inlineRefs := make(map[string]struct{})
+	for _, col := range new.Columns {
+		if col.References != nil {
+			inlineRefs[col.Name+":"+col.References.Table+":"+col.References.Column] = struct{}{}
+		}
+	}
+
 	// Added constraints (preserve new.Constraints order for stability).
 	for _, nc := range new.Constraints {
 		key := constraintKey(nc)
@@ -283,6 +297,14 @@ func diffTable(tableName string, old, new *TableSnap, tableRenames map[string]st
 		key := constraintKey(oc)
 		nc, exists := newCons[key]
 		if !exists {
+			// Don't drop a single-column FK that is represented as an inline
+			// ColumnDef.References in the target schema — the FK is kept alive
+			// by the column definition and doesn't need to be managed here.
+			if oc.Kind == pg.KindForeignKey && len(oc.Columns) == 1 && len(oc.FKColumns) == 1 {
+				if _, matched := inlineRefs[oc.Columns[0]+":"+oc.FKTable+":"+oc.FKColumns[0]]; matched {
+					continue
+				}
+			}
 			oc := oc
 			changes = append(changes, Change{
 				Kind:       ChangeDropConstraint,
@@ -443,9 +465,124 @@ func constraintsEqual(a, b pg.Constraint) bool {
 				return false
 			}
 		}
-		if a.FKOnDelete != b.FKOnDelete || a.FKOnUpdate != b.FKOnUpdate {
+		// Treat empty string and NO ACTION as equivalent: PostgreSQL reports
+		// "NO ACTION" for FKs created without an explicit action, but user
+		// schemas may leave FKOnDelete/FKOnUpdate unset (zero value "").
+		if normFKAction(a.FKOnDelete) != normFKAction(b.FKOnDelete) ||
+			normFKAction(a.FKOnUpdate) != normFKAction(b.FKOnUpdate) {
 			return false
 		}
 	}
 	return true
+}
+
+// normFKAction normalises a foreign-key action for comparison, treating the
+// zero value ("") as equivalent to pg.FKActionNoAction.
+func normFKAction(a pg.FKAction) pg.FKAction {
+	if a == "" {
+		return pg.FKActionNoAction
+	}
+	return a
+}
+
+// orderNewTables returns names in dependency order so that, when creating new
+// tables, a table that other new tables reference via FK is always emitted
+// before the referencing table. Tables with no FK dependencies on other new
+// tables come first, sorted alphabetically. Cycles fall back to alphabetical
+// order and the DB will surface the constraint error.
+func orderNewTables(names []string, tables map[string]*TableSnap) []string {
+	if len(names) <= 1 {
+		return names
+	}
+
+	sorted := make([]string, len(names))
+	copy(sorted, names)
+	sort.Strings(sorted)
+	names = sorted
+
+	nameSet := make(map[string]bool, len(names))
+	for _, n := range names {
+		nameSet[n] = true
+	}
+
+	// deps[n] = new tables that n depends on (must exist before n is created).
+	deps := make(map[string][]string, len(names))
+	for _, n := range names {
+		t := tables[n]
+		if t == nil {
+			continue
+		}
+		seen := make(map[string]bool)
+		add := func(ref string) {
+			if nameSet[ref] && ref != n && !seen[ref] {
+				deps[n] = append(deps[n], ref)
+				seen[ref] = true
+			}
+		}
+		for _, col := range t.Columns {
+			if col.References != nil {
+				add(col.References.Table)
+			}
+		}
+		for _, c := range t.Constraints {
+			if c.Kind == pg.KindForeignKey {
+				add(c.FKTable)
+			}
+		}
+	}
+
+	// Kahn's algorithm: build in-degree and reverse adjacency list.
+	inDegree := make(map[string]int, len(names))
+	adj := make(map[string][]string, len(names))
+	for _, n := range names {
+		inDegree[n] = 0
+	}
+	for _, n := range names {
+		for _, dep := range deps[n] {
+			inDegree[n]++
+			adj[dep] = append(adj[dep], n)
+		}
+	}
+	for k := range adj {
+		sort.Strings(adj[k])
+	}
+
+	// Seed with zero-degree nodes in alphabetical order (names is sorted above).
+	queue := make([]string, 0, len(names))
+	for _, n := range names {
+		if inDegree[n] == 0 {
+			queue = append(queue, n)
+		}
+	}
+
+	result := make([]string, 0, len(names))
+	for len(queue) > 0 {
+		n := queue[0]
+		queue = queue[1:]
+		result = append(result, n)
+		for _, dep := range adj[n] {
+			inDegree[dep]--
+			if inDegree[dep] == 0 {
+				i := sort.SearchStrings(queue, dep)
+				queue = append(queue, "")
+				copy(queue[i+1:], queue[i:])
+				queue[i] = dep
+			}
+		}
+	}
+
+	// Cycle fallback: append remaining nodes in alphabetical order.
+	if len(result) < len(names) {
+		inResult := make(map[string]bool, len(result))
+		for _, r := range result {
+			inResult[r] = true
+		}
+		for _, n := range names {
+			if !inResult[n] {
+				result = append(result, n)
+			}
+		}
+	}
+
+	return result
 }
