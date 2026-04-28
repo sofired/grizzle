@@ -138,7 +138,7 @@ func GenerateChangeSQLSQLite(snap Snapshot, c Change) []string {
 		}
 		return []string{fmt.Sprintf(
 			"CREATE VIEW IF NOT EXISTS %s AS %s",
-			qiSQLite(c.View.Name),
+			quoteTableSQLite(c.View.QualifiedName()),
 			c.View.SQL,
 		)}
 
@@ -148,7 +148,7 @@ func GenerateChangeSQLSQLite(snap Snapshot, c Change) []string {
 		}
 		return []string{fmt.Sprintf(
 			"DROP VIEW IF EXISTS %s",
-			qiSQLite(c.View.Name),
+			quoteTableSQLite(c.View.QualifiedName()),
 		)}
 
 	case ChangeCreateEnum:

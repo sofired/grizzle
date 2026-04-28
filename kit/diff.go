@@ -180,18 +180,9 @@ func Diff(old, new Snapshot) []Change {
 		}
 	}
 
-	// Phase 4: tables present in both → diff columns and constraints.
-	// Also handle tables that were renamed: diff the renamed table's contents.
-	for _, name := range newNames {
-		if _, exists := old.Tables[name]; exists {
-			changes = append(changes, diffTable(name, old.Tables[name], new.Tables[name], renamedFrom)...)
-		} else if oldName, isRename := renamedTo[name]; isRename {
-			// Renamed table: diff columns and constraints under the new name.
-			changes = append(changes, diffTable(name, old.Tables[oldName], new.Tables[name], renamedFrom)...)
-		}
-	}
-
-	// Phase 5: enums in both → diff values (additions only; removal requires pg_catalog surgery).
+	// Phase 4: enums in both → diff values (additions only; removal requires pg_catalog surgery).
+	// Emitted before table diffs so that newly-added enum labels are available if a table
+	// ALTER (e.g. ALTER COLUMN SET DEFAULT) references them in the same migration.
 	for _, name := range sortedKeys(new.Enums) {
 		oldE, exists := old.Enums[name]
 		if !exists {
@@ -206,6 +197,17 @@ func Diff(old, new Snapshot) []Change {
 				OldEnum:   &o,
 				NewEnum:   &n,
 			})
+		}
+	}
+
+	// Phase 5: tables present in both → diff columns and constraints.
+	// Also handle tables that were renamed: diff the renamed table's contents.
+	for _, name := range newNames {
+		if _, exists := old.Tables[name]; exists {
+			changes = append(changes, diffTable(name, old.Tables[name], new.Tables[name], renamedFrom)...)
+		} else if oldName, isRename := renamedTo[name]; isRename {
+			// Renamed table: diff columns and constraints under the new name.
+			changes = append(changes, diffTable(name, old.Tables[oldName], new.Tables[name], renamedFrom)...)
 		}
 	}
 
@@ -284,17 +286,44 @@ func sortedTableNames(tables map[string]*TableSnap) []string {
 	return names
 }
 
-// enumAddedValues returns values present in newE but absent in oldE,
-// in the order they appear in newE.
-func enumAddedValues(oldE, newE *EnumSnap) []string {
+// enumValueAddition describes a single new label to add to an existing PostgreSQL enum.
+type enumValueAddition struct {
+	Value  string
+	After  string // non-empty: ADD VALUE ... AFTER 'After'
+	Before string // non-empty and After=="": ADD VALUE ... BEFORE 'Before' (prepend case)
+	// both empty: plain ADD VALUE (append to end)
+}
+
+// enumAddedValues returns the labels present in newE but absent in oldE, in the order
+// they appear in newE, each paired with an AFTER/BEFORE anchor so that PostgreSQL places
+// them at the correct position even when values are inserted in the middle of the ordering.
+// It scans newE left-to-right, tracking the nearest preceding existing value as the AFTER
+// anchor; for a label that must be inserted before all existing labels it uses the first
+// following existing label as a BEFORE anchor instead.
+func enumAddedValues(oldE, newE *EnumSnap) []enumValueAddition {
 	existing := make(map[string]bool, len(oldE.Values))
 	for _, v := range oldE.Values {
 		existing[v] = true
 	}
-	var added []string
-	for _, v := range newE.Values {
-		if !existing[v] {
-			added = append(added, v)
+	var added []enumValueAddition
+	var lastExisting string // last existing label seen while scanning left-to-right
+	for i, v := range newE.Values {
+		if existing[v] {
+			lastExisting = v
+			continue
+		}
+		if lastExisting != "" {
+			added = append(added, enumValueAddition{Value: v, After: lastExisting})
+		} else {
+			// No existing label precedes this position; find the first one that follows.
+			var before string
+			for _, next := range newE.Values[i+1:] {
+				if existing[next] {
+					before = next
+					break
+				}
+			}
+			added = append(added, enumValueAddition{Value: v, Before: before})
 		}
 	}
 	return added

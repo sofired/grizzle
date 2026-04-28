@@ -23,6 +23,9 @@ func (e *EnumDef) QualifiedName() string {
 //
 //	var StatusEnum = pg.CreateEnum("status", "pending", "active", "archived")
 func CreateEnum(name string, values ...string) *EnumDef {
+	if len(values) == 0 {
+		panic("pg.CreateEnum: at least one enum value is required")
+	}
 	for i, v := range values {
 		if v == "" {
 			panic(fmt.Sprintf("pg.CreateEnum: value at index %d is empty; all enum values must be non-empty strings", i))
@@ -36,6 +39,9 @@ func CreateEnum(name string, values ...string) *EnumDef {
 //
 //	var RoleEnum = pg.SchemaCreateEnum("auth", "role", "admin", "user", "guest")
 func SchemaCreateEnum(schema, name string, values ...string) *EnumDef {
+	if len(values) == 0 {
+		panic("pg.SchemaCreateEnum: at least one enum value is required")
+	}
 	for i, v := range values {
 		if v == "" {
 			panic(fmt.Sprintf("pg.SchemaCreateEnum: value at index %d is empty; all enum values must be non-empty strings", i))

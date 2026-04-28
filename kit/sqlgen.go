@@ -190,13 +190,26 @@ func GenerateChangeSQL(snap Snapshot, c Change) []string {
 			return nil
 		}
 		added := enumAddedValues(c.OldEnum, c.NewEnum)
+		typeName := quoteTable(c.NewEnum.QualifiedName())
 		stmts := make([]string, 0, len(added))
-		for _, val := range added {
-			stmts = append(stmts, fmt.Sprintf(
-				"ALTER TYPE %s ADD VALUE IF NOT EXISTS '%s'",
-				quoteTable(c.NewEnum.QualifiedName()),
-				strings.ReplaceAll(val, "'", "''"),
-			))
+		for _, a := range added {
+			val := strings.ReplaceAll(a.Value, "'", "''")
+			if a.After != "" {
+				stmts = append(stmts, fmt.Sprintf(
+					"ALTER TYPE %s ADD VALUE IF NOT EXISTS '%s' AFTER '%s'",
+					typeName, val, strings.ReplaceAll(a.After, "'", "''"),
+				))
+			} else if a.Before != "" {
+				stmts = append(stmts, fmt.Sprintf(
+					"ALTER TYPE %s ADD VALUE IF NOT EXISTS '%s' BEFORE '%s'",
+					typeName, val, strings.ReplaceAll(a.Before, "'", "''"),
+				))
+			} else {
+				stmts = append(stmts, fmt.Sprintf(
+					"ALTER TYPE %s ADD VALUE IF NOT EXISTS '%s'",
+					typeName, val,
+				))
+			}
 		}
 		return stmts
 

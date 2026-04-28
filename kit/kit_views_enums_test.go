@@ -74,6 +74,24 @@ func TestCreateEnum_PanicsOnEmptyValue(t *testing.T) {
 	pg.CreateEnum("bad", "ok", "", "also ok")
 }
 
+func TestCreateEnum_PanicsOnZeroValues(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("expected panic on zero values, got none")
+		}
+	}()
+	pg.CreateEnum("bad")
+}
+
+func TestSchemaCreateEnum_PanicsOnZeroValues(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("expected panic on zero values, got none")
+		}
+	}()
+	pg.SchemaCreateEnum("auth", "bad")
+}
+
 // -------------------------------------------------------------------
 // pg DSL: EnumColumn
 // -------------------------------------------------------------------
@@ -603,6 +621,56 @@ func TestGenerateChangeSQL_AlterEnum_MultipleValues(t *testing.T) {
 	// One ALTER TYPE statement per added value
 	if len(stmts) != 2 {
 		t.Errorf("expected 2 ALTER TYPE statements, got %d: %v", len(stmts), stmts)
+	}
+}
+
+func TestGenerateChangeSQL_AlterEnum_MiddleInsertion(t *testing.T) {
+	// old=[a,c] → new=[a,b,c]: 'b' must be placed AFTER 'a', not appended to end.
+	old := kit.FromSchema(kit.SchemaObjects{
+		Enums: []*pg.EnumDef{pg.CreateEnum("s", "a", "c")},
+	})
+	new := kit.FromSchema(kit.SchemaObjects{
+		Enums: []*pg.EnumDef{pg.CreateEnum("s", "a", "b", "c")},
+	})
+	changes := kit.Diff(old, new)
+	if len(changes) != 1 {
+		t.Fatalf("expected 1 change, got %d", len(changes))
+	}
+	stmts := kit.GenerateChangeSQL(new, changes[0])
+	if len(stmts) != 1 {
+		t.Fatalf("expected 1 SQL statement, got %d: %v", len(stmts), stmts)
+	}
+	sql := stmts[0]
+	if !strings.Contains(sql, "AFTER 'a'") {
+		t.Errorf("expected AFTER 'a' for middle insertion, got: %s", sql)
+	}
+	if !strings.Contains(sql, "'b'") {
+		t.Errorf("expected value 'b' in statement, got: %s", sql)
+	}
+}
+
+func TestGenerateChangeSQL_AlterEnum_PrependInsertion(t *testing.T) {
+	// old=[c] → new=[a,c]: 'a' must be placed BEFORE 'c', not appended to end.
+	old := kit.FromSchema(kit.SchemaObjects{
+		Enums: []*pg.EnumDef{pg.CreateEnum("s", "c")},
+	})
+	new := kit.FromSchema(kit.SchemaObjects{
+		Enums: []*pg.EnumDef{pg.CreateEnum("s", "a", "c")},
+	})
+	changes := kit.Diff(old, new)
+	if len(changes) != 1 {
+		t.Fatalf("expected 1 change, got %d", len(changes))
+	}
+	stmts := kit.GenerateChangeSQL(new, changes[0])
+	if len(stmts) != 1 {
+		t.Fatalf("expected 1 SQL statement, got %d: %v", len(stmts), stmts)
+	}
+	sql := stmts[0]
+	if !strings.Contains(sql, "BEFORE 'c'") {
+		t.Errorf("expected BEFORE 'c' for prepend insertion, got: %s", sql)
+	}
+	if !strings.Contains(sql, "'a'") {
+		t.Errorf("expected value 'a' in statement, got: %s", sql)
 	}
 }
 
