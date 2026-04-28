@@ -355,7 +355,7 @@ func applyMethod(def *pg.ColumnDef, m MethodCall) error { //nolint:unparam
 		if strings.HasSuffix(def.SQLType, "[]") {
 			def.DefaultExpr = "ARRAY[]::" + def.SQLType
 		} else {
-			def.DefaultExpr = "'{}'::"+def.SQLType
+			def.DefaultExpr = "'{}'::" + def.SQLType
 		}
 
 	case "DefaultEmptyArray":
