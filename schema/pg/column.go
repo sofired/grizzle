@@ -23,6 +23,7 @@ package pg
 
 import (
 	"fmt"
+	"math"
 	"strings"
 )
 
@@ -562,7 +563,7 @@ type FloatBuilder struct{ colBuilder }
 func Real() *FloatBuilder {
 	b := &FloatBuilder{}
 	b.def.SQLType = "real"
-	b.def.GoType = GoTypeFloat32
+	b.def.GoType = GoTypeFloat64
 	return b
 }
 
@@ -576,7 +577,18 @@ func DoublePrecision() *FloatBuilder {
 
 func (b *FloatBuilder) NotNull() *FloatBuilder { b.setNotNull(); return b }
 func (b *FloatBuilder) Default(val float64) *FloatBuilder {
-	b.setDefault(fmt.Sprintf("%g", val))
+	var s string
+	switch {
+	case math.IsNaN(val):
+		s = fmt.Sprintf("'NaN'::%s", b.def.SQLType)
+	case math.IsInf(val, 1):
+		s = fmt.Sprintf("'Infinity'::%s", b.def.SQLType)
+	case math.IsInf(val, -1):
+		s = fmt.Sprintf("'-Infinity'::%s", b.def.SQLType)
+	default:
+		s = fmt.Sprintf("%g", val)
+	}
+	b.setDefault(s)
 	return b
 }
 func (b *FloatBuilder) Build(name string) ColumnDef { return b.build(name) }

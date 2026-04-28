@@ -1,6 +1,7 @@
 package pg_test
 
 import (
+	"math"
 	"testing"
 
 	pg "github.com/sofired/grizzle/schema/pg"
@@ -68,8 +69,8 @@ func TestReal(t *testing.T) {
 	if def.SQLType != "real" {
 		t.Errorf("SQLType = %q, want %q", def.SQLType, "real")
 	}
-	if def.GoType != pg.GoTypeFloat32 {
-		t.Errorf("GoType = %q, want %q", def.GoType, pg.GoTypeFloat32)
+	if def.GoType != pg.GoTypeFloat64 {
+		t.Errorf("GoType = %q, want %q", def.GoType, pg.GoTypeFloat64)
 	}
 }
 
@@ -87,6 +88,33 @@ func TestFloatDefault(t *testing.T) {
 	def := pg.DoublePrecision().Default(3.14).Build("col")
 	if !def.HasDefault {
 		t.Error("HasDefault should be true")
+	}
+}
+
+func TestFloatDefaultSpecialValues(t *testing.T) {
+	tests := []struct {
+		name    string
+		builder func() *pg.FloatBuilder
+		val     float64
+		want    string
+	}{
+		{"real NaN", pg.Real, math.NaN(), "'NaN'::real"},
+		{"real +Inf", pg.Real, math.Inf(1), "'Infinity'::real"},
+		{"real -Inf", pg.Real, math.Inf(-1), "'-Infinity'::real"},
+		{"double NaN", pg.DoublePrecision, math.NaN(), "'NaN'::double precision"},
+		{"double +Inf", pg.DoublePrecision, math.Inf(1), "'Infinity'::double precision"},
+		{"double -Inf", pg.DoublePrecision, math.Inf(-1), "'-Infinity'::double precision"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			def := tt.builder().Default(tt.val).Build("col")
+			if !def.HasDefault {
+				t.Error("HasDefault should be true")
+			}
+			if def.DefaultExpr != tt.want {
+				t.Errorf("DefaultExpr = %q, want %q", def.DefaultExpr, tt.want)
+			}
+		})
 	}
 }
 
