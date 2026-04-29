@@ -661,6 +661,70 @@ func TestDiff_Ordering_EnumDroppedAfterTable(t *testing.T) {
 	}
 }
 
+func TestDiff_Ordering_CreateViewAfterAlterTable(t *testing.T) {
+	// A new view is added at the same time an existing table gains a column.
+	// The ALTER TABLE must precede CREATE VIEW so the view can reference the
+	// new column without error.
+	oldTable := pg.Table("users",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+	).Build()
+	newTable := pg.Table("users",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("email", pg.Varchar(255)),
+	).Build()
+	newView := pg.CreateView("user_emails", `SELECT id, email FROM users`)
+
+	old := kit.FromSchema(kit.SchemaObjects{Tables: []pg.TableDefiner{oldTable}})
+	new := kit.FromSchema(kit.SchemaObjects{
+		Tables: []pg.TableDefiner{newTable},
+		Views:  []*pg.ViewDef{newView},
+	})
+
+	changes := kit.Diff(old, new)
+
+	addColIdx, createViewIdx := -1, -1
+	for i, c := range changes {
+		if c.Kind == kit.ChangeAddColumn {
+			addColIdx = i
+		}
+		if c.Kind == kit.ChangeCreateView {
+			createViewIdx = i
+		}
+	}
+	if addColIdx < 0 || createViewIdx < 0 {
+		t.Fatalf("missing expected changes: addCol=%d createView=%d", addColIdx, createViewIdx)
+	}
+	if addColIdx >= createViewIdx {
+		t.Errorf("expected ADD COLUMN (idx %d) before CREATE VIEW (idx %d)", addColIdx, createViewIdx)
+	}
+}
+
+func TestGenerateChangeSQL_AlterEnum_ConsecutiveInsertion(t *testing.T) {
+	// old=[a,d] → new=[a,b,c,d]: two labels inserted consecutively after 'a'.
+	// 'b' must be AFTER 'a'; 'c' must be AFTER 'b' (not AFTER 'a').
+	// If both anchor to 'a', PostgreSQL produces [a,c,b,d] instead of [a,b,c,d].
+	old := kit.FromSchema(kit.SchemaObjects{
+		Enums: []*pg.EnumDef{pg.CreateEnum("s", "a", "d")},
+	})
+	new := kit.FromSchema(kit.SchemaObjects{
+		Enums: []*pg.EnumDef{pg.CreateEnum("s", "a", "b", "c", "d")},
+	})
+	changes := kit.Diff(old, new)
+	if len(changes) != 1 {
+		t.Fatalf("expected 1 change, got %d", len(changes))
+	}
+	stmts := kit.GenerateChangeSQL(new, changes[0])
+	if len(stmts) != 2 {
+		t.Fatalf("expected 2 ALTER TYPE statements, got %d: %v", len(stmts), stmts)
+	}
+	if !strings.Contains(stmts[0], "'b'") || !strings.Contains(stmts[0], "AFTER 'a'") {
+		t.Errorf("expected first stmt to add 'b' AFTER 'a', got: %s", stmts[0])
+	}
+	if !strings.Contains(stmts[1], "'c'") || !strings.Contains(stmts[1], "AFTER 'b'") {
+		t.Errorf("expected second stmt to add 'c' AFTER 'b', got: %s", stmts[1])
+	}
+}
+
 // -------------------------------------------------------------------
 // SQL generation: views (PostgreSQL)
 // -------------------------------------------------------------------

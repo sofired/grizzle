@@ -72,9 +72,9 @@ type Change struct {
 //
 // Ordering is deterministic. The phase sequence prevents cross-type dependency
 // errors (e.g. enums before tables, tables before views, views before drops).
-// One caveat: within phases 4 and 7 views are sorted alphabetically only —
+// One caveat: within phases 5 and 7 views are sorted alphabetically only —
 // view→view dependencies are not resolved. If a newly-created view selects from
-// another new view (phase 4), or a removed view is referenced by another removed
+// another new view (phase 5), or a removed view is referenced by another removed
 // view (phase 7), the names must naturally sort in dependency order, or the
 // migration will fail at runtime.
 //
@@ -86,9 +86,12 @@ type Change struct {
 //     cannot perform those operations automatically.
 //  3. Rename or create new tables (renames before creates; creates are ordered
 //     by FK dependency so referenced tables are created before their dependants).
-//  4. Create new views — views SELECT FROM tables, which must already exist.
-//     Ordering within this phase is alphabetical only (no view→view dep resolution).
-//  5. Alter existing tables (columns + constraints, including drops).
+//  4. Alter existing tables (columns + constraints, including drops).
+//     Must run before creating new views (phase 5) so that any new view
+//     referencing freshly-added or renamed columns can rely on them existing.
+//  5. Create new views — views SELECT FROM tables, which must already exist and
+//     be fully altered. Ordering within this phase is alphabetical only
+//     (no view→view dep resolution).
 //  6. Replace changed views (CREATE OR REPLACE in sequence).
 //  7. Drop removed views — before tables, since views depend on tables.
 //     Ordering within this phase is alphabetical only (no view→view dep resolution).
@@ -208,7 +211,20 @@ func Diff(old, new Snapshot) []Change {
 		})
 	}
 
-	// Phase 4: new views not in old → CREATE VIEW (after tables exist).
+	// Phase 4: tables present in both → diff columns and constraints.
+	// Also handle tables that were renamed: diff the renamed table's contents.
+	// Must run before creating new views (phase 5) so that any new view referencing
+	// freshly-added columns can rely on those columns already existing.
+	for _, name := range newNames {
+		if _, exists := old.Tables[name]; exists {
+			changes = append(changes, diffTable(name, old.Tables[name], new.Tables[name], renamedFrom)...)
+		} else if oldName, isRename := renamedTo[name]; isRename {
+			// Renamed table: diff columns and constraints under the new name.
+			changes = append(changes, diffTable(name, old.Tables[oldName], new.Tables[name], renamedFrom)...)
+		}
+	}
+
+	// Phase 5: new views not in old → CREATE VIEW (after tables and their alterations exist).
 	for _, name := range sortedKeys(new.Views) {
 		if _, exists := old.Views[name]; !exists {
 			v := *new.Views[name]
@@ -217,17 +233,6 @@ func Diff(old, new Snapshot) []Change {
 				TableName: name,
 				View:      &v,
 			})
-		}
-	}
-
-	// Phase 5: tables present in both → diff columns and constraints.
-	// Also handle tables that were renamed: diff the renamed table's contents.
-	for _, name := range newNames {
-		if _, exists := old.Tables[name]; exists {
-			changes = append(changes, diffTable(name, old.Tables[name], new.Tables[name], renamedFrom)...)
-		} else if oldName, isRename := renamedTo[name]; isRename {
-			// Renamed table: diff columns and constraints under the new name.
-			changes = append(changes, diffTable(name, old.Tables[oldName], new.Tables[name], renamedFrom)...)
 		}
 	}
 
@@ -319,25 +324,27 @@ type enumValueAddition struct {
 // enumAddedValues returns the labels present in newE but absent in oldE, in the order
 // they appear in newE, each paired with an AFTER/BEFORE anchor so that PostgreSQL places
 // them at the correct position even when values are inserted in the middle of the ordering.
-// It scans newE left-to-right, tracking the nearest preceding existing value as the AFTER
-// anchor; for a label that must be inserted before all existing labels it uses the first
-// following existing label as a BEFORE anchor instead.
+// It scans newE left-to-right, tracking the nearest preceding label (existing or newly added)
+// as the AFTER anchor; for a label that must be inserted before all existing labels it uses
+// the first following existing label as a BEFORE anchor instead.
+// The anchor is updated to each newly-added label after it is emitted, so that consecutive
+// new labels anchor to each other rather than all anchoring to the same existing predecessor.
 func enumAddedValues(oldE, newE *EnumSnap) []enumValueAddition {
 	existing := make(map[string]bool, len(oldE.Values))
 	for _, v := range oldE.Values {
 		existing[v] = true
 	}
 	var added []enumValueAddition
-	var lastExisting string // last existing label seen while scanning left-to-right
+	var lastAnchor string // last existing-or-added label seen while scanning left-to-right
 	for i, v := range newE.Values {
 		if existing[v] {
-			lastExisting = v
+			lastAnchor = v
 			continue
 		}
-		if lastExisting != "" {
-			added = append(added, enumValueAddition{Value: v, After: lastExisting})
+		if lastAnchor != "" {
+			added = append(added, enumValueAddition{Value: v, After: lastAnchor})
 		} else {
-			// No existing label precedes this position; find the first one that follows.
+			// No preceding label yet; find the first existing label that follows.
 			var before string
 			for _, next := range newE.Values[i+1:] {
 				if existing[next] {
@@ -347,6 +354,9 @@ func enumAddedValues(oldE, newE *EnumSnap) []enumValueAddition {
 			}
 			added = append(added, enumValueAddition{Value: v, Before: before})
 		}
+		// Update the anchor to this newly-added label so the next consecutive
+		// insertion anchors to it, not to the same preceding existing label.
+		lastAnchor = v
 	}
 	return added
 }
