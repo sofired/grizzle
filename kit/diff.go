@@ -345,7 +345,7 @@ func diffColumn(tableName string, old, new pg.ColumnDef) []Change {
 			NewCol:    &n,
 		})
 	}
-	if old.DefaultExpr != new.DefaultExpr || old.HasDefault != new.HasDefault {
+	if normalizeDefaultExpr(old.DefaultExpr) != normalizeDefaultExpr(new.DefaultExpr) || old.HasDefault != new.HasDefault {
 		o, n := old, new
 		changes = append(changes, Change{
 			Kind:      ChangeAlterColumnDefault,
@@ -355,6 +355,53 @@ func diffColumn(tableName string, old, new pg.ColumnDef) []Change {
 		})
 	}
 	return changes
+}
+
+// normalizeDefaultExpr canonicalizes a PostgreSQL default expression so that
+// semantically-equivalent expressions that differ only in cast-operator spacing
+// compare equal. It collapses whitespace around :: outside of single-quoted
+// string literals (e.g. '{}' ::jsonb → '{}'::jsonb).
+func normalizeDefaultExpr(expr string) string {
+	expr = strings.TrimSpace(expr)
+	var b strings.Builder
+	b.Grow(len(expr))
+	i := 0
+	for i < len(expr) {
+		if expr[i] == '\'' {
+			// Copy single-quoted literal verbatim, handling '' escapes.
+			j := i + 1
+			for j < len(expr) {
+				if expr[j] == '\'' {
+					j++
+					if j < len(expr) && expr[j] == '\'' {
+						j++ // escaped quote — keep scanning
+					} else {
+						break
+					}
+				} else {
+					j++
+				}
+			}
+			b.WriteString(expr[i:j])
+			i = j
+		} else if expr[i] == ':' && i+1 < len(expr) && expr[i+1] == ':' {
+			// Trim any trailing space already written before ::
+			s := strings.TrimRight(b.String(), " \t")
+			b.Reset()
+			b.Grow(len(expr))
+			b.WriteString(s)
+			b.WriteString("::")
+			i += 2
+			// Skip leading space after ::
+			for i < len(expr) && (expr[i] == ' ' || expr[i] == '\t') {
+				i++
+			}
+		} else {
+			b.WriteByte(expr[i])
+			i++
+		}
+	}
+	return b.String()
 }
 
 func colMap(cols []pg.ColumnDef) map[string]pg.ColumnDef {
