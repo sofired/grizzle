@@ -362,7 +362,6 @@ func applyMethod(def *pg.ColumnDef, m MethodCall) error { //nolint:unparam
 		def.HasDefault = true
 		def.DefaultExpr = "'[]'::" + def.SQLType
 
-
 	case "Default":
 		def.HasDefault = true
 		if len(m.Args) > 0 {

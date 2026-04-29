@@ -541,7 +541,6 @@ func TestEvalTable_Default_Array(t *testing.T) {
 	}
 }
 
-
 func TestEvalTable_Unique(t *testing.T) {
 	c := evalOne(t, `pg.C("email", pg.Varchar(255).NotNull().Unique())`)
 	if !c.Unique {
