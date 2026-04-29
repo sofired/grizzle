@@ -33,9 +33,15 @@ package sqlite
 
 import (
 	"fmt"
+	"strings"
 
 	pg "github.com/sofired/grizzle/schema/pg"
 )
+
+// quoteSQLLiteral wraps val in single quotes, doubling any embedded single quotes.
+func quoteSQLLiteral(val string) string {
+	return "'" + strings.ReplaceAll(val, "'", "''") + "'"
+}
 
 // ---------------------------------------------------------------------------
 // Type aliases — SQLite definitions share underlying types with schema/pg
@@ -276,7 +282,7 @@ func (b *SQLiteJSONBuilder) PrimaryKey() *SQLiteJSONBuilder {
 // Default sets the column default to the given JSON expression literal.
 func (b *SQLiteJSONBuilder) Default(jsonExpr string) *SQLiteJSONBuilder {
 	b.def.HasDefault = true
-	b.def.DefaultExpr = fmt.Sprintf("'%s'", jsonExpr)
+	b.def.DefaultExpr = quoteSQLLiteral(jsonExpr)
 	return b
 }
 

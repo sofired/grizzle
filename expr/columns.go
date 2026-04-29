@@ -650,6 +650,101 @@ func (c BytesColumn) NEQ(val []byte) Expression {
 }
 
 // -------------------------------------------------------------------
+// DateColumn
+// -------------------------------------------------------------------
+
+// DateColumn is a typed column handle for SQL date (date-only) columns.
+// The corresponding Go type is time.Time; only the date portion is meaningful.
+type DateColumn struct{ ColBase }
+
+func (c DateColumn) EQ(val time.Time) Expression {
+	return binaryExpr{ref: c.ColBase, op: "=", val: val}
+}
+func (c DateColumn) NEQ(val time.Time) Expression {
+	return binaryExpr{ref: c.ColBase, op: "<>", val: val}
+}
+func (c DateColumn) GT(val time.Time) Expression {
+	return binaryExpr{ref: c.ColBase, op: ">", val: val}
+}
+func (c DateColumn) GTE(val time.Time) Expression {
+	return binaryExpr{ref: c.ColBase, op: ">=", val: val}
+}
+func (c DateColumn) LT(val time.Time) Expression {
+	return binaryExpr{ref: c.ColBase, op: "<", val: val}
+}
+func (c DateColumn) LTE(val time.Time) Expression {
+	return binaryExpr{ref: c.ColBase, op: "<=", val: val}
+}
+func (c DateColumn) EQCol(other DateColumn) Expression {
+	return colColExpr{left: c.ColBase, op: "=", right: other.ColBase}
+}
+
+// -------------------------------------------------------------------
+// IntervalColumn
+// -------------------------------------------------------------------
+
+// IntervalColumn is a typed column handle for PostgreSQL interval (duration) columns.
+// Intervals are scanned as strings; use pgtype.Interval for richer handling.
+type IntervalColumn struct{ ColBase }
+
+func (c IntervalColumn) EQ(val string) Expression {
+	return binaryExpr{ref: c.ColBase, op: "=", val: val}
+}
+func (c IntervalColumn) NEQ(val string) Expression {
+	return binaryExpr{ref: c.ColBase, op: "<>", val: val}
+}
+
+// -------------------------------------------------------------------
+// EnumColumn
+// -------------------------------------------------------------------
+
+// EnumColumn is a typed column handle for PostgreSQL custom enum columns.
+// Enum values are scanned as strings.
+type EnumColumn struct{ ColBase }
+
+func (c EnumColumn) EQ(val string) Expression {
+	return binaryExpr{ref: c.ColBase, op: "=", val: val}
+}
+func (c EnumColumn) NEQ(val string) Expression {
+	return binaryExpr{ref: c.ColBase, op: "<>", val: val}
+}
+func (c EnumColumn) In(vals ...string) Expression {
+	if len(vals) == 0 {
+		return Raw("FALSE")
+	}
+	anys := make([]any, len(vals))
+	for i, v := range vals {
+		anys[i] = v
+	}
+	return inExpr{ref: c.ColBase, vals: anys}
+}
+func (c EnumColumn) NotIn(vals ...string) Expression {
+	if len(vals) == 0 {
+		return Raw("TRUE")
+	}
+	anys := make([]any, len(vals))
+	for i, v := range vals {
+		anys[i] = v
+	}
+	return inExpr{ref: c.ColBase, vals: anys, not: true}
+}
+
+// -------------------------------------------------------------------
+// InetColumn
+// -------------------------------------------------------------------
+
+// InetColumn is a typed column handle for PostgreSQL inet, cidr, and macaddr columns.
+// Network addresses are scanned as strings.
+type InetColumn struct{ ColBase }
+
+func (c InetColumn) EQ(val string) Expression {
+	return binaryExpr{ref: c.ColBase, op: "=", val: val}
+}
+func (c InetColumn) NEQ(val string) Expression {
+	return binaryExpr{ref: c.ColBase, op: "<>", val: val}
+}
+
+// -------------------------------------------------------------------
 // TsvectorColumn (PostgreSQL-specific)
 // -------------------------------------------------------------------
 
@@ -718,4 +813,34 @@ func (c TsvectorColumn) MatchesWebSearch(query string) Expression {
 // config is bound as $1 and query as $2, matching the PostgreSQL call signature.
 func (c TsvectorColumn) MatchesWebSearchWithConfig(config, query string) Expression {
 	return ftsMatchExpr{ref: c.ColBase, tsFn: "websearch_to_tsquery", config: config, query: query, hasConfig: true}
+}
+
+// -------------------------------------------------------------------
+// ArrayColumn
+// -------------------------------------------------------------------
+
+// ArrayColumn is a typed column handle for PostgreSQL array columns (e.g. text[], integer[]).
+// Array values are scanned as any; the caller casts to the appropriate Go slice type.
+type ArrayColumn struct{ ColBase }
+
+func (c ArrayColumn) EQ(val any) Expression {
+	return binaryExpr{ref: c.ColBase, op: "=", val: val}
+}
+func (c ArrayColumn) NEQ(val any) Expression {
+	return binaryExpr{ref: c.ColBase, op: "<>", val: val}
+}
+
+// Contains returns a "col @> val" expression (array contains all elements of val).
+func (c ArrayColumn) Contains(val any) Expression {
+	return binaryExpr{ref: c.ColBase, op: "@>", val: val}
+}
+
+// ContainedBy returns a "col <@ val" expression (array is contained by val).
+func (c ArrayColumn) ContainedBy(val any) Expression {
+	return binaryExpr{ref: c.ColBase, op: "<@", val: val}
+}
+
+// Overlaps returns a "col && val" expression (arrays share any elements).
+func (c ArrayColumn) Overlaps(val any) Expression {
+	return binaryExpr{ref: c.ColBase, op: "&&", val: val}
 }

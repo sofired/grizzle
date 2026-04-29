@@ -98,16 +98,19 @@ Implemented for PostgreSQL, MySQL, and SQLite.
 | `integer`, `serial` | `int32` | |
 | `bigint`, `bigserial` | `int64` | |
 | `numeric(p,s)` | `string` | Default; avoids precision loss. Configurable — DEVIATION:GAP (not designed) |
-| `real` | `float32` | Type not yet in schema DSL — DEVIATION:GAP |
-| `double precision` | `float64` | Type not yet in schema DSL — DEVIATION:GAP |
+| `real` | `float64` | DEVIATION:INTENTIONAL — Drizzle maps `real` to TypeScript `number` (64-bit); Go uses `float64` for consistency with `DoublePrecision` and `FloatBuilder.Default(float64)` |
+| `double precision` | `float64` | |
 | `timestamp [with time zone]` | `time.Time` | |
-| `date` | `time.Time` | Type not yet in schema DSL — DEVIATION:GAP |
-| `json`, `jsonb` | `json.RawMessage` or custom type | Configurable via `.Type("T")` |
-| `bytea` | `[]byte` | Type not yet in schema DSL — DEVIATION:GAP |
-| `inet` | `netip.Addr` | Type not yet in schema DSL — DEVIATION:GAP |
-| `interval` | `time.Duration` (approximate) | Type not yet in schema DSL — DEVIATION:GAP; full mapping TBD |
-| enum | `string` or generated type | Type not yet in schema DSL — DEVIATION:GAP |
-| array | `[]T` | Type not yet in schema DSL — DEVIATION:GAP |
+| `date` | `time.Time` | Generates `expr.DateColumn` (distinct from `TimestampColumn`) |
+| `time [with time zone]` | `time.Time` | Generates `expr.TimestampColumn` |
+| `json`, `jsonb` | `map[string]any` or custom type | Default is `map[string]any`; override with `.Type("MyStruct")` |
+| `bytea` | `[]byte` | Generates `expr.BytesColumn` |
+| `inet`, `cidr`, `macaddr` | `string` | DEVIATION:INTENTIONAL — Drizzle uses `string` for inet/cidr; typed `netip.Addr`/`netip.Prefix` deferred |
+| `interval` | `string` | DEVIATION:INTENTIONAL — PostgreSQL intervals can include months/years with no exact `time.Duration` equivalent; `string` preserves full fidelity |
+| `enum` (pg) | `string` | Generates `expr.EnumColumn` |
+| `tsvector`, `tsquery` | `string` | `tsvector` generates `expr.TsvectorColumn`; `tsquery` generates `expr.StringColumn` |
+| array | `any` | Generates `expr.ArrayColumn`; typed `[]T` generation is deferred (tracked in #144) |
+| range types (`int4range`, `int8range`, `numrange`, `tsrange`, `tstzrange`, `daterange`) | `string` | GRIZZLE-ONLY — no Drizzle equivalent |
 
 ---
 

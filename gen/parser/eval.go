@@ -2,6 +2,7 @@ package parser
 
 import (
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/sofired/grizzle/schema/mysql"
@@ -55,7 +56,7 @@ func evalColumn(pc ParsedColumn) (pg.ColumnDef, error) {
 	def := pg.ColumnDef{Name: pc.Name}
 
 	// Apply base type.
-	if err := applyBaseType(&def, chain.BaseFn, chain.BaseArgs); err != nil {
+	if err := applyBaseType(&def, chain.BasePkg, chain.BaseFn, chain.BaseArgs); err != nil {
 		return pg.ColumnDef{}, err
 	}
 
@@ -69,7 +70,7 @@ func evalColumn(pc ParsedColumn) (pg.ColumnDef, error) {
 }
 
 // applyBaseType maps the builder function name to the SQL type and Go type hint.
-func applyBaseType(def *pg.ColumnDef, baseFn string, args []any) error {
+func applyBaseType(def *pg.ColumnDef, basePkg, baseFn string, args []any) error {
 	switch baseFn {
 	case "UUID":
 		def.SQLType = "uuid"
@@ -170,21 +171,43 @@ func applyBaseType(def *pg.ColumnDef, baseFn string, args []any) error {
 		def.SQLType = "year"
 		def.GoType = pg.GoTypeInt
 
-	// MySQL-specific: ENUM('v1','v2',...) — inline enumeration.
+	// Enum: pg.Enum(typeName, val1, val2, ...) vs MySQL inline ENUM('v1','v2',...).
 	case "Enum":
-		if len(args) == 0 {
-			return fmt.Errorf("enum requires at least one value")
-		}
-		parts := make([]string, 0, len(args))
-		for i, a := range args {
-			s, ok := a.(string)
-			if !ok {
-				return fmt.Errorf("enum: argument %d must be a string, got %T", i, a)
+		if basePkg == "pg" {
+			if len(args) < 2 {
+				return fmt.Errorf("pg.Enum requires a type name and at least one value")
 			}
-			parts = append(parts, "'"+strings.ReplaceAll(s, "'", "''")+"'")
+			typeName, ok := args[0].(string)
+			if !ok {
+				return fmt.Errorf("pg.Enum: first argument (type name) must be a string, got %T", args[0])
+			}
+			for i, a := range args[1:] {
+				s, ok := a.(string)
+				if !ok {
+					return fmt.Errorf("pg.Enum: argument %d must be a string, got %T", i+1, a)
+				}
+				if s == "" {
+					return fmt.Errorf("pg.Enum: argument %d must not be empty", i+1)
+				}
+			}
+			def.SQLType = typeName
+			def.GoType = pg.GoTypeString
+		} else {
+			// MySQL-specific: ENUM('v1','v2',...) — inline enumeration.
+			if len(args) == 0 {
+				return fmt.Errorf("enum requires at least one value")
+			}
+			parts := make([]string, 0, len(args))
+			for i, a := range args {
+				s, ok := a.(string)
+				if !ok {
+					return fmt.Errorf("enum: argument %d must be a string, got %T", i, a)
+				}
+				parts = append(parts, "'"+strings.ReplaceAll(s, "'", "''")+"'")
+			}
+			def.SQLType = "enum(" + strings.Join(parts, ",") + ")"
+			def.GoType = pg.GoTypeString
 		}
-		def.SQLType = "enum(" + strings.Join(parts, ",") + ")"
-		def.GoType = pg.GoTypeString
 
 	// MySQL-specific: SET('v1','v2',...) — multi-value set column.
 	case "Set":
@@ -201,6 +224,102 @@ func applyBaseType(def *pg.ColumnDef, baseFn string, args []any) error {
 		}
 		def.SQLType = "set(" + strings.Join(parts, ",") + ")"
 		def.GoType = pg.GoTypeString
+
+	// PostgreSQL-specific builders added in this PR.
+
+	case "Date":
+		def.SQLType = "date"
+		def.GoType = pg.GoTypeTime
+
+	case "Time":
+		def.SQLType = "time"
+		def.GoType = pg.GoTypeTime
+
+	case "Interval":
+		def.SQLType = "interval"
+		def.GoType = pg.GoTypeString
+
+	case "DoublePrecision":
+		def.SQLType = "double precision"
+		def.GoType = pg.GoTypeFloat64
+
+	case "Char":
+		n := int64(1)
+		if len(args) > 0 {
+			if v, ok := args[0].(int64); ok {
+				n = v
+			}
+		}
+		def.SQLType = fmt.Sprintf("char(%d)", n)
+		def.GoType = pg.GoTypeString
+
+	case "Bytea":
+		def.SQLType = "bytea"
+		def.GoType = pg.GoTypeByteSlice
+
+	case "Inet":
+		def.SQLType = "inet"
+		def.GoType = pg.GoTypeString
+
+	case "Cidr":
+		def.SQLType = "cidr"
+		def.GoType = pg.GoTypeString
+
+	case "Macaddr":
+		def.SQLType = "macaddr"
+		def.GoType = pg.GoTypeString
+
+	case "Tsvector":
+		def.SQLType = "tsvector"
+		def.GoType = pg.GoTypeString
+
+	case "Tsquery":
+		def.SQLType = "tsquery"
+		def.GoType = pg.GoTypeString
+
+	case "Int4Range":
+		def.SQLType = "int4range"
+		def.GoType = pg.GoTypeString
+
+	case "Int8Range":
+		def.SQLType = "int8range"
+		def.GoType = pg.GoTypeString
+
+	case "NumRange":
+		def.SQLType = "numrange"
+		def.GoType = pg.GoTypeString
+
+	case "TsRange":
+		def.SQLType = "tsrange"
+		def.GoType = pg.GoTypeString
+
+	case "TstzRange":
+		def.SQLType = "tstzrange"
+		def.GoType = pg.GoTypeString
+
+	case "DateRange":
+		def.SQLType = "daterange"
+		def.GoType = pg.GoTypeString
+
+	case "Array":
+		if len(args) == 0 {
+			return fmt.Errorf("pg.Array requires an inner column builder argument")
+		}
+		innerChain, ok := args[0].(*ChainResult)
+		if !ok {
+			return fmt.Errorf("pg.Array: argument must be a column builder chain, got %T", args[0])
+		}
+		var innerDef pg.ColumnDef
+		if err := applyBaseType(&innerDef, innerChain.BasePkg, innerChain.BaseFn, innerChain.BaseArgs); err != nil {
+			return fmt.Errorf("pg.Array inner type: %w", err)
+		}
+		for _, m := range innerChain.Methods {
+			if err := applyMethod(&innerDef, m); err != nil {
+				return fmt.Errorf("pg.Array inner method .%s: %w", m.Name, err)
+			}
+		}
+		def.SQLType = innerDef.SQLType + "[]"
+		def.GoType = pg.GoTypeAny
 
 	default:
 		return fmt.Errorf("unknown column builder %q", baseFn)
@@ -231,16 +350,36 @@ func applyMethod(def *pg.ColumnDef, m MethodCall) error { //nolint:unparam
 		def.HasDefault = true
 		def.DefaultExpr = "now()"
 
+	case "DefaultEmpty":
+		def.HasDefault = true
+		if strings.HasSuffix(def.SQLType, "[]") {
+			def.DefaultExpr = "ARRAY[]::" + def.SQLType
+		} else {
+			def.DefaultExpr = "'{}'::" + def.SQLType
+		}
+
+	case "DefaultEmptyArray":
+		def.HasDefault = true
+		def.DefaultExpr = "'[]'::" + def.SQLType
+
+
 	case "Default":
 		def.HasDefault = true
 		if len(m.Args) > 0 {
 			switch v := m.Args[0].(type) {
 			case string:
-				// Distinguish between boolean defaults and string literals.
-				if v == "true" || v == "false" {
-					def.DefaultExpr = v
-				} else {
-					def.DefaultExpr = fmt.Sprintf("'%s'", v)
+				quoted := "'" + strings.ReplaceAll(v, "'", "''") + "'"
+				switch {
+				case def.SQLType == "interval":
+					def.DefaultExpr = quoted + "::interval"
+				case def.SQLType == "jsonb" || def.SQLType == "json":
+					def.DefaultExpr = quoted + "::" + def.SQLType
+				case strings.HasSuffix(def.SQLType, "[]"):
+					def.DefaultExpr = quoted + "::" + def.SQLType
+				case isCustomSQLType(def.SQLType):
+					def.DefaultExpr = quoted + "::" + def.SQLType
+				default:
+					def.DefaultExpr = quoted
 				}
 			case bool:
 				if v {
@@ -251,16 +390,27 @@ func applyMethod(def *pg.ColumnDef, m MethodCall) error { //nolint:unparam
 			case int64:
 				def.DefaultExpr = fmt.Sprintf("%d", v)
 			case float64:
-				def.DefaultExpr = fmt.Sprintf("%g", v)
+				switch {
+				case math.IsNaN(v):
+					def.DefaultExpr = fmt.Sprintf("'NaN'::%s", def.SQLType)
+				case math.IsInf(v, 1):
+					def.DefaultExpr = fmt.Sprintf("'Infinity'::%s", def.SQLType)
+				case math.IsInf(v, -1):
+					def.DefaultExpr = fmt.Sprintf("'-Infinity'::%s", def.SQLType)
+				default:
+					def.DefaultExpr = fmt.Sprintf("%g", v)
+				}
 			default:
 				def.DefaultExpr = fmt.Sprintf("%v", v)
 			}
 		}
 
 	case "WithTimezone":
-		// Switch timestamp → timestamptz.
-		if def.SQLType == "timestamp" {
+		switch def.SQLType {
+		case "timestamp":
 			def.SQLType = "timestamptz"
+		case "time":
+			def.SQLType = "timetz"
 		}
 
 	case "OnUpdate":
@@ -306,6 +456,33 @@ func applyMethod(def *pg.ColumnDef, m MethodCall) error { //nolint:unparam
 		// added to the DSL won't break the evaluator on old code.
 	}
 	return nil
+}
+
+// knownBuiltinSQLTypes is the complete set of parameterless built-in SQL types
+// produced by this package's column builders. Any SQLType not in this set and
+// containing no '(' or space is treated as a user-defined type (e.g. a pg.Enum
+// type name) and receives an explicit ::cast suffix in DEFAULT expressions.
+var knownBuiltinSQLTypes = map[string]bool{
+	"uuid": true, "text": true, "boolean": true, "integer": true,
+	"bigint": true, "serial": true, "bigserial": true, "smallint": true,
+	"tinyint": true, "real": true, "blob": true, "json": true,
+	"timestamp": true, "timestamptz": true, "jsonb": true, "mediumint": true,
+	"year": true, "date": true, "time": true, "timetz": true,
+	"interval": true, "bytea": true, "inet": true, "cidr": true,
+	"macaddr": true, "tsvector": true, "tsquery": true, "int4range": true,
+	"int8range": true, "numrange": true, "tsrange": true, "tstzrange": true,
+	"daterange": true, "double precision": true,
+}
+
+// isCustomSQLType reports whether sqlType is a user-defined type name (e.g. a
+// pg.Enum type) that needs an explicit ::cast suffix in DEFAULT expressions.
+// Parameterized types (containing '(') and multi-word types (containing space)
+// are never custom.
+func isCustomSQLType(sqlType string) bool {
+	if strings.ContainsAny(sqlType, "( ") {
+		return false
+	}
+	return !knownBuiltinSQLTypes[sqlType]
 }
 
 // isKnownDialectPkg reports whether pkg is one of the three recognised schema
