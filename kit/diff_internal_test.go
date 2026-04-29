@@ -36,8 +36,10 @@ func TestNormalizeDefaultExpr(t *testing.T) {
 		// Empty string
 		{"", ""},
 
-		// Unterminated string literal — treated as an open literal; :: after
-		// the opening quote is not treated as a cast operator.
+		// Unterminated string literal — the scanner never finds a closing quote,
+		// so the :: is left inside the in-progress literal copy and is not
+		// treated as a cast operator. No explicit handling; behavior is a
+		// consequence of normal scan flow.
 		{"'unclosed ::jsonb", "'unclosed ::jsonb"},
 
 		// Dollar-quoted strings: :: inside $$ is incorrectly collapsed because

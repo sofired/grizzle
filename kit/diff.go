@@ -358,12 +358,14 @@ func diffColumn(tableName string, old, new pg.ColumnDef) []Change {
 }
 
 // normalizeDefaultExpr canonicalizes a PostgreSQL default expression so that
-// semantically-equivalent expressions that differ only in cast-operator spacing
-// compare equal. It collapses whitespace around :: outside single-quoted string
-// literals (e.g. '{}'  ::  jsonb → '{}'::jsonb), handling the doubled-quote
-// escape for embedded single quotes. Dollar-quoted strings ($$...$$) are not
-// recognized and are processed as bare SQL; they are not expected in column
-// default expressions returned by PostgreSQL introspection.
+// semantically-equivalent expressions compare equal. It trims leading and
+// trailing whitespace and collapses whitespace around :: outside single-quoted
+// string literals (e.g. '{}'  ::  jsonb → '{}'::jsonb), handling the
+// doubled-quote escape for embedded single quotes. Dollar-quoted strings
+// ($$...$$) are not recognized; their delimiters are treated as ordinary
+// characters, so any :: inside them will be incorrectly collapsed.
+// Dollar-quoting is not expected in column default expressions returned by
+// PostgreSQL introspection.
 func normalizeDefaultExpr(expr string) string {
 	expr = strings.TrimSpace(expr)
 	var b strings.Builder
@@ -392,6 +394,8 @@ func normalizeDefaultExpr(expr string) string {
 			// then skip any leading whitespace that follows. We read-back and
 			// reset the builder because strings.Builder provides no seek; this
 			// is O(n) per :: operator but cast chains are short in practice.
+			// b.Reset() retains the underlying buffer; b.Grow re-establishes
+			// the capacity hint so the following writes stay allocation-free.
 			s := strings.TrimRight(b.String(), " \t")
 			b.Reset()
 			b.Grow(len(expr))
