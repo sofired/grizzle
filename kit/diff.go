@@ -360,8 +360,8 @@ func diffColumn(tableName string, old, new pg.ColumnDef) []Change {
 // normalizeDefaultExpr canonicalizes a PostgreSQL default expression so that
 // semantically-equivalent expressions that differ only in cast-operator spacing
 // compare equal. It collapses whitespace around :: outside single-quoted string
-// literals (e.g. '{}'  ::  jsonb → '{}'::jsonb), handling the '' escape
-// sequence for embedded quotes. Dollar-quoted strings ($$...$$) are not
+// literals (e.g. '{}'  ::  jsonb → '{}'::jsonb), handling the doubled-quote
+// escape for embedded single quotes. Dollar-quoted strings ($$...$$) are not
 // recognized and are processed as bare SQL; they are not expected in column
 // default expressions returned by PostgreSQL introspection.
 func normalizeDefaultExpr(expr string) string {
