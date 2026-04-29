@@ -800,11 +800,16 @@ func TestSQLiteChangeSQL_CreateView(t *testing.T) {
 	})
 	changes := kit.Diff(kit.EmptySnapshot(), snap)
 	stmts := kit.GenerateChangeSQLSQLite(snap, changes[0])
-	if len(stmts) != 1 {
-		t.Fatalf("expected 1 statement, got %d", len(stmts))
+	// SQLite emits DROP VIEW IF EXISTS + CREATE VIEW (no IF NOT EXISTS) so that
+	// the same change kind handles both new views and replaced views correctly.
+	if len(stmts) != 2 {
+		t.Fatalf("expected 2 statements (DROP + CREATE), got %d: %v", len(stmts), stmts)
 	}
-	if !strings.Contains(stmts[0], "CREATE VIEW IF NOT EXISTS") {
-		t.Errorf("expected CREATE VIEW IF NOT EXISTS for SQLite, got: %s", stmts[0])
+	if !strings.HasPrefix(stmts[0], "DROP VIEW IF EXISTS") {
+		t.Errorf("expected DROP VIEW IF EXISTS as first statement, got: %s", stmts[0])
+	}
+	if !strings.Contains(stmts[1], "CREATE VIEW") || strings.Contains(stmts[1], "IF NOT EXISTS") {
+		t.Errorf("expected CREATE VIEW (without IF NOT EXISTS) as second statement, got: %s", stmts[1])
 	}
 }
 

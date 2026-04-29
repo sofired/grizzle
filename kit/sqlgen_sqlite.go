@@ -136,11 +136,14 @@ func GenerateChangeSQLSQLite(snap Snapshot, c Change) []string {
 		if c.View == nil {
 			return nil
 		}
-		return []string{fmt.Sprintf(
-			"CREATE VIEW IF NOT EXISTS %s AS %s",
-			quoteTableSQLite(c.View.QualifiedName()),
-			c.View.SQL,
-		)}
+		// SQLite has no CREATE OR REPLACE VIEW. ChangeCreateView covers both new
+		// views and modified views (Diff phase 6). Using CREATE VIEW IF NOT EXISTS
+		// would silently no-op for modifications, so always emit DROP + CREATE to
+		// guarantee convergence. DROP IF EXISTS is a no-op when the view is absent.
+		return []string{
+			fmt.Sprintf("DROP VIEW IF EXISTS %s", quoteTableSQLite(c.View.QualifiedName())),
+			fmt.Sprintf("CREATE VIEW %s AS %s", quoteTableSQLite(c.View.QualifiedName()), c.View.SQL),
+		}
 
 	case ChangeDropView:
 		if c.View == nil {

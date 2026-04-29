@@ -70,18 +70,26 @@ type Change struct {
 // most one rename; for tables, the first match in sorted new-table-name order
 // wins, and for columns, the first match in new.Columns slice order wins.
 //
-// Ordering is deterministic and safe for direct application:
+// Ordering is deterministic. The phase sequence prevents cross-type dependency
+// errors (e.g. enums before tables, tables before views, views before drops).
+// One caveat: within phases 3 and 7 views are sorted alphabetically only —
+// view→view dependencies are not resolved. If a newly-created view selects from
+// another new view (phase 3), or a removed view is referenced by another removed
+// view (phase 7), the names must naturally sort in dependency order, or the
+// migration will fail at runtime.
 //
 //  1. Create new enums — types may be referenced by table columns.
 //  2. Rename or create new tables (renames before creates; creates are ordered
 //     by FK dependency so referenced tables are created before their dependants).
 //  3. Create new views — views SELECT FROM tables, which must already exist.
+//     Ordering within this phase is alphabetical only (no view→view dep resolution).
 //  4. Alter existing enums (add values only; value removal requires manual intervention).
 //     Emitted before table diffs so newly-added labels are available if an ALTER TABLE
 //     in phase 5 references them (e.g. ALTER COLUMN SET DEFAULT).
 //  5. Alter existing tables (columns + constraints, including drops).
 //  6. Replace changed views (CREATE OR REPLACE in sequence).
 //  7. Drop removed views — before tables, since views depend on tables.
+//     Ordering within this phase is alphabetical only (no view→view dep resolution).
 //  8. Drop removed tables (unless renamed away).
 //  9. Drop removed enums — after tables that may reference them are gone.
 //
