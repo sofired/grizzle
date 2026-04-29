@@ -9,7 +9,7 @@
 //	    pg.C("realm_id",   pg.UUID().NotNull().References("realms", "id", pg.OnDelete("restrict"))),
 //	    pg.C("username",   pg.Varchar(255).NotNull()),
 //	    pg.C("email",      pg.Varchar(255)),
-//	    pg.C("enabled",    pg.Boolean().NotNull().Default("true")),
+//	    pg.C("enabled",    pg.Boolean().NotNull().Default(true)),
 //	    pg.C("created_at", pg.Timestamp().WithTimezone().NotNull().DefaultNow()),
 //	    pg.C("deleted_at", pg.Timestamp().WithTimezone()),
 //	).WithConstraints(func(t pg.TableRef) []pg.Constraint {
@@ -23,6 +23,7 @@ package pg
 
 import (
 	"fmt"
+	"math"
 	"strings"
 )
 
@@ -100,6 +101,12 @@ func (b *colBuilder) setDefault(expr string) {
 	b.def.HasDefault = true
 	b.def.DefaultExpr = expr
 }
+
+// quoteSQLLiteral wraps val in single quotes, doubling any embedded single quotes.
+func quoteSQLLiteral(val string) string {
+	return "'" + strings.ReplaceAll(val, "'", "''") + "'"
+}
+
 func (b *colBuilder) setPrimaryKey() {
 	b.def.PrimaryKey = true
 	b.def.NotNull = true    // PK is implicitly NOT NULL
@@ -204,7 +211,7 @@ func Text() *VarcharBuilder {
 func (b *VarcharBuilder) NotNull() *VarcharBuilder { b.setNotNull(); return b }
 func (b *VarcharBuilder) Unique() *VarcharBuilder  { b.def.Unique = true; return b }
 func (b *VarcharBuilder) Default(val string) *VarcharBuilder {
-	b.setDefault(fmt.Sprintf("'%s'", val))
+	b.setDefault(quoteSQLLiteral(val))
 	return b
 }
 func (b *VarcharBuilder) References(table, col string, opts ...FKOption) *VarcharBuilder {
@@ -405,15 +412,15 @@ func (b *JSONBBuilder) Type(typeExpr string) *JSONBBuilder {
 
 func (b *JSONBBuilder) NotNull() *JSONBBuilder { b.setNotNull(); return b }
 func (b *JSONBBuilder) Default(jsonExpr string) *JSONBBuilder {
-	b.setDefault(fmt.Sprintf("'%s'::jsonb", jsonExpr))
+	b.setDefault(quoteSQLLiteral(jsonExpr) + "::" + b.def.SQLType)
 	return b
 }
 func (b *JSONBBuilder) DefaultEmpty() *JSONBBuilder {
-	b.setDefault("'{}' ::jsonb")
+	b.setDefault("'{}'::" + b.def.SQLType)
 	return b
 }
 func (b *JSONBBuilder) DefaultEmptyArray() *JSONBBuilder {
-	b.setDefault("'[]'::jsonb")
+	b.setDefault("'[]'::" + b.def.SQLType)
 	return b
 }
 
@@ -471,6 +478,283 @@ func (b *NumericBuilder) RenamedFrom(oldName string) *NumericBuilder {
 func (b *NumericBuilder) Build(name string) ColumnDef { return b.build(name) }
 
 // -------------------------------------------------------------------
+// Date
+// -------------------------------------------------------------------
+
+// DateBuilder builds a date column definition.
+type DateBuilder struct{ colBuilder }
+
+// Date starts a SQL date (date-only, no time component) column.
+// Scans into time.Time; callers should use only the date portion.
+func Date() *DateBuilder {
+	b := &DateBuilder{}
+	b.def.SQLType = "date"
+	b.def.GoType = GoTypeTime
+	return b
+}
+
+func (b *DateBuilder) NotNull() *DateBuilder { b.setNotNull(); return b }
+func (b *DateBuilder) Default(val string) *DateBuilder {
+	b.setDefault(quoteSQLLiteral(val))
+	return b
+}
+func (b *DateBuilder) Build(name string) ColumnDef { return b.build(name) }
+
+// -------------------------------------------------------------------
+// Time / TimeTZ
+// -------------------------------------------------------------------
+
+// TimeBuilder builds a time / timetz column definition.
+type TimeBuilder struct{ colBuilder }
+
+// Time starts a SQL time (time-of-day without timezone) column.
+func Time() *TimeBuilder {
+	b := &TimeBuilder{}
+	b.def.SQLType = "time"
+	b.def.GoType = GoTypeTime
+	return b
+}
+
+// WithTimezone switches the column to TIMETZ (time with timezone).
+func (b *TimeBuilder) WithTimezone() *TimeBuilder {
+	b.def.SQLType = "timetz"
+	return b
+}
+
+func (b *TimeBuilder) NotNull() *TimeBuilder { b.setNotNull(); return b }
+func (b *TimeBuilder) Default(val string) *TimeBuilder {
+	b.setDefault(quoteSQLLiteral(val))
+	return b
+}
+func (b *TimeBuilder) Build(name string) ColumnDef { return b.build(name) }
+
+// -------------------------------------------------------------------
+// Interval
+// -------------------------------------------------------------------
+
+// IntervalBuilder builds an interval column definition.
+type IntervalBuilder struct{ colBuilder }
+
+// Interval starts a SQL interval (duration) column. Scans as a string
+// because Go has no native interval type; use pgtype.Interval for richer handling.
+func Interval() *IntervalBuilder {
+	b := &IntervalBuilder{}
+	b.def.SQLType = "interval"
+	b.def.GoType = GoTypeString
+	return b
+}
+
+func (b *IntervalBuilder) NotNull() *IntervalBuilder { b.setNotNull(); return b }
+func (b *IntervalBuilder) Default(val string) *IntervalBuilder {
+	b.setDefault(quoteSQLLiteral(val) + "::interval")
+	return b
+}
+func (b *IntervalBuilder) Build(name string) ColumnDef { return b.build(name) }
+
+// -------------------------------------------------------------------
+// Real / DoublePrecision
+// -------------------------------------------------------------------
+
+// FloatBuilder builds a real or double precision column definition.
+type FloatBuilder struct{ colBuilder }
+
+// Real starts a real (single-precision 4-byte) column. Go type is float64 for API consistency with DoublePrecision and FloatBuilder.Default.
+func Real() *FloatBuilder {
+	b := &FloatBuilder{}
+	b.def.SQLType = "real"
+	b.def.GoType = GoTypeFloat64
+	return b
+}
+
+// DoublePrecision starts a double-precision (8-byte) floating-point column.
+func DoublePrecision() *FloatBuilder {
+	b := &FloatBuilder{}
+	b.def.SQLType = "double precision"
+	b.def.GoType = GoTypeFloat64
+	return b
+}
+
+func (b *FloatBuilder) NotNull() *FloatBuilder { b.setNotNull(); return b }
+func (b *FloatBuilder) Default(val float64) *FloatBuilder {
+	var s string
+	switch {
+	case math.IsNaN(val):
+		s = fmt.Sprintf("'NaN'::%s", b.def.SQLType)
+	case math.IsInf(val, 1):
+		s = fmt.Sprintf("'Infinity'::%s", b.def.SQLType)
+	case math.IsInf(val, -1):
+		s = fmt.Sprintf("'-Infinity'::%s", b.def.SQLType)
+	default:
+		s = fmt.Sprintf("%g", val)
+	}
+	b.setDefault(s)
+	return b
+}
+func (b *FloatBuilder) Build(name string) ColumnDef { return b.build(name) }
+
+// -------------------------------------------------------------------
+// Char
+// -------------------------------------------------------------------
+
+// CharBuilder builds a char(n) fixed-length column definition.
+type CharBuilder struct{ colBuilder }
+
+// Char starts a char(n) fixed-length character column.
+func Char(length int) *CharBuilder {
+	b := &CharBuilder{}
+	b.def.SQLType = fmt.Sprintf("char(%d)", length)
+	b.def.GoType = GoTypeString
+	return b
+}
+
+func (b *CharBuilder) NotNull() *CharBuilder { b.setNotNull(); return b }
+func (b *CharBuilder) Default(val string) *CharBuilder {
+	b.setDefault(quoteSQLLiteral(val))
+	return b
+}
+func (b *CharBuilder) Build(name string) ColumnDef { return b.build(name) }
+
+// -------------------------------------------------------------------
+// Bytea
+// -------------------------------------------------------------------
+
+// ByteaBuilder builds a bytea column definition.
+type ByteaBuilder struct{ colBuilder }
+
+// Bytea starts a bytea (binary data) column. Scans into []byte.
+func Bytea() *ByteaBuilder {
+	b := &ByteaBuilder{}
+	b.def.SQLType = "bytea"
+	b.def.GoType = GoTypeByteSlice
+	return b
+}
+
+func (b *ByteaBuilder) NotNull() *ByteaBuilder      { b.setNotNull(); return b }
+func (b *ByteaBuilder) Build(name string) ColumnDef { return b.build(name) }
+
+// -------------------------------------------------------------------
+// Inet / Cidr / Macaddr
+// -------------------------------------------------------------------
+
+// NetworkBuilder builds network-address column definitions (inet, cidr, macaddr).
+type NetworkBuilder struct{ colBuilder }
+
+// Inet starts an inet (IP address, IPv4 or IPv6, with optional subnet) column.
+func Inet() *NetworkBuilder {
+	b := &NetworkBuilder{}
+	b.def.SQLType = "inet"
+	b.def.GoType = GoTypeString
+	return b
+}
+
+// Cidr starts a cidr (network address, host bits must be zero) column.
+func Cidr() *NetworkBuilder {
+	b := &NetworkBuilder{}
+	b.def.SQLType = "cidr"
+	b.def.GoType = GoTypeString
+	return b
+}
+
+// Macaddr starts a macaddr (MAC address) column.
+func Macaddr() *NetworkBuilder {
+	b := &NetworkBuilder{}
+	b.def.SQLType = "macaddr"
+	b.def.GoType = GoTypeString
+	return b
+}
+
+func (b *NetworkBuilder) NotNull() *NetworkBuilder { b.setNotNull(); return b }
+func (b *NetworkBuilder) Default(val string) *NetworkBuilder {
+	b.setDefault(quoteSQLLiteral(val))
+	return b
+}
+func (b *NetworkBuilder) Build(name string) ColumnDef { return b.build(name) }
+
+// -------------------------------------------------------------------
+// Tsvector / Tsquery
+// -------------------------------------------------------------------
+
+// TextSearchBuilder builds tsvector / tsquery column definitions.
+type TextSearchBuilder struct{ colBuilder }
+
+// Tsvector starts a tsvector (full-text search document vector) column.
+func Tsvector() *TextSearchBuilder {
+	b := &TextSearchBuilder{}
+	b.def.SQLType = "tsvector"
+	b.def.GoType = GoTypeString
+	return b
+}
+
+// Tsquery starts a tsquery (full-text search query) column.
+func Tsquery() *TextSearchBuilder {
+	b := &TextSearchBuilder{}
+	b.def.SQLType = "tsquery"
+	b.def.GoType = GoTypeString
+	return b
+}
+
+func (b *TextSearchBuilder) NotNull() *TextSearchBuilder { b.setNotNull(); return b }
+func (b *TextSearchBuilder) Build(name string) ColumnDef { return b.build(name) }
+
+// -------------------------------------------------------------------
+// Range types
+// -------------------------------------------------------------------
+
+// RangeBuilder builds PostgreSQL range-type column definitions.
+type RangeBuilder struct{ colBuilder }
+
+// Int4Range starts an int4range column (range of integers).
+func Int4Range() *RangeBuilder {
+	b := &RangeBuilder{}
+	b.def.SQLType = "int4range"
+	b.def.GoType = GoTypeString
+	return b
+}
+
+// Int8Range starts an int8range column (range of bigints).
+func Int8Range() *RangeBuilder {
+	b := &RangeBuilder{}
+	b.def.SQLType = "int8range"
+	b.def.GoType = GoTypeString
+	return b
+}
+
+// NumRange starts a numrange column (range of numerics).
+func NumRange() *RangeBuilder {
+	b := &RangeBuilder{}
+	b.def.SQLType = "numrange"
+	b.def.GoType = GoTypeString
+	return b
+}
+
+// TsRange starts a tsrange column (range of timestamps without timezone).
+func TsRange() *RangeBuilder {
+	b := &RangeBuilder{}
+	b.def.SQLType = "tsrange"
+	b.def.GoType = GoTypeString
+	return b
+}
+
+// TstzRange starts a tstzrange column (range of timestamps with timezone).
+func TstzRange() *RangeBuilder {
+	b := &RangeBuilder{}
+	b.def.SQLType = "tstzrange"
+	b.def.GoType = GoTypeString
+	return b
+}
+
+// DateRange starts a daterange column (range of dates).
+func DateRange() *RangeBuilder {
+	b := &RangeBuilder{}
+	b.def.SQLType = "daterange"
+	b.def.GoType = GoTypeString
+	return b
+}
+
+func (b *RangeBuilder) NotNull() *RangeBuilder      { b.setNotNull(); return b }
+func (b *RangeBuilder) Build(name string) ColumnDef { return b.build(name) }
+
+// -------------------------------------------------------------------
 // Enum
 // -------------------------------------------------------------------
 
@@ -481,7 +765,7 @@ type EnumColumnBuilder struct {
 }
 
 // Enum starts an enum column using the given PostgreSQL enum type name.
-// values must be non-empty and no individual value may be the empty string (Fix #118).
+// values must be non-empty and no individual value may be the empty string.
 //
 // Panics if values is empty or any value is the empty string.
 func Enum(typeName string, values ...string) *EnumColumnBuilder {
@@ -502,11 +786,9 @@ func Enum(typeName string, values ...string) *EnumColumnBuilder {
 func (b *EnumColumnBuilder) NotNull() *EnumColumnBuilder { b.setNotNull(); return b }
 
 // Default sets the DEFAULT value for the enum column.
-// Single quotes in the value are doubled to produce valid SQL (Fix #111).
+// Single quotes in the value are doubled to produce valid SQL.
 func (b *EnumColumnBuilder) Default(val string) *EnumColumnBuilder {
-	// Escape single quotes by doubling them (SQL standard quoting).
-	escaped := strings.ReplaceAll(val, "'", "''")
-	b.setDefault(fmt.Sprintf("'%s'::%s", escaped, b.typeName))
+	b.setDefault(quoteSQLLiteral(val) + "::" + b.typeName)
 	return b
 }
 
@@ -520,6 +802,38 @@ func (b *EnumColumnBuilder) RenamedFrom(oldName string) *EnumColumnBuilder {
 	return b
 }
 func (b *EnumColumnBuilder) Build(name string) ColumnDef { return b.build(name) }
+
+// -------------------------------------------------------------------
+// Array
+// -------------------------------------------------------------------
+
+// ArrayBuilder builds a PostgreSQL array-type column definition.
+// The element type is derived from the inner ColumnBuilder.
+type ArrayBuilder struct {
+	colBuilder
+	inner ColumnBuilder
+}
+
+// Array starts a PostgreSQL array column with the given element type.
+// Example: pg.Array(pg.Text()) produces a text[] column.
+func Array(inner ColumnBuilder) *ArrayBuilder {
+	innerDef := inner.Build("")
+	b := &ArrayBuilder{inner: inner}
+	b.def.SQLType = innerDef.SQLType + "[]"
+	b.def.GoType = GoTypeAny
+	return b
+}
+
+func (b *ArrayBuilder) NotNull() *ArrayBuilder { b.setNotNull(); return b }
+func (b *ArrayBuilder) Default(val string) *ArrayBuilder {
+	b.setDefault(quoteSQLLiteral(val) + "::" + b.def.SQLType)
+	return b
+}
+func (b *ArrayBuilder) DefaultEmpty() *ArrayBuilder {
+	b.setDefault(fmt.Sprintf("ARRAY[]::%s", b.def.SQLType))
+	return b
+}
+func (b *ArrayBuilder) Build(name string) ColumnDef { return b.build(name) }
 
 // -------------------------------------------------------------------
 // ColumnBuilder interface — satisfied by all typed builders
