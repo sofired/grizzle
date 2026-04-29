@@ -35,6 +35,15 @@ func TestNormalizeDefaultExpr(t *testing.T) {
 
 		// Empty string
 		{"", ""},
+
+		// Unterminated string literal — treated as an open literal; :: after
+		// the opening quote is not treated as a cast operator.
+		{"'unclosed ::jsonb", "'unclosed ::jsonb"},
+
+		// Dollar-quoted strings: :: inside $$ is incorrectly collapsed because
+		// dollar-quoting is not supported (see function doc). This test documents
+		// the current behavior; fix tracked in a follow-up issue.
+		{"$$foo :: bar$$::text", "$$foo::bar$$::text"},
 	}
 
 	for _, tc := range cases {

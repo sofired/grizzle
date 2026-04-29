@@ -359,8 +359,11 @@ func diffColumn(tableName string, old, new pg.ColumnDef) []Change {
 
 // normalizeDefaultExpr canonicalizes a PostgreSQL default expression so that
 // semantically-equivalent expressions that differ only in cast-operator spacing
-// compare equal. It collapses whitespace around :: outside of single-quoted
-// string literals (e.g. '{}' ::jsonb → '{}'::jsonb).
+// compare equal. It collapses whitespace around :: outside single-quoted string
+// literals (e.g. '{}'  ::  jsonb → '{}'::jsonb), handling the '' escape
+// sequence for embedded quotes. Dollar-quoted strings ($$...$$) are not
+// recognized and are processed as bare SQL; they are not expected in column
+// default expressions returned by PostgreSQL introspection.
 func normalizeDefaultExpr(expr string) string {
 	expr = strings.TrimSpace(expr)
 	var b strings.Builder
@@ -368,15 +371,15 @@ func normalizeDefaultExpr(expr string) string {
 	i := 0
 	for i < len(expr) {
 		if expr[i] == '\'' {
-			// Copy single-quoted literal verbatim, handling '' escapes.
+			// Copy single-quoted literal verbatim, handling '' escape sequences.
 			j := i + 1
 			for j < len(expr) {
 				if expr[j] == '\'' {
-					j++
+					j++ // move past first ' of potential '' escape
 					if j < len(expr) && expr[j] == '\'' {
-						j++ // escaped quote — keep scanning
+						j++ // second ' of '' escape — keep scanning inside the literal
 					} else {
-						break
+						break // closing quote — literal is complete
 					}
 				} else {
 					j++
@@ -385,14 +388,16 @@ func normalizeDefaultExpr(expr string) string {
 			b.WriteString(expr[i:j])
 			i = j
 		} else if expr[i] == ':' && i+1 < len(expr) && expr[i+1] == ':' {
-			// Trim any trailing space already written before ::
+			// Strip any trailing whitespace already written, then write ::,
+			// then skip any leading whitespace that follows. We read-back and
+			// reset the builder because strings.Builder provides no seek; this
+			// is O(n) per :: operator but cast chains are short in practice.
 			s := strings.TrimRight(b.String(), " \t")
 			b.Reset()
 			b.Grow(len(expr))
 			b.WriteString(s)
 			b.WriteString("::")
 			i += 2
-			// Skip leading space after ::
 			for i < len(expr) && (expr[i] == ' ' || expr[i] == '\t') {
 				i++
 			}
