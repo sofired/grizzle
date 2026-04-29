@@ -135,10 +135,11 @@ func FromSchema(objs SchemaObjects) Snapshot {
 	for _, td := range objs.Tables {
 		t := td.Def()
 		ts := &TableSnap{
-			Name:        t.Name,
-			Schema:      t.Schema,
-			Columns:     t.Columns,
-			Constraints: t.Constraints,
+			Name:         t.Name,
+			Schema:       t.Schema,
+			Columns:      t.Columns,
+			Constraints:  t.Constraints,
+			PreviousName: t.PreviousName,
 		}
 		snap.Tables[ts.QualifiedName()] = ts
 	}

@@ -192,6 +192,34 @@ func TestFromSchema_SchemaQualifiedObjects(t *testing.T) {
 	}
 }
 
+func TestFromSchema_PreviousName_RenameDetection(t *testing.T) {
+	oldDef := pg.Table("accounts",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+	).Build()
+	newDef := pg.Table("users",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+	).RenamedFrom("accounts").Build()
+
+	old := kit.FromSchema(kit.SchemaObjects{Tables: []pg.TableDefiner{oldDef}})
+	new := kit.FromSchema(kit.SchemaObjects{Tables: []pg.TableDefiner{newDef}})
+	changes := kit.Diff(old, new)
+
+	var renames, drops, creates int
+	for _, c := range changes {
+		switch c.Kind {
+		case kit.ChangeRenameTable:
+			renames++
+		case kit.ChangeDropTable:
+			drops++
+		case kit.ChangeCreateTable:
+			creates++
+		}
+	}
+	if renames != 1 || drops != 0 || creates != 0 {
+		t.Errorf("expected 1 rename, 0 drops, 0 creates; got %d/%d/%d — FromSchema must copy PreviousName", renames, drops, creates)
+	}
+}
+
 // -------------------------------------------------------------------
 // Snapshot: JSON round-trip with views and enums
 // -------------------------------------------------------------------
@@ -460,6 +488,74 @@ func TestDiff_AlterEnum_ReorderedValues(t *testing.T) {
 // -------------------------------------------------------------------
 // Diff: phase ordering
 // -------------------------------------------------------------------
+
+func TestDiff_Ordering_AlterEnumBeforeCreateTable(t *testing.T) {
+	// A new table is added at the same time an existing enum gains a value.
+	// ALTER TYPE must precede CREATE TABLE so a column default referencing the
+	// new label succeeds in PostgreSQL.
+	oldEnum := pg.CreateEnum("status", "pending", "active")
+	newEnum := pg.CreateEnum("status", "pending", "active", "archived")
+
+	old := kit.FromSchema(kit.SchemaObjects{Enums: []*pg.EnumDef{oldEnum}})
+	new := kit.FromSchema(kit.SchemaObjects{
+		Tables: []pg.TableDefiner{usersDef},
+		Enums:  []*pg.EnumDef{newEnum},
+	})
+
+	changes := kit.Diff(old, new)
+
+	alterIdx, createIdx := -1, -1
+	for i, c := range changes {
+		if c.Kind == kit.ChangeAlterEnum {
+			alterIdx = i
+		}
+		if c.Kind == kit.ChangeCreateTable {
+			createIdx = i
+		}
+	}
+	if alterIdx < 0 || createIdx < 0 {
+		t.Fatalf("missing expected changes: alter=%d create=%d", alterIdx, createIdx)
+	}
+	if alterIdx >= createIdx {
+		t.Errorf("expected ALTER ENUM (idx %d) before CREATE TABLE (idx %d)", alterIdx, createIdx)
+	}
+}
+
+func TestDiff_Ordering_AlterEnumBeforeCreateView(t *testing.T) {
+	// A new view is added at the same time an existing enum gains a value.
+	// ALTER TYPE must precede CREATE VIEW so a view predicate referencing the
+	// new label succeeds in PostgreSQL.
+	oldEnum := pg.CreateEnum("status", "pending", "active")
+	newEnum := pg.CreateEnum("status", "pending", "active", "archived")
+
+	old := kit.FromSchema(kit.SchemaObjects{
+		Tables: []pg.TableDefiner{usersDef},
+		Enums:  []*pg.EnumDef{oldEnum},
+	})
+	new := kit.FromSchema(kit.SchemaObjects{
+		Tables: []pg.TableDefiner{usersDef},
+		Views:  []*pg.ViewDef{activeUsersView},
+		Enums:  []*pg.EnumDef{newEnum},
+	})
+
+	changes := kit.Diff(old, new)
+
+	alterIdx, createIdx := -1, -1
+	for i, c := range changes {
+		if c.Kind == kit.ChangeAlterEnum {
+			alterIdx = i
+		}
+		if c.Kind == kit.ChangeCreateView {
+			createIdx = i
+		}
+	}
+	if alterIdx < 0 || createIdx < 0 {
+		t.Fatalf("missing expected changes: alter=%d create=%d", alterIdx, createIdx)
+	}
+	if alterIdx >= createIdx {
+		t.Errorf("expected ALTER ENUM (idx %d) before CREATE VIEW (idx %d)", alterIdx, createIdx)
+	}
+}
 
 func TestDiff_Ordering_EnumBeforeTable(t *testing.T) {
 	old := kit.EmptySnapshot()

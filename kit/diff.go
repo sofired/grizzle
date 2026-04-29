@@ -72,20 +72,22 @@ type Change struct {
 //
 // Ordering is deterministic. The phase sequence prevents cross-type dependency
 // errors (e.g. enums before tables, tables before views, views before drops).
-// One caveat: within phases 3 and 7 views are sorted alphabetically only —
+// One caveat: within phases 4 and 7 views are sorted alphabetically only —
 // view→view dependencies are not resolved. If a newly-created view selects from
-// another new view (phase 3), or a removed view is referenced by another removed
+// another new view (phase 4), or a removed view is referenced by another removed
 // view (phase 7), the names must naturally sort in dependency order, or the
 // migration will fail at runtime.
 //
-//  1. Create new enums — types may be referenced by table columns.
-//  2. Rename or create new tables (renames before creates; creates are ordered
+//  1. Create new enums — types may be referenced by table columns and views.
+//  2. Alter existing enums (add/remove/reorder values).
+//     Must run before any CREATE TABLE or CREATE VIEW that may reference a
+//     newly-added label (e.g. as a column default or in a view predicate).
+//     Value removal and reordering emit WARNING SQL comments — PostgreSQL
+//     cannot perform those operations automatically.
+//  3. Rename or create new tables (renames before creates; creates are ordered
 //     by FK dependency so referenced tables are created before their dependants).
-//  3. Create new views — views SELECT FROM tables, which must already exist.
+//  4. Create new views — views SELECT FROM tables, which must already exist.
 //     Ordering within this phase is alphabetical only (no view→view dep resolution).
-//  4. Alter existing enums (add values only; value removal requires manual intervention).
-//     Emitted before table diffs so newly-added labels are available if an ALTER TABLE
-//     in phase 5 references them (e.g. ALTER COLUMN SET DEFAULT).
 //  5. Alter existing tables (columns + constraints, including drops).
 //  6. Replace changed views (CREATE OR REPLACE in sequence).
 //  7. Drop removed views — before tables, since views depend on tables.
@@ -154,7 +156,32 @@ func Diff(old, new Snapshot) []Change {
 		}
 	}
 
-	// Phase 2: new tables not in old.
+	// Phase 2: enums in both → diff values.
+	// Must run before any CREATE TABLE or CREATE VIEW so that newly-added labels
+	// are present when PostgreSQL processes column defaults or view predicates
+	// that reference them. Also emitted when values are removed or reordered so
+	// callers receive warning SQL comments — PostgreSQL cannot remove or reorder
+	// enum values without manual work.
+	for _, name := range sortedKeys(new.Enums) {
+		oldE, exists := old.Enums[name]
+		if !exists {
+			continue // handled in phase 1
+		}
+		newE := new.Enums[name]
+		addedVals := enumAddedValues(oldE, newE)
+		removedVals, reordered := enumDrift(oldE, newE)
+		if len(addedVals) > 0 || len(removedVals) > 0 || reordered {
+			o, n := *oldE, *newE
+			changes = append(changes, Change{
+				Kind:      ChangeAlterEnum,
+				TableName: name,
+				OldEnum:   &o,
+				NewEnum:   &n,
+			})
+		}
+	}
+
+	// Phase 3: new tables not in old.
 	// Renames are collected and appended before creates so that FK references
 	// from a newly created table to the renamed table's new name are safe,
 	// regardless of alphabetical ordering.
@@ -181,7 +208,7 @@ func Diff(old, new Snapshot) []Change {
 		})
 	}
 
-	// Phase 3: new views not in old → CREATE VIEW (after tables exist).
+	// Phase 4: new views not in old → CREATE VIEW (after tables exist).
 	for _, name := range sortedKeys(new.Views) {
 		if _, exists := old.Views[name]; !exists {
 			v := *new.Views[name]
@@ -189,30 +216,6 @@ func Diff(old, new Snapshot) []Change {
 				Kind:      ChangeCreateView,
 				TableName: name,
 				View:      &v,
-			})
-		}
-	}
-
-	// Phase 4: enums in both → diff values.
-	// Emitted before table diffs so that newly-added enum labels are available if a table
-	// ALTER (e.g. ALTER COLUMN SET DEFAULT) references them in the same migration.
-	// Also emitted when values are removed or reordered so callers receive warning SQL
-	// comments — PostgreSQL cannot remove or reorder enum values without manual work.
-	for _, name := range sortedKeys(new.Enums) {
-		oldE, exists := old.Enums[name]
-		if !exists {
-			continue // handled above
-		}
-		newE := new.Enums[name]
-		addedVals := enumAddedValues(oldE, newE)
-		removedVals, reordered := enumDrift(oldE, newE)
-		if len(addedVals) > 0 || len(removedVals) > 0 || reordered {
-			o, n := *oldE, *newE
-			changes = append(changes, Change{
-				Kind:      ChangeAlterEnum,
-				TableName: name,
-				OldEnum:   &o,
-				NewEnum:   &n,
 			})
 		}
 	}
