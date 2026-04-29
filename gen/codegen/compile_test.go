@@ -212,6 +212,98 @@ func TestGeneratedCode_SQLite_Compiles(t *testing.T) {
 	}
 }
 
+// schemaForCompilePGExtended exercises the PostgreSQL-specific column builder
+// mappings added in this PR: Date, Bytea, Interval, Enum, Inet, Tsvector,
+// Array, and range types. Including them here ensures the generated expr types
+// and imports (e.g. expr.DateColumn, expr.ArrayColumn) stay working.
+const schemaForCompilePGExtended = `package myschema
+
+import pg "github.com/sofired/grizzle/schema/pg"
+
+var PGTypes = pg.Table("pg_types",
+	pg.C("id",          pg.UUID().PrimaryKey().DefaultRandom()),
+	pg.C("born_on",     pg.Date().NotNull()),
+	pg.C("payload",     pg.Bytea()),
+	pg.C("ttl",         pg.Interval()),
+	pg.C("status",      pg.Enum("item_status", "active", "inactive").NotNull()),
+	pg.C("ip_addr",     pg.Inet()),
+	pg.C("search_vec",  pg.Tsvector()),
+	pg.C("tags",        pg.Array(pg.Text())),
+	pg.C("score_range", pg.Int4Range()),
+)
+`
+
+// TestGeneratedCode_PGExtended_Compiles verifies that code generated from the
+// PostgreSQL-specific column types added in this PR compiles without errors.
+func TestGeneratedCode_PGExtended_Compiles(t *testing.T) {
+	goBin, err := exec.LookPath("go")
+	if err != nil {
+		t.Skip("go binary not found in PATH, skipping compile test")
+	}
+
+	moduleRoot := findModuleRoot(t)
+
+	schemaDir := t.TempDir()
+	schemaFile := filepath.Join(schemaDir, "schema.go")
+	if err := os.WriteFile(schemaFile, []byte(schemaForCompilePGExtended), 0644); err != nil {
+		t.Fatalf("write schema: %v", err)
+	}
+	tables, err := parser.ParseFile(schemaFile)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(tables) != 1 {
+		t.Fatalf("expected 1 table, got %d", len(tables))
+	}
+
+	outDir := t.TempDir()
+	files, err := codegen.GenerateAll(tables, codegen.Options{
+		PackageName: "myschema",
+		OutputDir:   outDir,
+	})
+	if err != nil {
+		t.Fatalf("GenerateAll: %v", err)
+	}
+	for _, f := range files {
+		if err := os.WriteFile(f.FileName, f.Source, 0644); err != nil {
+			t.Fatalf("write %s: %v", f.FileName, err)
+		}
+		t.Logf("generated %s (%d bytes)", filepath.Base(f.FileName), len(f.Source))
+	}
+
+	goMod := "module e2etest\n\ngo 1.22\n\n" +
+		"require github.com/sofired/grizzle v0.0.0\n\n" +
+		"replace github.com/sofired/grizzle => " + moduleRoot + "\n"
+	if err := os.WriteFile(filepath.Join(outDir, "go.mod"), []byte(goMod), 0644); err != nil {
+		t.Fatalf("write go.mod: %v", err)
+	}
+
+	parentSum, err := os.ReadFile(filepath.Join(moduleRoot, "go.sum"))
+	if err != nil {
+		t.Fatalf("read parent go.sum: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(outDir, "go.sum"), parentSum, 0644); err != nil {
+		t.Fatalf("write go.sum: %v", err)
+	}
+
+	tidy := exec.Command(goBin, "mod", "tidy")
+	tidy.Dir = outDir
+	tidy.Env = goEnv()
+	if out, err := tidy.CombinedOutput(); err != nil {
+		t.Fatalf("go mod tidy:\n%s\nerror: %v", out, err)
+	}
+
+	build := exec.Command(goBin, "build", "./...")
+	build.Dir = outDir
+	build.Env = goEnv()
+	if out, err := build.CombinedOutput(); err != nil {
+		for _, f := range files {
+			t.Logf("=== %s ===\n%s", filepath.Base(f.FileName), f.Source)
+		}
+		t.Fatalf("go build ./...:\n%s\nerror: %v", out, err)
+	}
+}
+
 // findModuleRoot walks up from the test file's directory until it finds go.mod.
 func findModuleRoot(t *testing.T) string {
 	t.Helper()
