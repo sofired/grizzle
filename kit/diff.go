@@ -25,8 +25,8 @@ const (
 	ChangeDropConstraint     ChangeKind = "drop_constraint"
 
 	// View change kinds.
-	ChangeCreateView  ChangeKind = "create_view"   // brand-new view
-	ChangeReplaceView ChangeKind = "replace_view"  // existing view whose SQL changed
+	ChangeCreateView  ChangeKind = "create_view"  // brand-new view
+	ChangeReplaceView ChangeKind = "replace_view" // existing view whose SQL changed
 	ChangeDropView    ChangeKind = "drop_view"
 
 	// Enum change kinds (PostgreSQL only).
