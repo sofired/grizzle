@@ -93,7 +93,7 @@ type Change struct {
 //  5. Create new views — views SELECT FROM tables, which must already exist and
 //     be fully altered. Ordering within this phase is alphabetical only
 //     (no view→view dep resolution).
-//  6. Replace changed views (CREATE OR REPLACE in sequence).
+//  6. Replace changed views (DROP + CREATE, to handle incompatible column changes).
 //  7. Drop removed views — before tables, since views depend on tables.
 //     Ordering within this phase is alphabetical only (no view→view dep resolution).
 //  8. Drop removed tables (unless renamed away).
