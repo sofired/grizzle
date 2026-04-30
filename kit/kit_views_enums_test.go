@@ -1104,6 +1104,73 @@ func TestEmptySnapshot_HasViewsAndEnums(t *testing.T) {
 }
 
 // -------------------------------------------------------------------
+// pg DSL: panic guards for empty name / sql
+// -------------------------------------------------------------------
+
+func TestSchemaCreateEnum_PanicsOnEmptyName(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("expected panic for empty name")
+		}
+	}()
+	pg.SchemaCreateEnum("auth", "", "a", "b")
+}
+
+func TestSchemaCreateEnum_PanicsOnEmptyValue(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("expected panic for empty value")
+		}
+	}()
+	pg.SchemaCreateEnum("auth", "role", "admin", "", "user")
+}
+
+func TestCreateView_PanicsOnEmptyName(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("expected panic for empty name")
+		}
+	}()
+	pg.CreateView("", "SELECT 1")
+}
+
+func TestCreateView_PanicsOnEmptySQL(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("expected panic for empty sql")
+		}
+	}()
+	pg.CreateView("my_view", "")
+}
+
+func TestSchemaView_PanicsOnEmptyName(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("expected panic for empty name")
+		}
+	}()
+	pg.SchemaView("reporting", "", "SELECT 1")
+}
+
+func TestSchemaView_PanicsOnEmptySQL(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("expected panic for empty sql")
+		}
+	}()
+	pg.SchemaView("reporting", "my_view", "")
+}
+
+func TestCreateEnum_PanicsOnEmptyName(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("expected panic for empty name")
+		}
+	}()
+	pg.CreateEnum("", "a", "b")
+}
+
+// -------------------------------------------------------------------
 // Helpers
 // -------------------------------------------------------------------
 

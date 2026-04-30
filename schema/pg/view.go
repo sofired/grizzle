@@ -27,6 +27,12 @@ func (v *ViewDef) QualifiedName() string {
 //	var ActiveUsers = pg.CreateView("active_users",
 //	    `SELECT id, username, email FROM users WHERE enabled = true`)
 func CreateView(name, sql string) *ViewDef {
+	if name == "" {
+		panic("pg.CreateView: name must not be empty")
+	}
+	if sql == "" {
+		panic("pg.CreateView: sql must not be empty")
+	}
 	return &ViewDef{Name: name, SQL: sql}
 }
 
@@ -35,5 +41,11 @@ func CreateView(name, sql string) *ViewDef {
 //	var RecentOrders = pg.SchemaView("reporting", "recent_orders",
 //	    `SELECT * FROM orders WHERE created_at > now() - interval '7 days'`)
 func SchemaView(schema, name, sql string) *ViewDef {
+	if name == "" {
+		panic("pg.SchemaView: name must not be empty")
+	}
+	if sql == "" {
+		panic("pg.SchemaView: sql must not be empty")
+	}
 	return &ViewDef{Schema: schema, Name: name, SQL: sql}
 }

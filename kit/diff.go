@@ -26,7 +26,7 @@ const (
 
 	// View change kinds.
 	ChangeCreateView  ChangeKind = "create_view"  // brand-new view
-	ChangeReplaceView ChangeKind = "replace_view" // existing view whose SQL changed
+	ChangeReplaceView ChangeKind = "replace_view" // existing view whose SQL changed; emits DROP VIEW IF EXISTS + CREATE VIEW rather than CREATE OR REPLACE to handle incompatible column changes
 	ChangeDropView    ChangeKind = "drop_view"
 
 	// Enum change kinds (PostgreSQL only).
@@ -38,10 +38,10 @@ const (
 // Change represents a single schema mutation — the unit that SQL generation works from.
 type Change struct {
 	Kind       ChangeKind
-	ObjectName string // qualified name of the affected object (table, view, or enum); for ChangeRenameTable this is the old (source) name
+	ObjectName string // qualified name of the affected object (table, view, or enum); for ChangeRenameTable this is the old (source) name — see RenameTarget for the new name
 
-	// RenameTarget is set only for ChangeRenameTable: it holds the new table name.
-	// For all other change kinds this field is empty.
+	// RenameTarget holds the new (destination) name for ChangeRenameTable.
+	// ObjectName holds the old (source) name. Empty for all other change kinds.
 	RenameTarget string
 
 	// Set for column-level changes.

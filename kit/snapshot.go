@@ -154,7 +154,9 @@ func FromSchema(objs SchemaObjects) Snapshot {
 		snap.Views[vs.QualifiedName()] = vs
 	}
 	for _, e := range objs.Enums {
-		es := &EnumSnap{Name: e.Name, Schema: e.Schema, Values: e.Values}
+		vals := make([]string, len(e.Values))
+		copy(vals, e.Values)
+		es := &EnumSnap{Name: e.Name, Schema: e.Schema, Values: vals}
 		snap.Enums[es.QualifiedName()] = es
 	}
 	return snap
