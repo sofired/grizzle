@@ -499,6 +499,231 @@ func TestRenameColumn_NilGuard(t *testing.T) {
 	}
 }
 
+// -------------------------------------------------------------------
+// Test group A — nil-guard tests for all GenerateChangeSQL variants
+// -------------------------------------------------------------------
+
+func TestGenerateChangeSQL_CreateTable_NilGuard(t *testing.T) {
+	// Snapshot that does not contain the ObjectName — guard checks snap.Tables[c.ObjectName] == nil
+	snap := kit.EmptySnapshot()
+	c := kit.Change{Kind: kit.ChangeCreateTable, ObjectName: "nonexistent"}
+	if stmts := kit.GenerateChangeSQL(snap, c); stmts != nil {
+		t.Errorf("expected nil when table not in snapshot, got %v", stmts)
+	}
+}
+
+func TestGenerateChangeSQL_RenameTable_NilGuard(t *testing.T) {
+	snap := kit.EmptySnapshot()
+	c := kit.Change{Kind: kit.ChangeRenameTable, ObjectName: "accounts", RenameTarget: ""}
+	if stmts := kit.GenerateChangeSQL(snap, c); stmts != nil {
+		t.Errorf("expected nil for empty RenameTarget, got %v", stmts)
+	}
+}
+
+func TestGenerateChangeSQL_AddColumn_NilGuard(t *testing.T) {
+	snap := kit.FromDefs(usersDef)
+	c := kit.Change{Kind: kit.ChangeAddColumn, ObjectName: "users", NewCol: nil}
+	if stmts := kit.GenerateChangeSQL(snap, c); stmts != nil {
+		t.Errorf("expected nil for nil NewCol, got %v", stmts)
+	}
+}
+
+func TestGenerateChangeSQL_DropColumn_NilGuard(t *testing.T) {
+	snap := kit.FromDefs(usersDef)
+	c := kit.Change{Kind: kit.ChangeDropColumn, ObjectName: "users", OldCol: nil}
+	if stmts := kit.GenerateChangeSQL(snap, c); stmts != nil {
+		t.Errorf("expected nil for nil OldCol, got %v", stmts)
+	}
+}
+
+func TestGenerateChangeSQL_AlterColumnType_NilGuard(t *testing.T) {
+	snap := kit.FromDefs(usersDef)
+	c := kit.Change{Kind: kit.ChangeAlterColumnType, ObjectName: "users", NewCol: nil}
+	if stmts := kit.GenerateChangeSQL(snap, c); stmts != nil {
+		t.Errorf("expected nil for nil NewCol, got %v", stmts)
+	}
+}
+
+func TestGenerateChangeSQL_AlterColumnNull_NilGuard(t *testing.T) {
+	snap := kit.FromDefs(usersDef)
+	c := kit.Change{Kind: kit.ChangeAlterColumnNull, ObjectName: "users", NewCol: nil}
+	if stmts := kit.GenerateChangeSQL(snap, c); stmts != nil {
+		t.Errorf("expected nil for nil NewCol, got %v", stmts)
+	}
+}
+
+func TestGenerateChangeSQL_AlterColumnDefault_NilGuard(t *testing.T) {
+	snap := kit.FromDefs(usersDef)
+	c := kit.Change{Kind: kit.ChangeAlterColumnDefault, ObjectName: "users", NewCol: nil}
+	if stmts := kit.GenerateChangeSQL(snap, c); stmts != nil {
+		t.Errorf("expected nil for nil NewCol, got %v", stmts)
+	}
+}
+
+func TestGenerateChangeSQL_RenameColumn_NilGuard(t *testing.T) {
+	snap := kit.FromDefs(usersDef)
+	c := kit.Change{Kind: kit.ChangeRenameColumn, ObjectName: "users"}
+	if stmts := kit.GenerateChangeSQL(snap, c); stmts != nil {
+		t.Errorf("expected nil for nil cols, got %v", stmts)
+	}
+}
+
+func TestGenerateChangeSQL_AddConstraint_NilGuard(t *testing.T) {
+	snap := kit.FromDefs(usersDef)
+	c := kit.Change{Kind: kit.ChangeAddConstraint, ObjectName: "users", Constraint: nil}
+	if stmts := kit.GenerateChangeSQL(snap, c); stmts != nil {
+		t.Errorf("expected nil for nil Constraint, got %v", stmts)
+	}
+}
+
+func TestGenerateChangeSQL_DropConstraint_NilGuard(t *testing.T) {
+	snap := kit.FromDefs(usersDef)
+	c := kit.Change{Kind: kit.ChangeDropConstraint, ObjectName: "users", Constraint: nil}
+	if stmts := kit.GenerateChangeSQL(snap, c); stmts != nil {
+		t.Errorf("expected nil for nil Constraint, got %v", stmts)
+	}
+}
+
+// MySQL nil-guard tests for pre-existing change kinds
+
+func TestGenerateChangeSQLMySQL_CreateTable_NilGuard(t *testing.T) {
+	snap := kit.EmptySnapshot()
+	c := kit.Change{Kind: kit.ChangeCreateTable, ObjectName: "nonexistent"}
+	if stmts := kit.GenerateChangeSQLMySQL(snap, c); stmts != nil {
+		t.Errorf("expected nil when table not in snapshot, got %v", stmts)
+	}
+}
+
+func TestGenerateChangeSQLMySQL_RenameTable_NilGuard(t *testing.T) {
+	snap := kit.EmptySnapshot()
+	c := kit.Change{Kind: kit.ChangeRenameTable, ObjectName: "accounts", RenameTarget: ""}
+	if stmts := kit.GenerateChangeSQLMySQL(snap, c); stmts != nil {
+		t.Errorf("expected nil for empty RenameTarget, got %v", stmts)
+	}
+}
+
+func TestGenerateChangeSQLMySQL_AddColumn_NilGuard(t *testing.T) {
+	snap := kit.FromDefs(usersDef)
+	c := kit.Change{Kind: kit.ChangeAddColumn, ObjectName: "users", NewCol: nil}
+	if stmts := kit.GenerateChangeSQLMySQL(snap, c); stmts != nil {
+		t.Errorf("expected nil for nil NewCol, got %v", stmts)
+	}
+}
+
+func TestGenerateChangeSQLMySQL_DropColumn_NilGuard(t *testing.T) {
+	snap := kit.FromDefs(usersDef)
+	c := kit.Change{Kind: kit.ChangeDropColumn, ObjectName: "users", OldCol: nil}
+	if stmts := kit.GenerateChangeSQLMySQL(snap, c); stmts != nil {
+		t.Errorf("expected nil for nil OldCol, got %v", stmts)
+	}
+}
+
+func TestGenerateChangeSQLMySQL_AlterColumnType_NilGuard(t *testing.T) {
+	snap := kit.FromDefs(usersDef)
+	c := kit.Change{Kind: kit.ChangeAlterColumnType, ObjectName: "users", NewCol: nil}
+	if stmts := kit.GenerateChangeSQLMySQL(snap, c); stmts != nil {
+		t.Errorf("expected nil for nil NewCol, got %v", stmts)
+	}
+}
+
+func TestGenerateChangeSQLMySQL_AlterColumnNull_NilGuard(t *testing.T) {
+	snap := kit.FromDefs(usersDef)
+	c := kit.Change{Kind: kit.ChangeAlterColumnNull, ObjectName: "users", NewCol: nil}
+	if stmts := kit.GenerateChangeSQLMySQL(snap, c); stmts != nil {
+		t.Errorf("expected nil for nil NewCol, got %v", stmts)
+	}
+}
+
+func TestGenerateChangeSQLMySQL_AlterColumnDefault_NilGuard(t *testing.T) {
+	snap := kit.FromDefs(usersDef)
+	c := kit.Change{Kind: kit.ChangeAlterColumnDefault, ObjectName: "users", NewCol: nil}
+	if stmts := kit.GenerateChangeSQLMySQL(snap, c); stmts != nil {
+		t.Errorf("expected nil for nil NewCol, got %v", stmts)
+	}
+}
+
+func TestGenerateChangeSQLMySQL_RenameColumn_NilGuard(t *testing.T) {
+	snap := kit.FromDefs(usersDef)
+	c := kit.Change{Kind: kit.ChangeRenameColumn, ObjectName: "users"}
+	if stmts := kit.GenerateChangeSQLMySQL(snap, c); stmts != nil {
+		t.Errorf("expected nil for nil cols, got %v", stmts)
+	}
+}
+
+func TestGenerateChangeSQLMySQL_AddConstraint_NilGuard(t *testing.T) {
+	snap := kit.FromDefs(usersDef)
+	c := kit.Change{Kind: kit.ChangeAddConstraint, ObjectName: "users", Constraint: nil}
+	if stmts := kit.GenerateChangeSQLMySQL(snap, c); stmts != nil {
+		t.Errorf("expected nil for nil Constraint, got %v", stmts)
+	}
+}
+
+func TestGenerateChangeSQLMySQL_DropConstraint_NilGuard(t *testing.T) {
+	snap := kit.FromDefs(usersDef)
+	c := kit.Change{Kind: kit.ChangeDropConstraint, ObjectName: "users", Constraint: nil}
+	if stmts := kit.GenerateChangeSQLMySQL(snap, c); stmts != nil {
+		t.Errorf("expected nil for nil Constraint, got %v", stmts)
+	}
+}
+
+// SQLite nil-guard tests for pre-existing change kinds
+
+func TestGenerateChangeSQLSQLite_CreateTable_NilGuard(t *testing.T) {
+	snap := kit.EmptySnapshot()
+	c := kit.Change{Kind: kit.ChangeCreateTable, ObjectName: "nonexistent"}
+	if stmts := kit.GenerateChangeSQLSQLite(snap, c); stmts != nil {
+		t.Errorf("expected nil when table not in snapshot, got %v", stmts)
+	}
+}
+
+func TestGenerateChangeSQLSQLite_RenameTable_NilGuard(t *testing.T) {
+	snap := kit.EmptySnapshot()
+	c := kit.Change{Kind: kit.ChangeRenameTable, ObjectName: "accounts", RenameTarget: ""}
+	if stmts := kit.GenerateChangeSQLSQLite(snap, c); stmts != nil {
+		t.Errorf("expected nil for empty RenameTarget, got %v", stmts)
+	}
+}
+
+func TestGenerateChangeSQLSQLite_AddColumn_NilGuard(t *testing.T) {
+	snap := kit.FromDefs(usersDef)
+	c := kit.Change{Kind: kit.ChangeAddColumn, ObjectName: "users", NewCol: nil}
+	if stmts := kit.GenerateChangeSQLSQLite(snap, c); stmts != nil {
+		t.Errorf("expected nil for nil NewCol, got %v", stmts)
+	}
+}
+
+func TestGenerateChangeSQLSQLite_DropColumn_NilGuard(t *testing.T) {
+	snap := kit.FromDefs(usersDef)
+	c := kit.Change{Kind: kit.ChangeDropColumn, ObjectName: "users", OldCol: nil}
+	if stmts := kit.GenerateChangeSQLSQLite(snap, c); stmts != nil {
+		t.Errorf("expected nil for nil OldCol, got %v", stmts)
+	}
+}
+
+func TestGenerateChangeSQLSQLite_RenameColumn_NilGuard(t *testing.T) {
+	snap := kit.FromDefs(usersDef)
+	c := kit.Change{Kind: kit.ChangeRenameColumn, ObjectName: "users"}
+	if stmts := kit.GenerateChangeSQLSQLite(snap, c); stmts != nil {
+		t.Errorf("expected nil for nil cols, got %v", stmts)
+	}
+}
+
+func TestGenerateChangeSQLSQLite_AddConstraint_NilGuard(t *testing.T) {
+	snap := kit.FromDefs(usersDef)
+	c := kit.Change{Kind: kit.ChangeAddConstraint, ObjectName: "users", Constraint: nil}
+	if stmts := kit.GenerateChangeSQLSQLite(snap, c); stmts != nil {
+		t.Errorf("expected nil for nil Constraint, got %v", stmts)
+	}
+}
+
+func TestGenerateChangeSQLSQLite_DropConstraint_NilGuard(t *testing.T) {
+	snap := kit.FromDefs(usersDef)
+	c := kit.Change{Kind: kit.ChangeDropConstraint, ObjectName: "users", Constraint: nil}
+	if stmts := kit.GenerateChangeSQLSQLite(snap, c); stmts != nil {
+		t.Errorf("expected nil for nil Constraint, got %v", stmts)
+	}
+}
+
 // TestRenameColumn_SQLGen_Postgres verifies that GenerateChangeSQL emits the
 // correct PostgreSQL RENAME COLUMN DDL for a ChangeRenameColumn change.
 func TestRenameColumn_SQLGen_Postgres(t *testing.T) {

@@ -204,8 +204,11 @@ func GenerateChangeSQL(snap Snapshot, c Change) []string {
 		}
 		added := enumAddedValues(c.OldEnum, c.NewEnum)
 		removedVals, reordered := enumDrift(c.OldEnum, c.NewEnum)
+		if len(added) == 0 && len(removedVals) == 0 && !reordered {
+			return nil
+		}
 		typeName := quoteTable(c.NewEnum.QualifiedName())
-		stmts := make([]string, 0, len(added)+len(removedVals)+1)
+		stmts := make([]string, 0, len(added)+len(removedVals)+2)
 		for _, v := range removedVals {
 			stmts = append(stmts, fmt.Sprintf(
 				"-- WARNING: enum value %q was removed from type %s; PostgreSQL cannot remove enum values — manual intervention required",
@@ -218,9 +221,12 @@ func GenerateChangeSQL(snap Snapshot, c Change) []string {
 				typeName,
 			))
 		}
-		// Note: ALTER TYPE ... ADD VALUE cannot run inside a transaction in PostgreSQL < 12.
-		// If your migration runner wraps all changes in a single transaction, this statement
-		// will fail on PG 9.x–11.x. Run it outside a transaction or upgrade to PG 12+.
+		if len(added) > 0 {
+			stmts = append(stmts, fmt.Sprintf(
+				"-- WARNING: ALTER TYPE %s ADD VALUE is not transactional in PostgreSQL < 12; run outside a transaction on PG 9.x–11.x or upgrade to PG 12+",
+				typeName,
+			))
+		}
 		for _, a := range added {
 			val := strings.ReplaceAll(a.Value, "'", "''")
 			if a.After != "" {

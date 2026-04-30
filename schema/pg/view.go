@@ -1,5 +1,7 @@
 package pg
 
+import "strings"
+
 // qualifyName returns "schema.name" for non-public schemas, otherwise just "name".
 func qualifyName(schema, name string) string {
 	if schema != "" && schema != "public" {
@@ -13,7 +15,10 @@ func qualifyName(schema, name string) string {
 type ViewDef struct {
 	Name   string
 	Schema string // PostgreSQL schema namespace; empty = "public"
-	SQL    string // The SELECT statement body of the view
+	// SQL is the SELECT statement body of the view.
+	// Must be a trusted, developer-authored SQL string — never interpolate
+	// runtime user input, as this is embedded verbatim in generated DDL.
+	SQL string
 }
 
 // QualifiedName returns the schema-qualified view name for use in SQL.
@@ -22,7 +27,9 @@ func (v *ViewDef) QualifiedName() string {
 }
 
 // CreateView declares a PostgreSQL view with the given name and SQL body.
-// The sql argument is the SELECT statement that defines the view.
+// Panics if name or sql is empty.
+// The sql argument must be a trusted, developer-authored SELECT statement —
+// never interpolate runtime user input into it, as it is embedded verbatim in DDL.
 //
 //	var ActiveUsers = pg.CreateView("active_users",
 //	    `SELECT id, username, email FROM users WHERE enabled = true`)
@@ -37,10 +44,17 @@ func CreateView(name, sql string) *ViewDef {
 }
 
 // SchemaView declares a view inside a named PostgreSQL schema namespace.
+// Panics if schema contains a ".", name is empty, or sql is empty.
 //
 //	var RecentOrders = pg.SchemaView("reporting", "recent_orders",
 //	    `SELECT * FROM orders WHERE created_at > now() - interval '7 days'`)
 func SchemaView(schema, name, sql string) *ViewDef {
+	if strings.Contains(schema, ".") {
+		panic(`pg.SchemaView: schema must not contain "."; pass the bare schema name, e.g. SchemaView("myschema", "view_name", sql)`)
+	}
+	if schema == "" {
+		panic("pg.SchemaView: schema must not be empty; use CreateView for public-schema views")
+	}
 	if name == "" {
 		panic("pg.SchemaView: name must not be empty")
 	}

@@ -1,6 +1,9 @@
 package pg
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // EnumDef is the definition of a PostgreSQL named enum type (CREATE TYPE ... AS ENUM).
 // Create one with CreateEnum() or SchemaCreateEnum().
@@ -16,7 +19,8 @@ func (e *EnumDef) QualifiedName() string {
 }
 
 // CreateEnum declares a PostgreSQL named enum type with the given name and values.
-// Values are stored in declaration order. CreateEnum panics if any value is empty.
+// Values are stored in declaration order.
+// Panics if name is empty, if no values are provided, or if any individual value is empty.
 //
 //	var StatusEnum = pg.CreateEnum("status", "pending", "active", "archived")
 func CreateEnum(name string, values ...string) *EnumDef {
@@ -35,10 +39,17 @@ func CreateEnum(name string, values ...string) *EnumDef {
 }
 
 // SchemaCreateEnum declares a named enum type inside a named PostgreSQL schema namespace.
-// SchemaCreateEnum panics if any value is empty.
+// Panics if schema contains a ".", if name is empty, if no values are provided,
+// or if any individual value is empty.
 //
 //	var RoleEnum = pg.SchemaCreateEnum("auth", "role", "admin", "user", "guest")
 func SchemaCreateEnum(schema, name string, values ...string) *EnumDef {
+	if strings.Contains(schema, ".") {
+		panic(`pg.SchemaCreateEnum: schema must not contain "."; pass the bare schema name, e.g. SchemaCreateEnum("myschema", "type_name", vals...)`)
+	}
+	if schema == "" {
+		panic("pg.SchemaCreateEnum: schema must not be empty; use CreateEnum for public-schema types")
+	}
 	if name == "" {
 		panic("pg.SchemaCreateEnum: name must not be empty")
 	}

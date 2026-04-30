@@ -19,6 +19,10 @@ type PushResult struct {
 // definitions, and applies all necessary DDL changes in a single transaction.
 // It accepts tables from any dialect via the TableDefiner interface.
 //
+// Note: Push only manages tables. Views and named enum types are not included
+// in the diff and will not be created, altered, or dropped. Use PushSchema
+// (tracked in #136) to manage views and enums via Push.
+//
 // Example:
 //
 //	result, err := kit.Push(ctx, pool, schema.Users, schema.Realms)
@@ -58,6 +62,9 @@ func Push(ctx context.Context, pool *pgxpool.Pool, tables ...pg.TableDefiner) (P
 // DryRun is like Push but does not apply changes — it only computes and
 // returns what would be run.
 // It accepts tables from any dialect via the TableDefiner interface.
+//
+// Note: like Push, DryRun only diffs tables. Views and named enum types are
+// not included. See PushSchema (#136) for full schema object support.
 func DryRun(ctx context.Context, pool *pgxpool.Pool, tables ...pg.TableDefiner) (PushResult, error) {
 	live, err := introspect.IntrospectPostgres(ctx, pool)
 	if err != nil {

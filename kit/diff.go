@@ -25,20 +25,26 @@ const (
 	ChangeDropConstraint     ChangeKind = "drop_constraint"
 
 	// View change kinds.
-	ChangeCreateView  ChangeKind = "create_view"  // brand-new view
-	ChangeReplaceView ChangeKind = "replace_view" // existing view whose SQL changed; emits DROP VIEW IF EXISTS + CREATE VIEW rather than CREATE OR REPLACE to handle incompatible column changes
+	ChangeCreateView ChangeKind = "create_view" // brand-new view
+	// ChangeReplaceView emits DROP VIEW IF EXISTS + CREATE VIEW rather than
+	// CREATE OR REPLACE VIEW so that incompatible column changes (renames, type
+	// changes, reordering) are handled correctly. Without CASCADE, the DROP
+	// fails with a clear error if other views depend on this one.
+	ChangeReplaceView ChangeKind = "replace_view"
 	ChangeDropView    ChangeKind = "drop_view"
 
 	// Enum change kinds (PostgreSQL only).
 	ChangeCreateEnum ChangeKind = "create_enum"
-	ChangeAlterEnum  ChangeKind = "alter_enum" // adds, removes, or reorders values in an existing enum; removals and reorders emit WARNING SQL comments
+	ChangeAlterEnum  ChangeKind = "alter_enum" // adds, removes, or reorders values; removals/reorders emit WARNING SQL comments
 	ChangeDropEnum   ChangeKind = "drop_enum"
 )
 
 // Change represents a single schema mutation — the unit that SQL generation works from.
 type Change struct {
-	Kind       ChangeKind
-	ObjectName string // qualified name of the affected object (table, view, or enum); for ChangeRenameTable this is the old (source) name — see RenameTarget for the new name
+	Kind ChangeKind
+	// ObjectName is the qualified name of the affected object (table, view, or enum).
+	// For ChangeRenameTable this is the old (source) name — see RenameTarget for the new name.
+	ObjectName string
 
 	// RenameTarget holds the new (destination) name for ChangeRenameTable.
 	// ObjectName holds the old (source) name. Empty for all other change kinds.
@@ -385,6 +391,10 @@ func enumDrift(oldE, newE *EnumSnap) (removed []string, reordered bool) {
 			inOldOrder = append(inOldOrder, v)
 		}
 	}
+	// Both slices contain only the intersection of old and new values, so their
+	// lengths are always equal for valid (duplicate-free) input. This guard is a
+	// defensive check against malformed enum definitions — it cannot fire from a
+	// simple value removal, which only affects the removed[] result above.
 	if len(inOldOrder) != len(inNewOrder) {
 		reordered = true
 		return
@@ -400,6 +410,9 @@ func enumDrift(oldE, newE *EnumSnap) (removed []string, reordered bool) {
 
 // normalizeViewSQL strips leading/trailing whitespace and trailing semicolons
 // to avoid spurious diffs from PostgreSQL's view-definition reformatting.
+// This handles the most common cases; PostgreSQL may also fully-qualify column
+// references, rewrite aliases, and expand wildcards in ways that produce
+// spurious diffs after introspection (see #39).
 func normalizeViewSQL(sql string) string {
 	return strings.TrimRight(strings.TrimSpace(sql), ";")
 }

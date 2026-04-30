@@ -2,6 +2,7 @@ package kit_test
 
 import (
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 
@@ -781,14 +782,18 @@ func TestGenerateChangeSQL_AlterEnum_ConsecutiveInsertion(t *testing.T) {
 		t.Fatalf("expected 1 change, got %d", len(changes))
 	}
 	stmts := kit.GenerateChangeSQL(new, changes[0])
-	if len(stmts) != 2 {
-		t.Fatalf("expected 2 ALTER TYPE statements, got %d: %v", len(stmts), stmts)
+	// stmts[0] is the PG<12 transaction warning; stmts[1] and stmts[2] are the ALTER TYPE statements.
+	if len(stmts) != 3 {
+		t.Fatalf("expected 3 statements (1 warning + 2 ALTER TYPE), got %d: %v", len(stmts), stmts)
 	}
-	if !strings.Contains(stmts[0], "'b'") || !strings.Contains(stmts[0], "AFTER 'a'") {
-		t.Errorf("expected first stmt to add 'b' AFTER 'a', got: %s", stmts[0])
+	if !strings.Contains(stmts[0], "WARNING") || !strings.Contains(stmts[0], "transactional") {
+		t.Errorf("expected PG<12 warning comment as first statement, got: %s", stmts[0])
 	}
-	if !strings.Contains(stmts[1], "'c'") || !strings.Contains(stmts[1], "AFTER 'b'") {
-		t.Errorf("expected second stmt to add 'c' AFTER 'b', got: %s", stmts[1])
+	if !strings.Contains(stmts[1], "'b'") || !strings.Contains(stmts[1], "AFTER 'a'") {
+		t.Errorf("expected second stmt to add 'b' AFTER 'a', got: %s", stmts[1])
+	}
+	if !strings.Contains(stmts[2], "'c'") || !strings.Contains(stmts[2], "AFTER 'b'") {
+		t.Errorf("expected third stmt to add 'c' AFTER 'b', got: %s", stmts[2])
 	}
 }
 
@@ -825,8 +830,9 @@ func TestGenerateChangeSQL_DropView(t *testing.T) {
 		Views: []*pg.ViewDef{activeUsersView},
 	})
 	c := kit.Change{
-		Kind: kit.ChangeDropView,
-		View: &kit.ViewSnap{Name: "active_users"},
+		Kind:       kit.ChangeDropView,
+		ObjectName: "active_users",
+		View:       &kit.ViewSnap{Name: "active_users"},
 	}
 	stmts := kit.GenerateChangeSQL(snap, c)
 	if len(stmts) != 1 {
@@ -891,10 +897,14 @@ func TestGenerateChangeSQL_AlterEnum_AddValue(t *testing.T) {
 		t.Fatalf("expected 1 change, got %d", len(changes))
 	}
 	stmts := kit.GenerateChangeSQL(new, changes[0])
-	if len(stmts) != 1 {
-		t.Fatalf("expected 1 SQL statement, got %d", len(stmts))
+	// stmts[0] is the PG<12 warning; stmts[1] is the ALTER TYPE statement.
+	if len(stmts) != 2 {
+		t.Fatalf("expected 2 statements (1 warning + 1 ALTER TYPE), got %d", len(stmts))
 	}
-	sql := stmts[0]
+	if !strings.Contains(stmts[0], "WARNING") {
+		t.Errorf("expected PG<12 warning as first statement, got: %s", stmts[0])
+	}
+	sql := stmts[1]
 	if !strings.HasPrefix(sql, "ALTER TYPE") {
 		t.Errorf("expected ALTER TYPE, got: %s", sql)
 	}
@@ -915,9 +925,9 @@ func TestGenerateChangeSQL_AlterEnum_MultipleValues(t *testing.T) {
 	})
 	changes := kit.Diff(old, new)
 	stmts := kit.GenerateChangeSQL(new, changes[0])
-	// One ALTER TYPE statement per added value
-	if len(stmts) != 2 {
-		t.Errorf("expected 2 ALTER TYPE statements, got %d: %v", len(stmts), stmts)
+	// stmts[0] is the PG<12 warning; stmts[1] and stmts[2] are ALTER TYPE per added value.
+	if len(stmts) != 3 {
+		t.Errorf("expected 3 statements (1 warning + 2 ALTER TYPE), got %d: %v", len(stmts), stmts)
 	}
 }
 
@@ -934,10 +944,11 @@ func TestGenerateChangeSQL_AlterEnum_MiddleInsertion(t *testing.T) {
 		t.Fatalf("expected 1 change, got %d", len(changes))
 	}
 	stmts := kit.GenerateChangeSQL(new, changes[0])
-	if len(stmts) != 1 {
-		t.Fatalf("expected 1 SQL statement, got %d: %v", len(stmts), stmts)
+	// stmts[0] is the PG<12 warning; stmts[1] is the ALTER TYPE statement.
+	if len(stmts) != 2 {
+		t.Fatalf("expected 2 statements (1 warning + 1 ALTER TYPE), got %d: %v", len(stmts), stmts)
 	}
-	sql := stmts[0]
+	sql := stmts[1]
 	if !strings.Contains(sql, "AFTER 'a'") {
 		t.Errorf("expected AFTER 'a' for middle insertion, got: %s", sql)
 	}
@@ -959,10 +970,11 @@ func TestGenerateChangeSQL_AlterEnum_PrependInsertion(t *testing.T) {
 		t.Fatalf("expected 1 change, got %d", len(changes))
 	}
 	stmts := kit.GenerateChangeSQL(new, changes[0])
-	if len(stmts) != 1 {
-		t.Fatalf("expected 1 SQL statement, got %d: %v", len(stmts), stmts)
+	// stmts[0] is the PG<12 warning; stmts[1] is the ALTER TYPE statement.
+	if len(stmts) != 2 {
+		t.Fatalf("expected 2 statements (1 warning + 1 ALTER TYPE), got %d: %v", len(stmts), stmts)
 	}
-	sql := stmts[0]
+	sql := stmts[1]
 	if !strings.Contains(sql, "BEFORE 'c'") {
 		t.Errorf("expected BEFORE 'c' for prepend insertion, got: %s", sql)
 	}
@@ -1168,6 +1180,384 @@ func TestCreateEnum_PanicsOnEmptyName(t *testing.T) {
 		}
 	}()
 	pg.CreateEnum("", "a", "b")
+}
+
+func TestSchemaView_PanicsOnDotInSchema(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("expected panic for schema containing dot")
+		}
+	}()
+	pg.SchemaView("a.b", "my_view", "SELECT 1")
+}
+
+func TestSchemaCreateEnum_PanicsOnDotInSchema(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("expected panic for schema containing dot")
+		}
+	}()
+	pg.SchemaCreateEnum("a.b", "status", "active", "inactive")
+}
+
+// -------------------------------------------------------------------
+// Test group A — nil-guard tests for view/enum change kinds (all 3 dialects)
+// -------------------------------------------------------------------
+
+func TestGenerateChangeSQL_CreateView_NilGuard(t *testing.T) {
+	snap := kit.EmptySnapshot()
+	c := kit.Change{Kind: kit.ChangeCreateView, ObjectName: "active_users", View: nil}
+	if stmts := kit.GenerateChangeSQL(snap, c); stmts != nil {
+		t.Errorf("expected nil for nil View, got %v", stmts)
+	}
+}
+
+func TestGenerateChangeSQL_ReplaceView_NilGuard(t *testing.T) {
+	snap := kit.EmptySnapshot()
+	c := kit.Change{Kind: kit.ChangeReplaceView, ObjectName: "active_users", View: nil}
+	if stmts := kit.GenerateChangeSQL(snap, c); stmts != nil {
+		t.Errorf("expected nil for nil View, got %v", stmts)
+	}
+}
+
+func TestGenerateChangeSQL_DropView_NilGuard(t *testing.T) {
+	snap := kit.EmptySnapshot()
+	c := kit.Change{Kind: kit.ChangeDropView, ObjectName: "active_users", View: nil}
+	if stmts := kit.GenerateChangeSQL(snap, c); stmts != nil {
+		t.Errorf("expected nil for nil View, got %v", stmts)
+	}
+}
+
+func TestGenerateChangeSQL_CreateEnum_NilGuard(t *testing.T) {
+	snap := kit.EmptySnapshot()
+	c := kit.Change{Kind: kit.ChangeCreateEnum, ObjectName: "status", NewEnum: nil}
+	if stmts := kit.GenerateChangeSQL(snap, c); stmts != nil {
+		t.Errorf("expected nil for nil NewEnum, got %v", stmts)
+	}
+}
+
+func TestGenerateChangeSQL_AlterEnum_NilOldEnum_NilGuard(t *testing.T) {
+	snap := kit.EmptySnapshot()
+	newEnum := &kit.EnumSnap{Name: "status", Values: []string{"a", "b"}}
+	c := kit.Change{Kind: kit.ChangeAlterEnum, ObjectName: "status", OldEnum: nil, NewEnum: newEnum}
+	if stmts := kit.GenerateChangeSQL(snap, c); stmts != nil {
+		t.Errorf("expected nil for nil OldEnum, got %v", stmts)
+	}
+}
+
+func TestGenerateChangeSQL_AlterEnum_NilNewEnum_NilGuard(t *testing.T) {
+	snap := kit.EmptySnapshot()
+	oldEnum := &kit.EnumSnap{Name: "status", Values: []string{"a", "b"}}
+	c := kit.Change{Kind: kit.ChangeAlterEnum, ObjectName: "status", OldEnum: oldEnum, NewEnum: nil}
+	if stmts := kit.GenerateChangeSQL(snap, c); stmts != nil {
+		t.Errorf("expected nil for nil NewEnum, got %v", stmts)
+	}
+}
+
+func TestGenerateChangeSQL_AlterEnum_NoOp_NilGuard(t *testing.T) {
+	// No-op path: added==0, removedVals==0, reordered==false → return nil
+	snap := kit.EmptySnapshot()
+	enum := &kit.EnumSnap{Name: "status", Values: []string{"a", "b"}}
+	c := kit.Change{Kind: kit.ChangeAlterEnum, ObjectName: "status", OldEnum: enum, NewEnum: enum}
+	if stmts := kit.GenerateChangeSQL(snap, c); stmts != nil {
+		t.Errorf("expected nil for no-op alter enum (identical old/new), got %v", stmts)
+	}
+}
+
+func TestGenerateChangeSQL_DropEnum_NilGuard(t *testing.T) {
+	snap := kit.EmptySnapshot()
+	c := kit.Change{Kind: kit.ChangeDropEnum, ObjectName: "status", OldEnum: nil}
+	if stmts := kit.GenerateChangeSQL(snap, c); stmts != nil {
+		t.Errorf("expected nil for nil OldEnum, got %v", stmts)
+	}
+}
+
+func TestGenerateChangeSQLMySQL_CreateView_NilGuard(t *testing.T) {
+	snap := kit.EmptySnapshot()
+	c := kit.Change{Kind: kit.ChangeCreateView, ObjectName: "v", View: nil}
+	if stmts := kit.GenerateChangeSQLMySQL(snap, c); stmts != nil {
+		t.Errorf("expected nil for nil View, got %v", stmts)
+	}
+}
+
+func TestGenerateChangeSQLMySQL_ReplaceView_NilGuard(t *testing.T) {
+	snap := kit.EmptySnapshot()
+	c := kit.Change{Kind: kit.ChangeReplaceView, ObjectName: "v", View: nil}
+	if stmts := kit.GenerateChangeSQLMySQL(snap, c); stmts != nil {
+		t.Errorf("expected nil for nil View, got %v", stmts)
+	}
+}
+
+func TestGenerateChangeSQLMySQL_DropView_NilGuard(t *testing.T) {
+	snap := kit.EmptySnapshot()
+	c := kit.Change{Kind: kit.ChangeDropView, ObjectName: "v", View: nil}
+	if stmts := kit.GenerateChangeSQLMySQL(snap, c); stmts != nil {
+		t.Errorf("expected nil for nil View, got %v", stmts)
+	}
+}
+
+func TestGenerateChangeSQLSQLite_CreateView_NilGuard(t *testing.T) {
+	snap := kit.EmptySnapshot()
+	c := kit.Change{Kind: kit.ChangeCreateView, ObjectName: "v", View: nil}
+	if stmts := kit.GenerateChangeSQLSQLite(snap, c); stmts != nil {
+		t.Errorf("expected nil for nil View, got %v", stmts)
+	}
+}
+
+func TestGenerateChangeSQLSQLite_ReplaceView_NilGuard(t *testing.T) {
+	snap := kit.EmptySnapshot()
+	c := kit.Change{Kind: kit.ChangeReplaceView, ObjectName: "v", View: nil}
+	if stmts := kit.GenerateChangeSQLSQLite(snap, c); stmts != nil {
+		t.Errorf("expected nil for nil View, got %v", stmts)
+	}
+}
+
+func TestGenerateChangeSQLSQLite_DropView_NilGuard(t *testing.T) {
+	snap := kit.EmptySnapshot()
+	c := kit.Change{Kind: kit.ChangeDropView, ObjectName: "v", View: nil}
+	if stmts := kit.GenerateChangeSQLSQLite(snap, c); stmts != nil {
+		t.Errorf("expected nil for nil View, got %v", stmts)
+	}
+}
+
+// -------------------------------------------------------------------
+// Test group B — MySQL/SQLite dialect tests for DropView, AlterEnum, DropEnum
+// -------------------------------------------------------------------
+
+func TestGenerateChangeSQLMySQL_DropView_EmitsDropIfExists(t *testing.T) {
+	snap := kit.EmptySnapshot()
+	view := &kit.ViewSnap{Name: "active_users"}
+	c := kit.Change{Kind: kit.ChangeDropView, ObjectName: "active_users", View: view}
+	stmts := kit.GenerateChangeSQLMySQL(snap, c)
+	if len(stmts) != 1 {
+		t.Fatalf("expected 1 statement, got %d: %v", len(stmts), stmts)
+	}
+	if !strings.HasPrefix(stmts[0], "DROP VIEW IF EXISTS") {
+		t.Errorf("expected DROP VIEW IF EXISTS, got: %s", stmts[0])
+	}
+}
+
+func TestGenerateChangeSQLMySQL_AlterEnum_IsComment(t *testing.T) {
+	snap := kit.EmptySnapshot()
+	oldEnum := &kit.EnumSnap{Name: "status", Values: []string{"pending", "active"}}
+	newEnum := &kit.EnumSnap{Name: "status", Values: []string{"pending", "active", "archived"}}
+	c := kit.Change{Kind: kit.ChangeAlterEnum, ObjectName: "status", OldEnum: oldEnum, NewEnum: newEnum}
+	stmts := kit.GenerateChangeSQLMySQL(snap, c)
+	if len(stmts) != 1 {
+		t.Fatalf("expected 1 statement (comment), got %d: %v", len(stmts), stmts)
+	}
+	if !strings.HasPrefix(stmts[0], "--") {
+		t.Errorf("expected SQL comment for MySQL AlterEnum, got: %s", stmts[0])
+	}
+}
+
+func TestGenerateChangeSQLMySQL_DropEnum_IsComment(t *testing.T) {
+	snap := kit.EmptySnapshot()
+	oldEnum := &kit.EnumSnap{Name: "status", Values: []string{"pending", "active"}}
+	c := kit.Change{Kind: kit.ChangeDropEnum, ObjectName: "status", OldEnum: oldEnum}
+	stmts := kit.GenerateChangeSQLMySQL(snap, c)
+	if len(stmts) != 1 {
+		t.Fatalf("expected 1 statement (comment), got %d: %v", len(stmts), stmts)
+	}
+	if !strings.HasPrefix(stmts[0], "--") {
+		t.Errorf("expected SQL comment for MySQL DropEnum, got: %s", stmts[0])
+	}
+}
+
+func TestGenerateChangeSQLSQLite_DropView_EmitsDropIfExists(t *testing.T) {
+	snap := kit.EmptySnapshot()
+	view := &kit.ViewSnap{Name: "active_users"}
+	c := kit.Change{Kind: kit.ChangeDropView, ObjectName: "active_users", View: view}
+	stmts := kit.GenerateChangeSQLSQLite(snap, c)
+	if len(stmts) != 1 {
+		t.Fatalf("expected 1 statement, got %d: %v", len(stmts), stmts)
+	}
+	if !strings.HasPrefix(stmts[0], "DROP VIEW IF EXISTS") {
+		t.Errorf("expected DROP VIEW IF EXISTS, got: %s", stmts[0])
+	}
+}
+
+func TestGenerateChangeSQLSQLite_AlterEnum_IsComment(t *testing.T) {
+	snap := kit.EmptySnapshot()
+	oldEnum := &kit.EnumSnap{Name: "status", Values: []string{"pending", "active"}}
+	newEnum := &kit.EnumSnap{Name: "status", Values: []string{"pending", "active", "archived"}}
+	c := kit.Change{Kind: kit.ChangeAlterEnum, ObjectName: "status", OldEnum: oldEnum, NewEnum: newEnum}
+	stmts := kit.GenerateChangeSQLSQLite(snap, c)
+	if len(stmts) != 1 {
+		t.Fatalf("expected 1 statement (comment), got %d: %v", len(stmts), stmts)
+	}
+	if !strings.HasPrefix(stmts[0], "--") {
+		t.Errorf("expected SQL comment for SQLite AlterEnum, got: %s", stmts[0])
+	}
+}
+
+func TestGenerateChangeSQLSQLite_DropEnum_IsComment(t *testing.T) {
+	snap := kit.EmptySnapshot()
+	oldEnum := &kit.EnumSnap{Name: "status", Values: []string{"pending", "active"}}
+	c := kit.Change{Kind: kit.ChangeDropEnum, ObjectName: "status", OldEnum: oldEnum}
+	stmts := kit.GenerateChangeSQLSQLite(snap, c)
+	if len(stmts) != 1 {
+		t.Fatalf("expected 1 statement (comment), got %d: %v", len(stmts), stmts)
+	}
+	if !strings.HasPrefix(stmts[0], "--") {
+		t.Errorf("expected SQL comment for SQLite DropEnum, got: %s", stmts[0])
+	}
+}
+
+// -------------------------------------------------------------------
+// Test group C — backward-compatibility: load snapshot JSON without views/enums
+// -------------------------------------------------------------------
+
+func TestLoadJSON_BackwardCompat_NoViewsOrEnums(t *testing.T) {
+	// Write a JSON snapshot that only has "version", "created_at", and "tables" — no "views" or "enums"
+	dir := t.TempDir()
+	path := dir + "/schema.snapshot.json"
+	jsonContent := `{
+		"version": "1",
+		"created_at": "2024-01-01T00:00:00Z",
+		"tables": {
+			"users": {
+				"name": "users",
+				"columns": [{"name": "id", "sqltype": "uuid", "not_null": true, "primary_key": true, "has_default": true, "default_expr": "gen_random_uuid()"}]
+			}
+		}
+	}`
+	if err := os.WriteFile(path, []byte(jsonContent), 0644); err != nil {
+		t.Fatalf("write temp file: %v", err)
+	}
+	loaded, err := kit.LoadJSON(path)
+	if err != nil {
+		t.Fatalf("LoadJSON: %v", err)
+	}
+	if loaded.Views == nil {
+		t.Error("expected Views to be non-nil after loading snapshot without views key")
+	}
+	if loaded.Enums == nil {
+		t.Error("expected Enums to be non-nil after loading snapshot without enums key")
+	}
+	if len(loaded.Views) != 0 {
+		t.Errorf("expected empty Views map, got %d entries", len(loaded.Views))
+	}
+	if len(loaded.Enums) != 0 {
+		t.Errorf("expected empty Enums map, got %d entries", len(loaded.Enums))
+	}
+	// Must not panic when diffing against an empty snapshot
+	_ = kit.Diff(loaded, kit.EmptySnapshot())
+}
+
+// -------------------------------------------------------------------
+// Test group D — schema-qualified names through SQL generators
+// -------------------------------------------------------------------
+
+func TestGenerateChangeSQL_CreateView_SchemaQualified(t *testing.T) {
+	view := pg.SchemaView("reporting", "recent_orders",
+		`SELECT * FROM orders WHERE created_at > now() - interval '7 days'`)
+	snap := kit.FromSchema(kit.SchemaObjects{Views: []*pg.ViewDef{view}})
+	changes := kit.Diff(kit.EmptySnapshot(), snap)
+	if len(changes) != 1 {
+		t.Fatalf("expected 1 change, got %d", len(changes))
+	}
+	stmts := kit.GenerateChangeSQL(snap, changes[0])
+	if len(stmts) != 1 {
+		t.Fatalf("expected 1 statement, got %d", len(stmts))
+	}
+	if !strings.Contains(stmts[0], `"reporting"."recent_orders"`) {
+		t.Errorf("expected schema-qualified quoted name in SQL, got: %s", stmts[0])
+	}
+}
+
+func TestGenerateChangeSQL_CreateEnum_SchemaQualified(t *testing.T) {
+	enum := pg.SchemaCreateEnum("auth", "role", "admin", "user", "guest")
+	snap := kit.FromSchema(kit.SchemaObjects{Enums: []*pg.EnumDef{enum}})
+	changes := kit.Diff(kit.EmptySnapshot(), snap)
+	if len(changes) != 1 {
+		t.Fatalf("expected 1 change, got %d", len(changes))
+	}
+	stmts := kit.GenerateChangeSQL(snap, changes[0])
+	if len(stmts) != 1 {
+		t.Fatalf("expected 1 statement, got %d", len(stmts))
+	}
+	if !strings.Contains(stmts[0], `"auth"."role"`) {
+		t.Errorf("expected schema-qualified quoted name in SQL, got: %s", stmts[0])
+	}
+}
+
+func TestGenerateChangeSQL_DropView_SchemaQualified(t *testing.T) {
+	view := pg.SchemaView("reporting", "recent_orders", `SELECT 1`)
+	snap := kit.FromSchema(kit.SchemaObjects{Views: []*pg.ViewDef{view}})
+	changes := kit.Diff(snap, kit.EmptySnapshot())
+	if len(changes) != 1 {
+		t.Fatalf("expected 1 change, got %d", len(changes))
+	}
+	stmts := kit.GenerateChangeSQL(snap, changes[0])
+	if len(stmts) != 1 {
+		t.Fatalf("expected 1 statement, got %d", len(stmts))
+	}
+	if !strings.Contains(stmts[0], `"reporting"."recent_orders"`) {
+		t.Errorf("expected schema-qualified quoted name in DROP VIEW, got: %s", stmts[0])
+	}
+}
+
+func TestGenerateChangeSQL_DropEnum_SchemaQualified(t *testing.T) {
+	enum := pg.SchemaCreateEnum("auth", "role", "admin", "user")
+	snap := kit.FromSchema(kit.SchemaObjects{Enums: []*pg.EnumDef{enum}})
+	changes := kit.Diff(snap, kit.EmptySnapshot())
+	if len(changes) != 1 {
+		t.Fatalf("expected 1 change, got %d", len(changes))
+	}
+	stmts := kit.GenerateChangeSQL(snap, changes[0])
+	if len(stmts) != 1 {
+		t.Fatalf("expected 1 statement, got %d", len(stmts))
+	}
+	if !strings.Contains(stmts[0], `"auth"."role"`) {
+		t.Errorf("expected schema-qualified quoted name in DROP TYPE, got: %s", stmts[0])
+	}
+}
+
+func TestGenerateChangeSQL_AlterEnum_SchemaQualified(t *testing.T) {
+	oldEnum := pg.SchemaCreateEnum("auth", "role", "admin", "user")
+	newEnum := pg.SchemaCreateEnum("auth", "role", "admin", "user", "guest")
+	oldSnap := kit.FromSchema(kit.SchemaObjects{Enums: []*pg.EnumDef{oldEnum}})
+	newSnap := kit.FromSchema(kit.SchemaObjects{Enums: []*pg.EnumDef{newEnum}})
+	changes := kit.Diff(oldSnap, newSnap)
+	if len(changes) != 1 {
+		t.Fatalf("expected 1 change, got %d", len(changes))
+	}
+	stmts := kit.GenerateChangeSQL(newSnap, changes[0])
+	if len(stmts) == 0 {
+		t.Fatal("expected at least 1 statement")
+	}
+	found := false
+	for _, s := range stmts {
+		if strings.Contains(s, `"auth"."role"`) {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected schema-qualified name in ALTER TYPE statements, got: %v", stmts)
+	}
+}
+
+// -------------------------------------------------------------------
+// Test group F — SchemaView and SchemaCreateEnum empty-schema panic tests
+// -------------------------------------------------------------------
+
+func TestSchemaView_PanicsOnEmptySchema(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("expected panic for empty schema")
+		}
+	}()
+	pg.SchemaView("", "my_view", "SELECT 1")
+}
+
+func TestSchemaCreateEnum_PanicsOnEmptySchema(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("expected panic for empty schema")
+		}
+	}()
+	pg.SchemaCreateEnum("", "status", "active", "inactive")
 }
 
 // -------------------------------------------------------------------

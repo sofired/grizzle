@@ -117,9 +117,14 @@ func FromDefs(tables ...pg.TableDefiner) Snapshot {
 
 // SchemaObjects holds all the schema object types that can be passed to FromSchema.
 type SchemaObjects struct {
-	Tables []pg.TableDefiner // dialect-agnostic table definitions (pg, mysql, or sqlite)
-	Views  []*pg.ViewDef     // PostgreSQL view definitions; ignored by non-PostgreSQL generators
-	Enums  []*pg.EnumDef     // PostgreSQL named enum type definitions; ignored by non-PostgreSQL generators
+	// Tables holds dialect-agnostic table definitions (pg, mysql, or sqlite).
+	Tables []pg.TableDefiner
+	// Views holds PostgreSQL view definitions.
+	// Non-PostgreSQL SQL generators emit stub comments instead of real DDL for views.
+	Views []*pg.ViewDef
+	// Enums holds PostgreSQL named enum type definitions.
+	// Non-PostgreSQL SQL generators emit stub comments instead of real DDL for enum types.
+	Enums []*pg.EnumDef
 }
 
 // FromSchema builds a Snapshot from tables, views, and enum types together.
