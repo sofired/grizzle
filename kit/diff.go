@@ -25,8 +25,9 @@ const (
 	ChangeDropConstraint     ChangeKind = "drop_constraint"
 
 	// View change kinds.
-	ChangeCreateView ChangeKind = "create_view"
-	ChangeDropView   ChangeKind = "drop_view"
+	ChangeCreateView  ChangeKind = "create_view"   // brand-new view
+	ChangeReplaceView ChangeKind = "replace_view"  // existing view whose SQL changed
+	ChangeDropView    ChangeKind = "drop_view"
 
 	// Enum change kinds (PostgreSQL only).
 	ChangeCreateEnum ChangeKind = "create_enum"
@@ -236,10 +237,12 @@ func Diff(old, new Snapshot) []Change {
 		}
 	}
 
-	// Phase 6: views present in both — update via CREATE OR REPLACE VIEW if SQL differs.
-	// Only ChangeCreateView is emitted; CREATE OR REPLACE handles the update in PostgreSQL
-	// and MySQL without needing a preceding DROP. Emitting DROP first is dangerous because
-	// PostgreSQL will reject it if other views depend on this view.
+	// Phase 6: views present in both — replace if SQL differs.
+	// ChangeReplaceView generates DROP VIEW IF EXISTS + CREATE VIEW so the view always
+	// converges to the target definition, including incompatible column changes (renames,
+	// type changes, reordering, removals) that CREATE OR REPLACE VIEW cannot handle in
+	// PostgreSQL. Without CASCADE, a DROP on a view with dependents produces a clear
+	// PostgreSQL error explaining which objects depend on it.
 	for _, name := range sortedKeys(new.Views) {
 		oldV, exists := old.Views[name]
 		if !exists {
@@ -249,7 +252,7 @@ func Diff(old, new Snapshot) []Change {
 		if normalizeViewSQL(oldV.SQL) != normalizeViewSQL(newV.SQL) {
 			n := *newV
 			changes = append(changes,
-				Change{Kind: ChangeCreateView, ObjectName: name, View: &n},
+				Change{Kind: ChangeReplaceView, ObjectName: name, View: &n},
 			)
 		}
 	}

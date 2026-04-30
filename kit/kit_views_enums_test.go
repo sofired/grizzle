@@ -317,13 +317,80 @@ func TestDiff_AlterView(t *testing.T) {
 	})
 
 	changes := kit.Diff(old, new)
-	// Expect: only CREATE OR REPLACE VIEW (no preceding DROP — it is dangerous when
-	// other views depend on this view and redundant since OR REPLACE handles the update).
+	// Expect ChangeReplaceView (not ChangeCreateView): modified views need DROP + CREATE
+	// because CREATE OR REPLACE VIEW cannot handle incompatible column changes in PostgreSQL.
 	if len(changes) != 1 {
-		t.Fatalf("expected 1 change (CREATE OR REPLACE VIEW), got %d: %v", len(changes), changes)
+		t.Fatalf("expected 1 change (ChangeReplaceView), got %d: %v", len(changes), changes)
 	}
-	if changes[0].Kind != kit.ChangeCreateView {
-		t.Errorf("expected ChangeCreateView, got %s", changes[0].Kind)
+	if changes[0].Kind != kit.ChangeReplaceView {
+		t.Errorf("expected ChangeReplaceView, got %s", changes[0].Kind)
+	}
+}
+
+func TestGenerateChangeSQL_ReplaceView_DropsAndCreates(t *testing.T) {
+	// PostgreSQL: ChangeReplaceView must emit DROP VIEW IF EXISTS + CREATE VIEW
+	// so incompatible column changes (renames, type changes, reordering) converge correctly.
+	old := kit.FromSchema(kit.SchemaObjects{
+		Views: []*pg.ViewDef{pg.CreateView("v", "SELECT id FROM users")},
+	})
+	new := kit.FromSchema(kit.SchemaObjects{
+		Views: []*pg.ViewDef{pg.CreateView("v", "SELECT id, email FROM users")},
+	})
+	changes := kit.Diff(old, new)
+	if len(changes) != 1 || changes[0].Kind != kit.ChangeReplaceView {
+		t.Fatalf("expected 1 ChangeReplaceView, got %v", changes)
+	}
+	stmts := kit.GenerateChangeSQL(new, changes[0])
+	if len(stmts) != 2 {
+		t.Fatalf("expected 2 statements (DROP + CREATE), got %d: %v", len(stmts), stmts)
+	}
+	if !strings.HasPrefix(stmts[0], "DROP VIEW IF EXISTS") {
+		t.Errorf("first statement must be DROP VIEW IF EXISTS, got: %s", stmts[0])
+	}
+	if !strings.Contains(stmts[1], "CREATE VIEW") || strings.Contains(stmts[1], "OR REPLACE") {
+		t.Errorf("second statement must be CREATE VIEW (not OR REPLACE), got: %s", stmts[1])
+	}
+}
+
+func TestGenerateChangeSQLMySQL_ReplaceView_UsesCreateOrReplace(t *testing.T) {
+	// MySQL: CREATE OR REPLACE VIEW handles incompatible column changes natively.
+	old := kit.FromSchema(kit.SchemaObjects{
+		Views: []*pg.ViewDef{pg.CreateView("v", "SELECT id FROM users")},
+	})
+	new := kit.FromSchema(kit.SchemaObjects{
+		Views: []*pg.ViewDef{pg.CreateView("v", "SELECT id, email FROM users")},
+	})
+	changes := kit.Diff(old, new)
+	if len(changes) != 1 || changes[0].Kind != kit.ChangeReplaceView {
+		t.Fatalf("expected 1 ChangeReplaceView, got %v", changes)
+	}
+	stmts := kit.GenerateChangeSQLMySQL(new, changes[0])
+	if len(stmts) != 1 || !strings.Contains(stmts[0], "CREATE OR REPLACE VIEW") {
+		t.Errorf("expected CREATE OR REPLACE VIEW, got: %v", stmts)
+	}
+}
+
+func TestGenerateChangeSQLSQLite_ReplaceView_DropsAndCreates(t *testing.T) {
+	// SQLite: same DROP + CREATE sequence as ChangeCreateView.
+	old := kit.FromSchema(kit.SchemaObjects{
+		Views: []*pg.ViewDef{pg.CreateView("v", "SELECT id FROM users")},
+	})
+	new := kit.FromSchema(kit.SchemaObjects{
+		Views: []*pg.ViewDef{pg.CreateView("v", "SELECT id, email FROM users")},
+	})
+	changes := kit.Diff(old, new)
+	if len(changes) != 1 || changes[0].Kind != kit.ChangeReplaceView {
+		t.Fatalf("expected 1 ChangeReplaceView, got %v", changes)
+	}
+	stmts := kit.GenerateChangeSQLSQLite(new, changes[0])
+	if len(stmts) != 2 {
+		t.Fatalf("expected 2 statements (DROP + CREATE), got %d: %v", len(stmts), stmts)
+	}
+	if !strings.HasPrefix(stmts[0], "DROP VIEW IF EXISTS") {
+		t.Errorf("first statement must be DROP VIEW IF EXISTS, got: %s", stmts[0])
+	}
+	if !strings.Contains(stmts[1], "CREATE VIEW") {
+		t.Errorf("second statement must be CREATE VIEW, got: %s", stmts[1])
 	}
 }
 

@@ -153,10 +153,11 @@ func GenerateChangeSQLMySQL(snap Snapshot, c Change) []string {
 		}
 		return dropConstraintSQLMySQL(c.ObjectName, *c.Constraint)
 
-	case ChangeCreateView:
+	case ChangeCreateView, ChangeReplaceView:
 		if c.View == nil {
 			return nil
 		}
+		// MySQL's CREATE OR REPLACE VIEW handles incompatible column changes natively.
 		return []string{fmt.Sprintf(
 			"CREATE OR REPLACE VIEW %s AS %s",
 			quoteTableMySQL(c.View.QualifiedName()),

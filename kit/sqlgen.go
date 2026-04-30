@@ -170,6 +170,19 @@ func GenerateChangeSQL(snap Snapshot, c Change) []string {
 			c.View.SQL,
 		)}
 
+	case ChangeReplaceView:
+		if c.View == nil {
+			return nil
+		}
+		// CREATE OR REPLACE VIEW cannot alter column names, order, or types in PostgreSQL.
+		// DROP IF EXISTS + CREATE guarantees convergence for all view changes. Without CASCADE,
+		// PostgreSQL will error if dependent views exist, which surfaces the dependency clearly.
+		name := quoteTable(c.View.QualifiedName())
+		return []string{
+			fmt.Sprintf("DROP VIEW IF EXISTS %s", name),
+			fmt.Sprintf("CREATE VIEW %s AS %s", name, c.View.SQL),
+		}
+
 	case ChangeDropView:
 		if c.View == nil {
 			return nil
