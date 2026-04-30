@@ -77,8 +77,8 @@ func (v *ViewSnap) QualifiedName() string {
 
 // EnumSnap is the snapshot of a single PostgreSQL enum type.
 type EnumSnap struct {
-	Name   string   `json:"name"`
-	Schema string   `json:"schema,omitempty"`
+	Name   string `json:"name"`
+	Schema string `json:"schema,omitempty"`
 	// Values is the ordered list of enum labels. Must be non-empty;
 	// pg.CreateEnum and pg.SchemaCreateEnum enforce this invariant.
 	Values []string `json:"values"`

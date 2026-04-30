@@ -246,9 +246,9 @@ func TestGenerateChangeSQL_AddColumn(t *testing.T) {
 	snap := kit.FromDefs(usersDef)
 	col := pg.ColumnDef{Name: "phone", SQLType: "varchar(20)"}
 	change := kit.Change{
-		Kind:      kit.ChangeAddColumn,
+		Kind:       kit.ChangeAddColumn,
 		ObjectName: "users",
-		NewCol:    &col,
+		NewCol:     &col,
 	}
 	stmts := kit.GenerateChangeSQL(snap, change)
 	if len(stmts) != 1 {
@@ -388,9 +388,9 @@ func TestMySQLChangeSQL_AddColumn(t *testing.T) {
 	snap := kit.FromDefs(realmsDef)
 	newCol := pg.ColumnDef{Name: "slug", SQLType: "varchar(255)"}
 	change := kit.Change{
-		Kind:      kit.ChangeAddColumn,
+		Kind:       kit.ChangeAddColumn,
 		ObjectName: "realms",
-		NewCol:    &newCol,
+		NewCol:     &newCol,
 	}
 	stmts := kit.GenerateChangeSQLMySQL(snap, change)
 	if len(stmts) != 1 {
@@ -404,7 +404,7 @@ func TestMySQLChangeSQL_AddColumn(t *testing.T) {
 func TestMySQLChangeSQL_DropIndex(t *testing.T) {
 	snap := kit.FromDefs(realmsDef)
 	change := kit.Change{
-		Kind:      kit.ChangeDropConstraint,
+		Kind:       kit.ChangeDropConstraint,
 		ObjectName: "realms",
 		Constraint: &pg.Constraint{
 			Kind: pg.KindUniqueIndex,
@@ -425,9 +425,9 @@ func TestMySQLChangeSQL_AlterColumnType(t *testing.T) {
 	snap := kit.FromDefs(realmsDef)
 	newCol := pg.ColumnDef{Name: "name", SQLType: "varchar(512)", NotNull: true}
 	change := kit.Change{
-		Kind:      kit.ChangeAlterColumnType,
+		Kind:       kit.ChangeAlterColumnType,
 		ObjectName: "realms",
-		NewCol:    &newCol,
+		NewCol:     &newCol,
 	}
 	stmts := kit.GenerateChangeSQLMySQL(snap, change)
 	if len(stmts) != 1 {
@@ -447,10 +447,10 @@ func makeRenameChange() kit.Change {
 	old := pg.ColumnDef{Name: "username", SQLType: "varchar(255)", NotNull: true}
 	newCol := pg.ColumnDef{Name: "login_name", SQLType: "varchar(255)", NotNull: true}
 	return kit.Change{
-		Kind:      kit.ChangeRenameColumn,
+		Kind:       kit.ChangeRenameColumn,
 		ObjectName: "users",
-		OldCol:    &old,
-		NewCol:    &newCol,
+		OldCol:     &old,
+		NewCol:     &newCol,
 	}
 }
 
@@ -506,10 +506,10 @@ func TestRenameColumn_SQLGen_Postgres(t *testing.T) {
 	old := pg.ColumnDef{Name: "username", SQLType: "varchar(255)", NotNull: true}
 	newCol := pg.ColumnDef{Name: "handle", SQLType: "varchar(255)", NotNull: true}
 	change := kit.Change{
-		Kind:      kit.ChangeRenameColumn,
+		Kind:       kit.ChangeRenameColumn,
 		ObjectName: "users",
-		OldCol:    &old,
-		NewCol:    &newCol,
+		OldCol:     &old,
+		NewCol:     &newCol,
 	}
 	stmts := kit.GenerateChangeSQL(snap, change)
 	if len(stmts) != 1 {
@@ -528,10 +528,10 @@ func TestRenameColumn_SQLGen_MySQL(t *testing.T) {
 	old := pg.ColumnDef{Name: "username", SQLType: "varchar(255)", NotNull: true}
 	newCol := pg.ColumnDef{Name: "handle", SQLType: "varchar(255)", NotNull: true}
 	change := kit.Change{
-		Kind:      kit.ChangeRenameColumn,
+		Kind:       kit.ChangeRenameColumn,
 		ObjectName: "users",
-		OldCol:    &old,
-		NewCol:    &newCol,
+		OldCol:     &old,
+		NewCol:     &newCol,
 	}
 	stmts := kit.GenerateChangeSQLMySQL(snap, change)
 	if len(stmts) != 1 {
@@ -550,10 +550,10 @@ func TestRenameColumn_SQLGen_SQLite(t *testing.T) {
 	old := pg.ColumnDef{Name: "username", SQLType: "varchar(255)", NotNull: true}
 	newCol := pg.ColumnDef{Name: "handle", SQLType: "varchar(255)", NotNull: true}
 	change := kit.Change{
-		Kind:      kit.ChangeRenameColumn,
+		Kind:       kit.ChangeRenameColumn,
 		ObjectName: "users",
-		OldCol:    &old,
-		NewCol:    &newCol,
+		OldCol:     &old,
+		NewCol:     &newCol,
 	}
 	stmts := kit.GenerateChangeSQLSQLite(snap, change)
 	if len(stmts) != 1 {
@@ -1161,7 +1161,7 @@ func TestDiff_TableRename_SQLGen_Postgres(t *testing.T) {
 
 	change := kit.Change{
 		Kind:         kit.ChangeRenameTable,
-		ObjectName:    "accounts",
+		ObjectName:   "accounts",
 		RenameTarget: "users",
 	}
 	stmts := kit.GenerateChangeSQL(snap, change)
@@ -1181,7 +1181,7 @@ func TestDiff_TableRename_SQLGen_MySQL(t *testing.T) {
 
 	change := kit.Change{
 		Kind:         kit.ChangeRenameTable,
-		ObjectName:    "accounts",
+		ObjectName:   "accounts",
 		RenameTarget: "users",
 	}
 	stmts := kit.GenerateChangeSQLMySQL(snap, change)
@@ -1201,7 +1201,7 @@ func TestDiff_TableRename_SQLGen_SQLite(t *testing.T) {
 
 	change := kit.Change{
 		Kind:         kit.ChangeRenameTable,
-		ObjectName:    "accounts",
+		ObjectName:   "accounts",
 		RenameTarget: "users",
 	}
 	stmts := kit.GenerateChangeSQLSQLite(snap, change)
@@ -1391,7 +1391,7 @@ func TestRenameTable_SQLGen_SchemaQualified_Postgres(t *testing.T) {
 	snap := kit.EmptySnapshot()
 	change := kit.Change{
 		Kind:         kit.ChangeRenameTable,
-		ObjectName:    "public.accounts",
+		ObjectName:   "public.accounts",
 		RenameTarget: "public.users",
 	}
 	stmts := kit.GenerateChangeSQL(snap, change)
@@ -1413,7 +1413,7 @@ func TestRenameTable_SQLGen_CrossSchema_Postgres(t *testing.T) {
 	snap := kit.EmptySnapshot()
 	change := kit.Change{
 		Kind:         kit.ChangeRenameTable,
-		ObjectName:    "auth.accounts",
+		ObjectName:   "auth.accounts",
 		RenameTarget: "public.users",
 	}
 	stmts := kit.GenerateChangeSQL(snap, change)
@@ -1445,7 +1445,7 @@ func TestRenameTable_SQLGen_MixedPublicSchema_Postgres(t *testing.T) {
 	for _, tc := range cases {
 		change := kit.Change{
 			Kind:         kit.ChangeRenameTable,
-			ObjectName:    tc.src,
+			ObjectName:   tc.src,
 			RenameTarget: tc.dst,
 		}
 		stmts := kit.GenerateChangeSQL(snap, change)
@@ -1469,7 +1469,7 @@ func TestRenameTable_SQLGen_SchemaQualified_MySQL(t *testing.T) {
 	snap := kit.EmptySnapshot()
 	change := kit.Change{
 		Kind:         kit.ChangeRenameTable,
-		ObjectName:    "public.accounts",
+		ObjectName:   "public.accounts",
 		RenameTarget: "public.users",
 	}
 	stmts := kit.GenerateChangeSQLMySQL(snap, change)
@@ -1489,7 +1489,7 @@ func TestRenameTable_SQLGen_SchemaQualified_SQLite(t *testing.T) {
 	snap := kit.EmptySnapshot()
 	change := kit.Change{
 		Kind:         kit.ChangeRenameTable,
-		ObjectName:    "main.accounts",
+		ObjectName:   "main.accounts",
 		RenameTarget: "main.users",
 	}
 	stmts := kit.GenerateChangeSQLSQLite(snap, change)

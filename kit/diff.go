@@ -36,7 +36,7 @@ const (
 
 // Change represents a single schema mutation — the unit that SQL generation works from.
 type Change struct {
-	Kind      ChangeKind
+	Kind       ChangeKind
 	ObjectName string // qualified name of the affected object (table, view, or enum); for ChangeRenameTable this is the old (source) name
 
 	// RenameTarget is set only for ChangeRenameTable: it holds the new table name.
@@ -152,9 +152,9 @@ func Diff(old, new Snapshot) []Change {
 		if _, exists := old.Enums[name]; !exists {
 			e := *new.Enums[name]
 			changes = append(changes, Change{
-				Kind:      ChangeCreateEnum,
+				Kind:       ChangeCreateEnum,
 				ObjectName: name,
-				NewEnum:   &e,
+				NewEnum:    &e,
 			})
 		}
 	}
@@ -176,10 +176,10 @@ func Diff(old, new Snapshot) []Change {
 		if len(addedVals) > 0 || len(removedVals) > 0 || reordered {
 			o, n := *oldE, *newE
 			changes = append(changes, Change{
-				Kind:      ChangeAlterEnum,
+				Kind:       ChangeAlterEnum,
 				ObjectName: name,
-				OldEnum:   &o,
-				NewEnum:   &n,
+				OldEnum:    &o,
+				NewEnum:    &n,
 			})
 		}
 	}
@@ -229,9 +229,9 @@ func Diff(old, new Snapshot) []Change {
 		if _, exists := old.Views[name]; !exists {
 			v := *new.Views[name]
 			changes = append(changes, Change{
-				Kind:      ChangeCreateView,
+				Kind:       ChangeCreateView,
 				ObjectName: name,
-				View:      &v,
+				View:       &v,
 			})
 		}
 	}
@@ -259,9 +259,9 @@ func Diff(old, new Snapshot) []Change {
 		if _, exists := new.Views[name]; !exists {
 			v := *old.Views[name]
 			changes = append(changes, Change{
-				Kind:      ChangeDropView,
+				Kind:       ChangeDropView,
 				ObjectName: name,
-				View:      &v,
+				View:       &v,
 			})
 		}
 	}
@@ -271,7 +271,7 @@ func Diff(old, new Snapshot) []Change {
 		if _, exists := new.Tables[name]; !exists {
 			if _, wasRenamed := renamedFrom[name]; !wasRenamed {
 				changes = append(changes, Change{
-					Kind:      ChangeDropTable,
+					Kind:       ChangeDropTable,
 					ObjectName: name,
 				})
 			}
@@ -283,9 +283,9 @@ func Diff(old, new Snapshot) []Change {
 		if _, exists := new.Enums[name]; !exists {
 			e := *old.Enums[name]
 			changes = append(changes, Change{
-				Kind:      ChangeDropEnum,
+				Kind:       ChangeDropEnum,
 				ObjectName: name,
-				OldEnum:   &e,
+				OldEnum:    &e,
 			})
 		}
 	}
@@ -448,10 +448,10 @@ func diffTable(tableName string, old, new *TableSnap, tableRenames map[string]st
 				oldColDef := oldCols[oldColName]
 				o, n := oldColDef, nc
 				changes = append(changes, Change{
-					Kind:      ChangeRenameColumn,
+					Kind:       ChangeRenameColumn,
 					ObjectName: tableName,
-					OldCol:    &o,
-					NewCol:    &n,
+					OldCol:     &o,
+					NewCol:     &n,
 				})
 				// Also diff the old vs new column definitions (targeting the new
 				// column name) so that type/nullability/default changes that
@@ -464,9 +464,9 @@ func diffTable(tableName string, old, new *TableSnap, tableRenames map[string]st
 				changes = append(changes, diffColumn(tableName, oldColRenamed, nc)...)
 			} else {
 				changes = append(changes, Change{
-					Kind:      ChangeAddColumn,
+					Kind:       ChangeAddColumn,
 					ObjectName: tableName,
-					NewCol:    &nc,
+					NewCol:     &nc,
 				})
 			}
 			continue
@@ -481,9 +481,9 @@ func diffTable(tableName string, old, new *TableSnap, tableRenames map[string]st
 			if _, wasRenamed := colRenamedFrom[oc.Name]; !wasRenamed {
 				oc := oc // copy
 				changes = append(changes, Change{
-					Kind:      ChangeDropColumn,
+					Kind:       ChangeDropColumn,
 					ObjectName: tableName,
-					OldCol:    &oc,
+					OldCol:     &oc,
 				})
 			}
 		}
@@ -566,28 +566,28 @@ func diffColumn(tableName string, old, new pg.ColumnDef) []Change {
 	if old.SQLType != new.SQLType {
 		o, n := old, new
 		changes = append(changes, Change{
-			Kind:      ChangeAlterColumnType,
+			Kind:       ChangeAlterColumnType,
 			ObjectName: tableName,
-			OldCol:    &o,
-			NewCol:    &n,
+			OldCol:     &o,
+			NewCol:     &n,
 		})
 	}
 	if old.NotNull != new.NotNull {
 		o, n := old, new
 		changes = append(changes, Change{
-			Kind:      ChangeAlterColumnNull,
+			Kind:       ChangeAlterColumnNull,
 			ObjectName: tableName,
-			OldCol:    &o,
-			NewCol:    &n,
+			OldCol:     &o,
+			NewCol:     &n,
 		})
 	}
 	if old.DefaultExpr != new.DefaultExpr || old.HasDefault != new.HasDefault {
 		o, n := old, new
 		changes = append(changes, Change{
-			Kind:      ChangeAlterColumnDefault,
+			Kind:       ChangeAlterColumnDefault,
 			ObjectName: tableName,
-			OldCol:    &o,
-			NewCol:    &n,
+			OldCol:     &o,
+			NewCol:     &n,
 		})
 	}
 	return changes
