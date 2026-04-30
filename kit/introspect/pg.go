@@ -19,6 +19,14 @@ type LiveSnapshot struct {
 	Enums  map[string]*LiveEnum  // keyed by qualified name
 }
 
+// qualifyName returns "schema.name" for non-public schemas, otherwise just "name".
+func qualifyName(schema, name string) string {
+	if schema != "" && schema != "public" {
+		return schema + "." + name
+	}
+	return name
+}
+
 // LiveView mirrors kit.ViewSnap but is built from information_schema queries.
 type LiveView struct {
 	Name   string
@@ -27,10 +35,7 @@ type LiveView struct {
 }
 
 func (v *LiveView) QualifiedName() string {
-	if v.Schema != "" && v.Schema != "public" {
-		return v.Schema + "." + v.Name
-	}
-	return v.Name
+	return qualifyName(v.Schema, v.Name)
 }
 
 // LiveEnum mirrors kit.EnumSnap but is built from pg_catalog queries.
@@ -41,10 +46,7 @@ type LiveEnum struct {
 }
 
 func (e *LiveEnum) QualifiedName() string {
-	if e.Schema != "" && e.Schema != "public" {
-		return e.Schema + "." + e.Name
-	}
-	return e.Name
+	return qualifyName(e.Schema, e.Name)
 }
 
 // LiveTable mirrors kit.TableSnap but is built from information_schema queries.

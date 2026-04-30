@@ -278,8 +278,8 @@ func TestDiff_CreateView(t *testing.T) {
 	if c.Kind != kit.ChangeCreateView {
 		t.Errorf("expected ChangeCreateView, got %s", c.Kind)
 	}
-	if c.TableName != "active_users" {
-		t.Errorf("expected TableName 'active_users', got %q", c.TableName)
+	if c.ObjectName != "active_users" {
+		t.Errorf("expected ObjectName 'active_users', got %q", c.ObjectName)
 	}
 	if c.View == nil {
 		t.Fatal("expected View to be set")

@@ -1,5 +1,13 @@
 package pg
 
+// qualifyName returns "schema.name" for non-public schemas, otherwise just "name".
+func qualifyName(schema, name string) string {
+	if schema != "" && schema != "public" {
+		return schema + "." + name
+	}
+	return name
+}
+
 // ViewDef is the definition of a PostgreSQL view.
 // Create one with CreateView() or SchemaView().
 type ViewDef struct {
@@ -10,10 +18,7 @@ type ViewDef struct {
 
 // QualifiedName returns the schema-qualified view name for use in SQL.
 func (v *ViewDef) QualifiedName() string {
-	if v.Schema != "" && v.Schema != "public" {
-		return v.Schema + "." + v.Name
-	}
-	return v.Name
+	return qualifyName(v.Schema, v.Name)
 }
 
 // CreateView declares a PostgreSQL view with the given name and SQL body.

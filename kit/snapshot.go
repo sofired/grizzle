@@ -45,6 +45,14 @@ type TableSnap struct {
 	PreviousName string `json:"-"`
 }
 
+// qualifyName returns "schema.name" for non-public schemas, otherwise just "name".
+func qualifyName(schema, name string) string {
+	if schema != "" && schema != "public" {
+		return schema + "." + name
+	}
+	return name
+}
+
 // QualifiedName returns the schema-qualified name used as the map key.
 func (t *TableSnap) QualifiedName() string {
 	if t.Schema != "" {
@@ -57,30 +65,28 @@ func (t *TableSnap) QualifiedName() string {
 type ViewSnap struct {
 	Name   string `json:"name"`
 	Schema string `json:"schema,omitempty"`
-	SQL    string `json:"sql"`
+	// SQL is the raw SELECT body as declared in the schema definition; not pre-normalized.
+	// normalizeViewSQL is applied at diff time to avoid spurious diffs from PostgreSQL reformatting.
+	SQL string `json:"sql"`
 }
 
 // QualifiedName returns the schema-qualified name used as the map key.
 func (v *ViewSnap) QualifiedName() string {
-	if v.Schema != "" && v.Schema != "public" {
-		return v.Schema + "." + v.Name
-	}
-	return v.Name
+	return qualifyName(v.Schema, v.Name)
 }
 
 // EnumSnap is the snapshot of a single PostgreSQL enum type.
 type EnumSnap struct {
 	Name   string   `json:"name"`
 	Schema string   `json:"schema,omitempty"`
+	// Values is the ordered list of enum labels. Must be non-empty;
+	// pg.CreateEnum and pg.SchemaCreateEnum enforce this invariant.
 	Values []string `json:"values"`
 }
 
 // QualifiedName returns the schema-qualified name used as the map key.
 func (e *EnumSnap) QualifiedName() string {
-	if e.Schema != "" && e.Schema != "public" {
-		return e.Schema + "." + e.Name
-	}
-	return e.Name
+	return qualifyName(e.Schema, e.Name)
 }
 
 // FromDefs builds a Snapshot from a set of dialect-agnostic TableDefiner values.
@@ -111,9 +117,9 @@ func FromDefs(tables ...pg.TableDefiner) Snapshot {
 
 // SchemaObjects holds all the schema object types that can be passed to FromSchema.
 type SchemaObjects struct {
-	Tables []pg.TableDefiner
-	Views  []*pg.ViewDef
-	Enums  []*pg.EnumDef
+	Tables []pg.TableDefiner // dialect-agnostic table definitions (pg, mysql, or sqlite)
+	Views  []*pg.ViewDef     // PostgreSQL view definitions; ignored by non-PostgreSQL generators
+	Enums  []*pg.EnumDef     // PostgreSQL named enum type definitions; ignored by non-PostgreSQL generators
 }
 
 // FromSchema builds a Snapshot from tables, views, and enum types together.

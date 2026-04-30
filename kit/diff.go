@@ -30,14 +30,14 @@ const (
 
 	// Enum change kinds (PostgreSQL only).
 	ChangeCreateEnum ChangeKind = "create_enum"
-	ChangeAlterEnum  ChangeKind = "alter_enum" // adds values to an existing enum
+	ChangeAlterEnum  ChangeKind = "alter_enum" // adds, removes, or reorders values in an existing enum; removals and reorders emit WARNING SQL comments
 	ChangeDropEnum   ChangeKind = "drop_enum"
 )
 
 // Change represents a single schema mutation — the unit that SQL generation works from.
 type Change struct {
 	Kind      ChangeKind
-	TableName string // qualified name (also used as object name for views/enums); for ChangeRenameTable this is the old (source) name
+	ObjectName string // qualified name of the affected object (table, view, or enum); for ChangeRenameTable this is the old (source) name
 
 	// RenameTarget is set only for ChangeRenameTable: it holds the new table name.
 	// For all other change kinds this field is empty.
@@ -116,8 +116,8 @@ func Diff(old, new Snapshot) []Change {
 		new.Enums = make(map[string]*EnumSnap)
 	}
 
-	newNames := sortedTableNames(new.Tables)
-	oldNames := sortedTableNames(old.Tables)
+	newNames := sortedKeys(new.Tables)
+	oldNames := sortedKeys(old.Tables)
 
 	// Build sets of added and dropped tables for rename detection.
 	droppedTables := make(map[string]struct{})
@@ -153,7 +153,7 @@ func Diff(old, new Snapshot) []Change {
 			e := *new.Enums[name]
 			changes = append(changes, Change{
 				Kind:      ChangeCreateEnum,
-				TableName: name,
+				ObjectName: name,
 				NewEnum:   &e,
 			})
 		}
@@ -177,7 +177,7 @@ func Diff(old, new Snapshot) []Change {
 			o, n := *oldE, *newE
 			changes = append(changes, Change{
 				Kind:      ChangeAlterEnum,
-				TableName: name,
+				ObjectName: name,
 				OldEnum:   &o,
 				NewEnum:   &n,
 			})
@@ -195,7 +195,7 @@ func Diff(old, new Snapshot) []Change {
 			if oldName, isRename := renamedTo[name]; isRename {
 				renames = append(renames, Change{
 					Kind:         ChangeRenameTable,
-					TableName:    oldName,
+					ObjectName:   oldName,
 					RenameTarget: name,
 				})
 			} else {
@@ -206,8 +206,8 @@ func Diff(old, new Snapshot) []Change {
 	changes = append(changes, renames...)
 	for _, name := range orderNewTables(createNames, new.Tables) {
 		changes = append(changes, Change{
-			Kind:      ChangeCreateTable,
-			TableName: name,
+			Kind:       ChangeCreateTable,
+			ObjectName: name,
 		})
 	}
 
@@ -230,7 +230,7 @@ func Diff(old, new Snapshot) []Change {
 			v := *new.Views[name]
 			changes = append(changes, Change{
 				Kind:      ChangeCreateView,
-				TableName: name,
+				ObjectName: name,
 				View:      &v,
 			})
 		}
@@ -249,7 +249,7 @@ func Diff(old, new Snapshot) []Change {
 		if normalizeViewSQL(oldV.SQL) != normalizeViewSQL(newV.SQL) {
 			n := *newV
 			changes = append(changes,
-				Change{Kind: ChangeCreateView, TableName: name, View: &n},
+				Change{Kind: ChangeCreateView, ObjectName: name, View: &n},
 			)
 		}
 	}
@@ -260,7 +260,7 @@ func Diff(old, new Snapshot) []Change {
 			v := *old.Views[name]
 			changes = append(changes, Change{
 				Kind:      ChangeDropView,
-				TableName: name,
+				ObjectName: name,
 				View:      &v,
 			})
 		}
@@ -272,7 +272,7 @@ func Diff(old, new Snapshot) []Change {
 			if _, wasRenamed := renamedFrom[name]; !wasRenamed {
 				changes = append(changes, Change{
 					Kind:      ChangeDropTable,
-					TableName: name,
+					ObjectName: name,
 				})
 			}
 		}
@@ -284,7 +284,7 @@ func Diff(old, new Snapshot) []Change {
 			e := *old.Enums[name]
 			changes = append(changes, Change{
 				Kind:      ChangeDropEnum,
-				TableName: name,
+				ObjectName: name,
 				OldEnum:   &e,
 			})
 		}
@@ -301,16 +301,6 @@ func sortedKeys[V any](m map[string]V) []string {
 	}
 	sort.Strings(keys)
 	return keys
-}
-
-// sortedTableNames returns the keys of the given map, sorted alphabetically.
-func sortedTableNames(tables map[string]*TableSnap) []string {
-	names := make([]string, 0, len(tables))
-	for name := range tables {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
 }
 
 // enumValueAddition describes a single new label to add to an existing PostgreSQL enum.
@@ -459,7 +449,7 @@ func diffTable(tableName string, old, new *TableSnap, tableRenames map[string]st
 				o, n := oldColDef, nc
 				changes = append(changes, Change{
 					Kind:      ChangeRenameColumn,
-					TableName: tableName,
+					ObjectName: tableName,
 					OldCol:    &o,
 					NewCol:    &n,
 				})
@@ -475,7 +465,7 @@ func diffTable(tableName string, old, new *TableSnap, tableRenames map[string]st
 			} else {
 				changes = append(changes, Change{
 					Kind:      ChangeAddColumn,
-					TableName: tableName,
+					ObjectName: tableName,
 					NewCol:    &nc,
 				})
 			}
@@ -492,7 +482,7 @@ func diffTable(tableName string, old, new *TableSnap, tableRenames map[string]st
 				oc := oc // copy
 				changes = append(changes, Change{
 					Kind:      ChangeDropColumn,
-					TableName: tableName,
+					ObjectName: tableName,
 					OldCol:    &oc,
 				})
 			}
@@ -532,7 +522,7 @@ func diffTable(tableName string, old, new *TableSnap, tableRenames map[string]st
 			nc := nc
 			changes = append(changes, Change{
 				Kind:       ChangeAddConstraint,
-				TableName:  tableName,
+				ObjectName: tableName,
 				Constraint: &nc,
 			})
 		}
@@ -554,15 +544,15 @@ func diffTable(tableName string, old, new *TableSnap, tableRenames map[string]st
 			oc := oc
 			changes = append(changes, Change{
 				Kind:       ChangeDropConstraint,
-				TableName:  tableName,
+				ObjectName: tableName,
 				Constraint: &oc,
 			})
 		} else if !constraintsEqual(oc, nc) {
 			// Changed: drop then recreate.
 			oc, nc := oc, nc
 			changes = append(changes,
-				Change{Kind: ChangeDropConstraint, TableName: tableName, Constraint: &oc},
-				Change{Kind: ChangeAddConstraint, TableName: tableName, Constraint: &nc},
+				Change{Kind: ChangeDropConstraint, ObjectName: tableName, Constraint: &oc},
+				Change{Kind: ChangeAddConstraint, ObjectName: tableName, Constraint: &nc},
 			)
 		}
 	}
@@ -577,7 +567,7 @@ func diffColumn(tableName string, old, new pg.ColumnDef) []Change {
 		o, n := old, new
 		changes = append(changes, Change{
 			Kind:      ChangeAlterColumnType,
-			TableName: tableName,
+			ObjectName: tableName,
 			OldCol:    &o,
 			NewCol:    &n,
 		})
@@ -586,7 +576,7 @@ func diffColumn(tableName string, old, new pg.ColumnDef) []Change {
 		o, n := old, new
 		changes = append(changes, Change{
 			Kind:      ChangeAlterColumnNull,
-			TableName: tableName,
+			ObjectName: tableName,
 			OldCol:    &o,
 			NewCol:    &n,
 		})
@@ -595,7 +585,7 @@ func diffColumn(tableName string, old, new pg.ColumnDef) []Change {
 		o, n := old, new
 		changes = append(changes, Change{
 			Kind:      ChangeAlterColumnDefault,
-			TableName: tableName,
+			ObjectName: tableName,
 			OldCol:    &o,
 			NewCol:    &n,
 		})
@@ -685,7 +675,7 @@ func applyRenames(cols []string, renames map[string]string) []string {
 }
 
 // constraintsEqual compares two constraints for logical equality,
-// including FK-specific fields (Fix #9).
+// including FK-specific fields (FKTable, FKColumns, FKOnDelete, FKOnUpdate).
 func constraintsEqual(a, b pg.Constraint) bool {
 	if a.Kind != b.Kind || a.Name != b.Name || a.WhereExpr != b.WhereExpr || a.CheckExpr != b.CheckExpr {
 		return false

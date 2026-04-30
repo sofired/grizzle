@@ -104,7 +104,7 @@ func TestDiff_EmptyToSchema(t *testing.T) {
 	// No other change kinds expected when going from empty → full schema.
 	for _, c := range changes {
 		if c.Kind != kit.ChangeCreateTable {
-			t.Errorf("unexpected change kind %q for table %s", c.Kind, c.TableName)
+			t.Errorf("unexpected change kind %q for table %s", c.Kind, c.ObjectName)
 		}
 	}
 }
@@ -247,7 +247,7 @@ func TestGenerateChangeSQL_AddColumn(t *testing.T) {
 	col := pg.ColumnDef{Name: "phone", SQLType: "varchar(20)"}
 	change := kit.Change{
 		Kind:      kit.ChangeAddColumn,
-		TableName: "users",
+		ObjectName: "users",
 		NewCol:    &col,
 	}
 	stmts := kit.GenerateChangeSQL(snap, change)
@@ -263,7 +263,7 @@ func TestGenerateChangeSQL_AddColumn(t *testing.T) {
 func TestGenerateChangeSQL_DropColumn(t *testing.T) {
 	snap := kit.FromDefs(usersDef)
 	col := pg.ColumnDef{Name: "email"}
-	change := kit.Change{Kind: kit.ChangeDropColumn, TableName: "users", OldCol: &col}
+	change := kit.Change{Kind: kit.ChangeDropColumn, ObjectName: "users", OldCol: &col}
 	stmts := kit.GenerateChangeSQL(snap, change)
 	if len(stmts) != 1 {
 		t.Fatalf("expected 1 statement, got %d", len(stmts))
@@ -317,9 +317,9 @@ func TestChecksumSQL_Length(t *testing.T) {
 
 func TestDescribeChanges_Labels(t *testing.T) {
 	changes := []kit.Change{
-		{Kind: kit.ChangeCreateTable, TableName: "users"},
-		{Kind: kit.ChangeCreateTable, TableName: "realms"},
-		{Kind: kit.ChangeAddColumn, TableName: "posts", NewCol: &pg.ColumnDef{Name: "title"}},
+		{Kind: kit.ChangeCreateTable, ObjectName: "users"},
+		{Kind: kit.ChangeCreateTable, ObjectName: "realms"},
+		{Kind: kit.ChangeAddColumn, ObjectName: "posts", NewCol: &pg.ColumnDef{Name: "title"}},
 	}
 	desc := kit.DescribeChanges(changes)
 	if !strings.Contains(desc, "create_table") {
@@ -389,7 +389,7 @@ func TestMySQLChangeSQL_AddColumn(t *testing.T) {
 	newCol := pg.ColumnDef{Name: "slug", SQLType: "varchar(255)"}
 	change := kit.Change{
 		Kind:      kit.ChangeAddColumn,
-		TableName: "realms",
+		ObjectName: "realms",
 		NewCol:    &newCol,
 	}
 	stmts := kit.GenerateChangeSQLMySQL(snap, change)
@@ -405,7 +405,7 @@ func TestMySQLChangeSQL_DropIndex(t *testing.T) {
 	snap := kit.FromDefs(realmsDef)
 	change := kit.Change{
 		Kind:      kit.ChangeDropConstraint,
-		TableName: "realms",
+		ObjectName: "realms",
 		Constraint: &pg.Constraint{
 			Kind: pg.KindUniqueIndex,
 			Name: "realms_name_idx",
@@ -426,7 +426,7 @@ func TestMySQLChangeSQL_AlterColumnType(t *testing.T) {
 	newCol := pg.ColumnDef{Name: "name", SQLType: "varchar(512)", NotNull: true}
 	change := kit.Change{
 		Kind:      kit.ChangeAlterColumnType,
-		TableName: "realms",
+		ObjectName: "realms",
 		NewCol:    &newCol,
 	}
 	stmts := kit.GenerateChangeSQLMySQL(snap, change)
@@ -448,7 +448,7 @@ func makeRenameChange() kit.Change {
 	newCol := pg.ColumnDef{Name: "login_name", SQLType: "varchar(255)", NotNull: true}
 	return kit.Change{
 		Kind:      kit.ChangeRenameColumn,
-		TableName: "users",
+		ObjectName: "users",
 		OldCol:    &old,
 		NewCol:    &newCol,
 	}
@@ -493,7 +493,7 @@ func TestRenameColumn_SQLite(t *testing.T) {
 func TestRenameColumn_NilGuard(t *testing.T) {
 	snap := kit.FromDefs(usersDef)
 	// Missing OldCol / NewCol must not panic.
-	c := kit.Change{Kind: kit.ChangeRenameColumn, TableName: "users"}
+	c := kit.Change{Kind: kit.ChangeRenameColumn, ObjectName: "users"}
 	if stmts := kit.GenerateChangeSQL(snap, c); stmts != nil {
 		t.Errorf("expected nil for nil cols, got %v", stmts)
 	}
@@ -507,7 +507,7 @@ func TestRenameColumn_SQLGen_Postgres(t *testing.T) {
 	newCol := pg.ColumnDef{Name: "handle", SQLType: "varchar(255)", NotNull: true}
 	change := kit.Change{
 		Kind:      kit.ChangeRenameColumn,
-		TableName: "users",
+		ObjectName: "users",
 		OldCol:    &old,
 		NewCol:    &newCol,
 	}
@@ -529,7 +529,7 @@ func TestRenameColumn_SQLGen_MySQL(t *testing.T) {
 	newCol := pg.ColumnDef{Name: "handle", SQLType: "varchar(255)", NotNull: true}
 	change := kit.Change{
 		Kind:      kit.ChangeRenameColumn,
-		TableName: "users",
+		ObjectName: "users",
 		OldCol:    &old,
 		NewCol:    &newCol,
 	}
@@ -551,7 +551,7 @@ func TestRenameColumn_SQLGen_SQLite(t *testing.T) {
 	newCol := pg.ColumnDef{Name: "handle", SQLType: "varchar(255)", NotNull: true}
 	change := kit.Change{
 		Kind:      kit.ChangeRenameColumn,
-		TableName: "users",
+		ObjectName: "users",
 		OldCol:    &old,
 		NewCol:    &newCol,
 	}
@@ -580,9 +580,9 @@ func TestDiff_Deterministic(t *testing.T) {
 			t.Fatalf("run %d: length mismatch: got %d, want %d", i, len(got), len(first))
 		}
 		for j := range first {
-			if got[j].Kind != first[j].Kind || got[j].TableName != first[j].TableName {
+			if got[j].Kind != first[j].Kind || got[j].ObjectName != first[j].ObjectName {
 				t.Errorf("run %d, change[%d]: got {%s %s}, want {%s %s}",
-					i, j, got[j].Kind, got[j].TableName, first[j].Kind, first[j].TableName)
+					i, j, got[j].Kind, got[j].ObjectName, first[j].Kind, first[j].ObjectName)
 			}
 		}
 	}
@@ -689,7 +689,7 @@ func TestDiff_FK_CreateOrder_ReferencedTableFirst(t *testing.T) {
 	usersIdx, postsIdx := -1, -1
 	for i, c := range changes {
 		if c.Kind == kit.ChangeCreateTable {
-			switch c.TableName {
+			switch c.ObjectName {
 			case "users":
 				usersIdx = i
 			case "posts":
@@ -723,7 +723,7 @@ func TestDiff_FK_CreateOrder_ColumnRefReferencedTableFirst(t *testing.T) {
 	usersIdx, postsIdx := -1, -1
 	for i, c := range changes {
 		if c.Kind == kit.ChangeCreateTable {
-			switch c.TableName {
+			switch c.ObjectName {
 			case "users":
 				usersIdx = i
 			case "posts":
@@ -878,7 +878,7 @@ func TestDiff_FK_CreateOrder_ThreeTableChain(t *testing.T) {
 	tableOrder := make(map[string]int)
 	for i, c := range changes {
 		if c.Kind == kit.ChangeCreateTable {
-			tableOrder[c.TableName] = i
+			tableOrder[c.ObjectName] = i
 		}
 	}
 
@@ -928,8 +928,8 @@ func TestDiff_FK_CreateOrder_CycleFallback(t *testing.T) {
 	// Run a second time to verify determinism of fallback ordering.
 	changes2 := kit.Diff(old, new)
 	for i := range changes {
-		if changes[i].TableName != changes2[i].TableName {
-			t.Errorf("non-deterministic cycle fallback at index %d: %q vs %q", i, changes[i].TableName, changes2[i].TableName)
+		if changes[i].ObjectName != changes2[i].ObjectName {
+			t.Errorf("non-deterministic cycle fallback at index %d: %q vs %q", i, changes[i].ObjectName, changes2[i].ObjectName)
 		}
 	}
 }
@@ -1146,8 +1146,8 @@ func TestDiff_TableRename_DetectedAsRename(t *testing.T) {
 			break
 		}
 	}
-	if renameChange.TableName != "accounts" {
-		t.Errorf("expected TableName=accounts (old), got %q", renameChange.TableName)
+	if renameChange.ObjectName != "accounts" {
+		t.Errorf("expected ObjectName=accounts (old), got %q", renameChange.ObjectName)
 	}
 	if renameChange.RenameTarget != "users" {
 		t.Errorf("expected RenameTarget=users (new), got %q", renameChange.RenameTarget)
@@ -1161,7 +1161,7 @@ func TestDiff_TableRename_SQLGen_Postgres(t *testing.T) {
 
 	change := kit.Change{
 		Kind:         kit.ChangeRenameTable,
-		TableName:    "accounts",
+		ObjectName:    "accounts",
 		RenameTarget: "users",
 	}
 	stmts := kit.GenerateChangeSQL(snap, change)
@@ -1181,7 +1181,7 @@ func TestDiff_TableRename_SQLGen_MySQL(t *testing.T) {
 
 	change := kit.Change{
 		Kind:         kit.ChangeRenameTable,
-		TableName:    "accounts",
+		ObjectName:    "accounts",
 		RenameTarget: "users",
 	}
 	stmts := kit.GenerateChangeSQLMySQL(snap, change)
@@ -1201,7 +1201,7 @@ func TestDiff_TableRename_SQLGen_SQLite(t *testing.T) {
 
 	change := kit.Change{
 		Kind:         kit.ChangeRenameTable,
-		TableName:    "accounts",
+		ObjectName:    "accounts",
 		RenameTarget: "users",
 	}
 	stmts := kit.GenerateChangeSQLSQLite(snap, change)
@@ -1217,7 +1217,7 @@ func TestDiff_TableRename_SQLGen_SQLite(t *testing.T) {
 func TestDiff_TableRename_NilGuard(t *testing.T) {
 	snap := kit.EmptySnapshot()
 	// Missing RenameTarget must not panic and returns nil.
-	c := kit.Change{Kind: kit.ChangeRenameTable, TableName: "accounts"}
+	c := kit.Change{Kind: kit.ChangeRenameTable, ObjectName: "accounts"}
 	if stmts := kit.GenerateChangeSQL(snap, c); stmts != nil {
 		t.Errorf("expected nil for empty RenameTarget, got %v", stmts)
 	}
@@ -1391,7 +1391,7 @@ func TestRenameTable_SQLGen_SchemaQualified_Postgres(t *testing.T) {
 	snap := kit.EmptySnapshot()
 	change := kit.Change{
 		Kind:         kit.ChangeRenameTable,
-		TableName:    "public.accounts",
+		ObjectName:    "public.accounts",
 		RenameTarget: "public.users",
 	}
 	stmts := kit.GenerateChangeSQL(snap, change)
@@ -1413,7 +1413,7 @@ func TestRenameTable_SQLGen_CrossSchema_Postgres(t *testing.T) {
 	snap := kit.EmptySnapshot()
 	change := kit.Change{
 		Kind:         kit.ChangeRenameTable,
-		TableName:    "auth.accounts",
+		ObjectName:    "auth.accounts",
 		RenameTarget: "public.users",
 	}
 	stmts := kit.GenerateChangeSQL(snap, change)
@@ -1445,7 +1445,7 @@ func TestRenameTable_SQLGen_MixedPublicSchema_Postgres(t *testing.T) {
 	for _, tc := range cases {
 		change := kit.Change{
 			Kind:         kit.ChangeRenameTable,
-			TableName:    tc.src,
+			ObjectName:    tc.src,
 			RenameTarget: tc.dst,
 		}
 		stmts := kit.GenerateChangeSQL(snap, change)
@@ -1469,7 +1469,7 @@ func TestRenameTable_SQLGen_SchemaQualified_MySQL(t *testing.T) {
 	snap := kit.EmptySnapshot()
 	change := kit.Change{
 		Kind:         kit.ChangeRenameTable,
-		TableName:    "public.accounts",
+		ObjectName:    "public.accounts",
 		RenameTarget: "public.users",
 	}
 	stmts := kit.GenerateChangeSQLMySQL(snap, change)
@@ -1489,7 +1489,7 @@ func TestRenameTable_SQLGen_SchemaQualified_SQLite(t *testing.T) {
 	snap := kit.EmptySnapshot()
 	change := kit.Change{
 		Kind:         kit.ChangeRenameTable,
-		TableName:    "main.accounts",
+		ObjectName:    "main.accounts",
 		RenameTarget: "main.users",
 	}
 	stmts := kit.GenerateChangeSQLSQLite(snap, change)

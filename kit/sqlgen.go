@@ -30,21 +30,21 @@ func GenerateCreateSQL(tables ...pg.TableDefiner) string {
 func GenerateChangeSQL(snap Snapshot, c Change) []string {
 	switch c.Kind {
 	case ChangeCreateTable:
-		t := snap.Tables[c.TableName]
+		t := snap.Tables[c.ObjectName]
 		if t == nil {
 			return nil
 		}
 		td := &pg.TableDef{Name: t.Name, Schema: t.Schema, Columns: t.Columns, Constraints: t.Constraints}
 		stmts := []string{createTableSQL(td)}
 		for _, con := range t.Constraints {
-			if sql := indexSQL(c.TableName, con); sql != "" {
+			if sql := indexSQL(c.ObjectName, con); sql != "" {
 				stmts = append(stmts, sql)
 			}
 		}
 		return stmts
 
 	case ChangeDropTable:
-		return []string{fmt.Sprintf("DROP TABLE IF EXISTS %s", quoteTable(c.TableName))}
+		return []string{fmt.Sprintf("DROP TABLE IF EXISTS %s", quoteTable(c.ObjectName))}
 
 	case ChangeRenameTable:
 		if c.RenameTarget == "" {
@@ -54,7 +54,7 @@ func GenerateChangeSQL(snap Snapshot, c Change) []string {
 		// resolves to the public schema under the default search_path, so treating
 		// them as the same avoids spurious cross-schema paths that would emit
 		// SET SCHEMA "" (invalid SQL) when one side is qualified and the other is not.
-		srcSchema := pgNormalizeSchema(schemaOf(c.TableName))
+		srcSchema := pgNormalizeSchema(schemaOf(c.ObjectName))
 		dstSchema := pgNormalizeSchema(schemaOf(c.RenameTarget))
 		newUnqualified := unqualifiedName(c.RenameTarget)
 		if srcSchema != dstSchema {
@@ -63,7 +63,7 @@ func GenerateChangeSQL(snap Snapshot, c Change) []string {
 			intermediate := srcSchema + "." + newUnqualified
 			return []string{
 				fmt.Sprintf("ALTER TABLE %s RENAME TO %s",
-					quoteTable(c.TableName), qi(newUnqualified)),
+					quoteTable(c.ObjectName), qi(newUnqualified)),
 				fmt.Sprintf("ALTER TABLE %s SET SCHEMA %s",
 					quoteTable(intermediate), qi(dstSchema)),
 			}
@@ -72,7 +72,7 @@ func GenerateChangeSQL(snap Snapshot, c Change) []string {
 		// same schema; a schema-qualified target like "public"."users" is invalid.
 		return []string{fmt.Sprintf(
 			"ALTER TABLE %s RENAME TO %s",
-			quoteTable(c.TableName),
+			quoteTable(c.ObjectName),
 			quoteUnqualifiedTable(c.RenameTarget),
 		)}
 
@@ -82,7 +82,7 @@ func GenerateChangeSQL(snap Snapshot, c Change) []string {
 		}
 		return []string{fmt.Sprintf(
 			"ALTER TABLE %s ADD COLUMN %s",
-			quoteTable(c.TableName),
+			quoteTable(c.ObjectName),
 			columnDefSQL(*c.NewCol),
 		)}
 
@@ -92,7 +92,7 @@ func GenerateChangeSQL(snap Snapshot, c Change) []string {
 		}
 		return []string{fmt.Sprintf(
 			"ALTER TABLE %s DROP COLUMN %s",
-			quoteTable(c.TableName),
+			quoteTable(c.ObjectName),
 			qi(c.OldCol.Name),
 		)}
 
@@ -102,7 +102,7 @@ func GenerateChangeSQL(snap Snapshot, c Change) []string {
 		}
 		return []string{fmt.Sprintf(
 			"ALTER TABLE %s ALTER COLUMN %s TYPE %s",
-			quoteTable(c.TableName),
+			quoteTable(c.ObjectName),
 			qi(c.NewCol.Name),
 			c.NewCol.SQLType,
 		)}
@@ -114,12 +114,12 @@ func GenerateChangeSQL(snap Snapshot, c Change) []string {
 		if c.NewCol.NotNull {
 			return []string{fmt.Sprintf(
 				"ALTER TABLE %s ALTER COLUMN %s SET NOT NULL",
-				quoteTable(c.TableName), qi(c.NewCol.Name),
+				quoteTable(c.ObjectName), qi(c.NewCol.Name),
 			)}
 		}
 		return []string{fmt.Sprintf(
 			"ALTER TABLE %s ALTER COLUMN %s DROP NOT NULL",
-			quoteTable(c.TableName), qi(c.NewCol.Name),
+			quoteTable(c.ObjectName), qi(c.NewCol.Name),
 		)}
 
 	case ChangeAlterColumnDefault:
@@ -129,12 +129,12 @@ func GenerateChangeSQL(snap Snapshot, c Change) []string {
 		if !c.NewCol.HasDefault {
 			return []string{fmt.Sprintf(
 				"ALTER TABLE %s ALTER COLUMN %s DROP DEFAULT",
-				quoteTable(c.TableName), qi(c.NewCol.Name),
+				quoteTable(c.ObjectName), qi(c.NewCol.Name),
 			)}
 		}
 		return []string{fmt.Sprintf(
 			"ALTER TABLE %s ALTER COLUMN %s SET DEFAULT %s",
-			quoteTable(c.TableName), qi(c.NewCol.Name), c.NewCol.DefaultExpr,
+			quoteTable(c.ObjectName), qi(c.NewCol.Name), c.NewCol.DefaultExpr,
 		)}
 
 	case ChangeRenameColumn:
@@ -143,7 +143,7 @@ func GenerateChangeSQL(snap Snapshot, c Change) []string {
 		}
 		return []string{fmt.Sprintf(
 			"ALTER TABLE %s RENAME COLUMN %s TO %s",
-			quoteTable(c.TableName),
+			quoteTable(c.ObjectName),
 			qi(c.OldCol.Name),
 			qi(c.NewCol.Name),
 		)}
@@ -152,13 +152,13 @@ func GenerateChangeSQL(snap Snapshot, c Change) []string {
 		if c.Constraint == nil {
 			return nil
 		}
-		return addConstraintSQL(c.TableName, *c.Constraint)
+		return addConstraintSQL(c.ObjectName, *c.Constraint)
 
 	case ChangeDropConstraint:
 		if c.Constraint == nil {
 			return nil
 		}
-		return dropConstraintSQL(c.TableName, *c.Constraint)
+		return dropConstraintSQL(c.ObjectName, *c.Constraint)
 
 	case ChangeCreateView:
 		if c.View == nil {
@@ -205,6 +205,9 @@ func GenerateChangeSQL(snap Snapshot, c Change) []string {
 				typeName,
 			))
 		}
+		// Note: ALTER TYPE ... ADD VALUE cannot run inside a transaction in PostgreSQL < 12.
+		// If your migration runner wraps all changes in a single transaction, this statement
+		// will fail on PG 9.x–11.x. Run it outside a transaction or upgrade to PG 12+.
 		for _, a := range added {
 			val := strings.ReplaceAll(a.Value, "'", "''")
 			if a.After != "" {
