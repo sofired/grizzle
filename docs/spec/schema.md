@@ -191,7 +191,7 @@ var ActiveUsers = pg.CreateView("active_users",
 | `pgSchema("s").view(name).as(...)` | `pg.SchemaView(schema, name, sql)` | PARITY |
 | `pgMaterializedView(name)` | DEVIATION:GAP (not designed) | — |
 
-**Note on kit support:** Drizzle Kit v0.30 does not support views in migrations — views must be managed manually. Grizzle's kit fully supports views in `Diff`, `Push`, and `Migrate` via `ChangeCreateView`, `ChangeReplaceView`, and `ChangeDropView`. This is **GRIZZLE-ONLY** capability.
+**Note on kit support:** Drizzle Kit v0.30 does not support views in migrations — views must be managed manually. Grizzle's `Diff` and the SQL generation layer fully support views via `ChangeCreateView`, `ChangeReplaceView`, and `ChangeDropView`. `Push` and `Migrate` are table-only for now because `liveToSnapshot` intentionally excludes live views to avoid silently dropping unmanaged views. Full `Push`/`Migrate` support for views is tracked in #136 (`PushSchema`). This is **GRIZZLE-ONLY** capability.
 
 `pg.CreateView(name, sql)` panics if `name` or `sql` is empty.
 

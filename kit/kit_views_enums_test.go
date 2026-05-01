@@ -395,6 +395,89 @@ func TestGenerateChangeSQLSQLite_ReplaceView_DropsAndCreates(t *testing.T) {
 	}
 }
 
+func TestGenerateChangeSQL_ReplaceView_SchemaQualified_PG(t *testing.T) {
+	// PostgreSQL: ChangeReplaceView with a schema-qualified view must emit
+	// correctly double-quoted DROP VIEW IF EXISTS + CREATE VIEW.
+	view := pg.SchemaView("reporting", "recent_orders", `SELECT * FROM orders WHERE created_at > now() - interval '7 days'`)
+	oldSnap := kit.FromSchema(kit.SchemaObjects{Views: []*pg.ViewDef{view}})
+	newView := pg.SchemaView("reporting", "recent_orders", `SELECT id FROM orders`)
+	newSnap := kit.FromSchema(kit.SchemaObjects{Views: []*pg.ViewDef{newView}})
+	changes := kit.Diff(oldSnap, newSnap)
+	if len(changes) != 1 || changes[0].Kind != kit.ChangeReplaceView {
+		t.Fatalf("expected 1 ChangeReplaceView, got %v", changes)
+	}
+	stmts := kit.GenerateChangeSQL(newSnap, changes[0])
+	if len(stmts) != 2 {
+		t.Fatalf("expected 2 statements (DROP + CREATE), got %d: %v", len(stmts), stmts)
+	}
+	if !strings.Contains(stmts[0], `"reporting"."recent_orders"`) {
+		t.Errorf("DROP VIEW must contain schema-qualified quoted name, got: %s", stmts[0])
+	}
+	if !strings.HasPrefix(stmts[0], "DROP VIEW IF EXISTS") {
+		t.Errorf("first statement must be DROP VIEW IF EXISTS, got: %s", stmts[0])
+	}
+	if !strings.Contains(stmts[1], `"reporting"."recent_orders"`) {
+		t.Errorf("CREATE VIEW must contain schema-qualified quoted name, got: %s", stmts[1])
+	}
+	if !strings.Contains(stmts[1], "CREATE VIEW") || strings.Contains(stmts[1], "OR REPLACE") {
+		t.Errorf("second statement must be CREATE VIEW (not OR REPLACE), got: %s", stmts[1])
+	}
+}
+
+func TestGenerateChangeSQL_ReplaceView_SchemaQualified_MySQL(t *testing.T) {
+	// MySQL: ChangeReplaceView with a schema-qualified view emits CREATE OR REPLACE VIEW
+	// with the correctly quoted schema-qualified name.
+	view := pg.SchemaView("reporting", "recent_orders", `SELECT * FROM orders WHERE created_at > now() - interval '7 days'`)
+	oldSnap := kit.FromSchema(kit.SchemaObjects{Views: []*pg.ViewDef{view}})
+	newView := pg.SchemaView("reporting", "recent_orders", `SELECT id FROM orders`)
+	newSnap := kit.FromSchema(kit.SchemaObjects{Views: []*pg.ViewDef{newView}})
+	changes := kit.Diff(oldSnap, newSnap)
+	if len(changes) != 1 || changes[0].Kind != kit.ChangeReplaceView {
+		t.Fatalf("expected 1 ChangeReplaceView, got %v", changes)
+	}
+	stmts := kit.GenerateChangeSQLMySQL(newSnap, changes[0])
+	if len(stmts) != 1 {
+		t.Fatalf("expected 1 statement, got %d: %v", len(stmts), stmts)
+	}
+	if !strings.Contains(stmts[0], "CREATE OR REPLACE VIEW") {
+		t.Errorf("expected CREATE OR REPLACE VIEW, got: %s", stmts[0])
+	}
+	// MySQL uses backtick quoting
+	if !strings.Contains(stmts[0], "`reporting`") || !strings.Contains(stmts[0], "`recent_orders`") {
+		t.Errorf("expected backtick-quoted schema-qualified name, got: %s", stmts[0])
+	}
+}
+
+func TestGenerateChangeSQL_ReplaceView_SchemaQualified_SQLite(t *testing.T) {
+	// SQLite: ChangeReplaceView with a schema-qualified view emits
+	// DROP VIEW IF EXISTS + CREATE VIEW; SQLite has no schema namespace so
+	// the schema prefix is stripped and only the unqualified name is quoted.
+	view := pg.SchemaView("reporting", "recent_orders", `SELECT * FROM orders WHERE created_at > now() - interval '7 days'`)
+	oldSnap := kit.FromSchema(kit.SchemaObjects{Views: []*pg.ViewDef{view}})
+	newView := pg.SchemaView("reporting", "recent_orders", `SELECT id FROM orders`)
+	newSnap := kit.FromSchema(kit.SchemaObjects{Views: []*pg.ViewDef{newView}})
+	changes := kit.Diff(oldSnap, newSnap)
+	if len(changes) != 1 || changes[0].Kind != kit.ChangeReplaceView {
+		t.Fatalf("expected 1 ChangeReplaceView, got %v", changes)
+	}
+	stmts := kit.GenerateChangeSQLSQLite(newSnap, changes[0])
+	if len(stmts) != 2 {
+		t.Fatalf("expected 2 statements (DROP + CREATE), got %d: %v", len(stmts), stmts)
+	}
+	if !strings.HasPrefix(stmts[0], "DROP VIEW IF EXISTS") {
+		t.Errorf("first statement must be DROP VIEW IF EXISTS, got: %s", stmts[0])
+	}
+	if !strings.Contains(stmts[0], `"recent_orders"`) {
+		t.Errorf("DROP VIEW must contain quoted view name, got: %s", stmts[0])
+	}
+	if !strings.Contains(stmts[1], "CREATE VIEW") {
+		t.Errorf("second statement must be CREATE VIEW, got: %s", stmts[1])
+	}
+	if !strings.Contains(stmts[1], `"recent_orders"`) {
+		t.Errorf("CREATE VIEW must contain quoted view name, got: %s", stmts[1])
+	}
+}
+
 func TestDiff_NoChange_View_SameSQL(t *testing.T) {
 	snap := kit.FromSchema(kit.SchemaObjects{
 		Views: []*pg.ViewDef{pg.CreateView("v", "SELECT 1")},
@@ -1127,6 +1210,56 @@ func TestSQLiteChangeSQL_CreateEnum_IsComment(t *testing.T) {
 }
 
 // -------------------------------------------------------------------
+// SQLiteApplyableChanges: new change kinds
+// -------------------------------------------------------------------
+
+func TestSQLiteApplyableChanges_NewChangeKinds(t *testing.T) {
+	// All six new change kinds (views + enums) must pass through SQLiteApplyableChanges
+	// unchanged — none of them are column-level changes that require a table rebuild.
+	viewSnap := &kit.ViewSnap{Name: "v", SQL: "SELECT 1"}
+	enumSnapVal := &kit.EnumSnap{Name: "status", Values: []string{"a", "b"}}
+
+	cases := []struct {
+		name   string
+		change kit.Change
+	}{
+		{
+			"ChangeCreateView",
+			kit.Change{Kind: kit.ChangeCreateView, ObjectName: "v", View: viewSnap},
+		},
+		{
+			"ChangeReplaceView",
+			kit.Change{Kind: kit.ChangeReplaceView, ObjectName: "v", View: viewSnap},
+		},
+		{
+			"ChangeDropView",
+			kit.Change{Kind: kit.ChangeDropView, ObjectName: "v", View: viewSnap},
+		},
+		{
+			"ChangeCreateEnum",
+			kit.Change{Kind: kit.ChangeCreateEnum, ObjectName: "status", NewEnum: enumSnapVal},
+		},
+		{
+			"ChangeAlterEnum",
+			kit.Change{Kind: kit.ChangeAlterEnum, ObjectName: "status", OldEnum: enumSnapVal, NewEnum: enumSnapVal},
+		},
+		{
+			"ChangeDropEnum",
+			kit.Change{Kind: kit.ChangeDropEnum, ObjectName: "status", OldEnum: enumSnapVal},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := kit.SQLiteApplyableChanges([]kit.Change{tc.change})
+			if len(result) != 1 {
+				t.Errorf("%s: expected change to pass through SQLiteApplyableChanges, got %d results", tc.name, len(result))
+			}
+		})
+	}
+}
+
+// -------------------------------------------------------------------
 // AllChangeSQL with mixed objects
 // -------------------------------------------------------------------
 
@@ -1161,6 +1294,81 @@ func TestAllChangeSQL_MixedObjects(t *testing.T) {
 	}
 	if !hasView {
 		t.Error("expected CREATE OR REPLACE VIEW statement")
+	}
+}
+
+func TestAllChangeSQLMySQL_MixedObjects(t *testing.T) {
+	newSnap := kit.FromSchema(kit.SchemaObjects{
+		Tables: []pg.TableDefiner{usersDef},
+		Views:  []*pg.ViewDef{activeUsersView},
+		Enums:  []*pg.EnumDef{statusEnum},
+	})
+	changes := kit.Diff(kit.EmptySnapshot(), newSnap)
+	stmts := kit.AllChangeSQLMySQL(newSnap, changes)
+
+	hasTable := false
+	hasView := false
+	hasEnumComment := false
+	for _, s := range stmts {
+		if strings.Contains(s, "CREATE TABLE") {
+			hasTable = true
+		}
+		if strings.Contains(s, "CREATE OR REPLACE VIEW") {
+			hasView = true
+		}
+		if strings.HasPrefix(s, "--") && strings.Contains(s, "MySQL") && strings.Contains(s, "ENUM") {
+			hasEnumComment = true
+		}
+	}
+	if !hasTable {
+		t.Error("expected CREATE TABLE statement in MySQL output")
+	}
+	if !hasView {
+		t.Error("expected CREATE OR REPLACE VIEW statement in MySQL output")
+	}
+	if !hasEnumComment {
+		t.Error("expected MySQL stub comment for enum type in output")
+	}
+}
+
+func TestAllChangeSQLSQLite_MixedObjects(t *testing.T) {
+	newSnap := kit.FromSchema(kit.SchemaObjects{
+		Tables: []pg.TableDefiner{usersDef},
+		Views:  []*pg.ViewDef{activeUsersView},
+		Enums:  []*pg.EnumDef{statusEnum},
+	})
+	changes := kit.Diff(kit.EmptySnapshot(), newSnap)
+	stmts := kit.AllChangeSQLSQLite(newSnap, changes)
+
+	hasTable := false
+	hasViewDrop := false
+	hasViewCreate := false
+	hasEnumComment := false
+	for _, s := range stmts {
+		if strings.Contains(s, "CREATE TABLE") {
+			hasTable = true
+		}
+		if strings.HasPrefix(s, "DROP VIEW IF EXISTS") {
+			hasViewDrop = true
+		}
+		if strings.Contains(s, "CREATE VIEW") {
+			hasViewCreate = true
+		}
+		if strings.HasPrefix(s, "--") && strings.Contains(s, "SQLite") && strings.Contains(s, "ENUM") {
+			hasEnumComment = true
+		}
+	}
+	if !hasTable {
+		t.Error("expected CREATE TABLE statement in SQLite output")
+	}
+	if !hasViewDrop {
+		t.Error("expected DROP VIEW IF EXISTS statement in SQLite output (SQLite uses DROP+CREATE for new views)")
+	}
+	if !hasViewCreate {
+		t.Error("expected CREATE VIEW statement in SQLite output")
+	}
+	if !hasEnumComment {
+		t.Error("expected SQLite stub comment for enum type in output")
 	}
 }
 

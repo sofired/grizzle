@@ -67,6 +67,8 @@ type ViewSnap struct {
 	Schema string `json:"schema,omitempty"`
 	// SQL is the raw SELECT body as declared in the schema definition; not pre-normalized.
 	// normalizeViewSQL is applied at diff time to avoid spurious diffs from PostgreSQL reformatting.
+	// Must be a trusted, developer-authored SQL string — never interpolate
+	// runtime user input, as this is embedded verbatim in generated DDL.
 	SQL string `json:"sql"`
 }
 

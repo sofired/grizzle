@@ -1,6 +1,8 @@
 package kit
 
-import "testing"
+import (
+	"testing"
+)
 
 func TestEnumAddedValues_PrependBeforeExisting(t *testing.T) {
 	// new values "a","b" inserted before existing "z"; "a" should get Before:"z", "b" should get After:"a"
@@ -63,5 +65,102 @@ func TestEnumAddedValues_InterleavedMultiPosition(t *testing.T) {
 	}
 	if got[1].Value != "d" || got[1].After != "c" || got[1].Before != "" {
 		t.Errorf("got[1] = %+v, want {Value:d After:c}", got[1])
+	}
+}
+
+// -------------------------------------------------------------------
+// enumDrift white-box unit tests
+// -------------------------------------------------------------------
+
+func TestEnumDrift_ValuesRemoved_NoReorder(t *testing.T) {
+	old := &EnumSnap{Name: "s", Values: []string{"a", "b", "c"}}
+	nw := &EnumSnap{Name: "s", Values: []string{"a", "c"}}
+	removed, reordered := enumDrift(old, nw)
+	if len(removed) != 1 || removed[0] != "b" {
+		t.Errorf("expected removed=[b], got %v", removed)
+	}
+	if reordered {
+		t.Error("expected reordered=false when only values are removed")
+	}
+}
+
+func TestEnumDrift_ValuesReordered_NoneRemoved(t *testing.T) {
+	old := &EnumSnap{Name: "s", Values: []string{"a", "b", "c"}}
+	nw := &EnumSnap{Name: "s", Values: []string{"a", "c", "b"}}
+	removed, reordered := enumDrift(old, nw)
+	if len(removed) != 0 {
+		t.Errorf("expected no removed values, got %v", removed)
+	}
+	if !reordered {
+		t.Error("expected reordered=true when retained values change order")
+	}
+}
+
+func TestEnumDrift_BothRemovedAndReordered(t *testing.T) {
+	old := &EnumSnap{Name: "s", Values: []string{"a", "b", "c", "d"}}
+	// "b" is removed and "c","d" are swapped relative to old
+	nw := &EnumSnap{Name: "s", Values: []string{"a", "d", "c"}}
+	removed, reordered := enumDrift(old, nw)
+	if len(removed) != 1 || removed[0] != "b" {
+		t.Errorf("expected removed=[b], got %v", removed)
+	}
+	if !reordered {
+		t.Error("expected reordered=true when retained values change order")
+	}
+}
+
+func TestEnumDrift_NoChanges(t *testing.T) {
+	old := &EnumSnap{Name: "s", Values: []string{"a", "b", "c"}}
+	nw := &EnumSnap{Name: "s", Values: []string{"a", "b", "c"}}
+	removed, reordered := enumDrift(old, nw)
+	if len(removed) != 0 {
+		t.Errorf("expected no removed values, got %v", removed)
+	}
+	if reordered {
+		t.Error("expected reordered=false for identical enum values")
+	}
+}
+
+// -------------------------------------------------------------------
+// normalizeViewSQL unit tests
+// -------------------------------------------------------------------
+
+func TestNormalizeViewSQL_TrailingSemicolon(t *testing.T) {
+	got := normalizeViewSQL("SELECT 1;")
+	want := "SELECT 1"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestNormalizeViewSQL_LeadingTrailingWhitespace(t *testing.T) {
+	got := normalizeViewSQL("  SELECT 1  ")
+	want := "SELECT 1"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestNormalizeViewSQL_WhitespaceAndSemicolon(t *testing.T) {
+	got := normalizeViewSQL("  SELECT 1;  ")
+	want := "SELECT 1"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestNormalizeViewSQL_MultipleTrailingSemicolons(t *testing.T) {
+	got := normalizeViewSQL("SELECT 1;;;")
+	want := "SELECT 1"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestNormalizeViewSQL_EmptyString(t *testing.T) {
+	got := normalizeViewSQL("")
+	want := ""
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
 	}
 }

@@ -279,6 +279,12 @@ func Diff(old, new Snapshot) []Change {
 	// type changes, reordering, removals) that CREATE OR REPLACE VIEW cannot handle in
 	// PostgreSQL. Without CASCADE, a DROP on a view with dependents produces a clear
 	// PostgreSQL error explaining which objects depend on it.
+	//
+	// Deferral: if the view's name conflicts with a table being dropped in this same
+	// migration, the replace must be deferred to phase 8b for the same reason as
+	// ChangeCreateView — PostgreSQL requires a view name to be distinct from all
+	// existing relations, including the to-be-dropped table.
+	var deferredReplaceViews []Change
 	for _, name := range sortedKeys(new.Views) {
 		oldV, exists := old.Views[name]
 		if !exists {
@@ -287,9 +293,12 @@ func Diff(old, new Snapshot) []Change {
 		newV := new.Views[name]
 		if normalizeViewSQL(oldV.SQL) != normalizeViewSQL(newV.SQL) {
 			n := *newV
-			changes = append(changes,
-				Change{Kind: ChangeReplaceView, ObjectName: name, View: &n},
-			)
+			ch := Change{Kind: ChangeReplaceView, ObjectName: name, View: &n}
+			if _, conflict := actualDroppedTables[name]; conflict {
+				deferredReplaceViews = append(deferredReplaceViews, ch)
+			} else {
+				changes = append(changes, ch)
+			}
 		}
 	}
 
@@ -317,11 +326,12 @@ func Diff(old, new Snapshot) []Change {
 		}
 	}
 
-	// Phase 8b: deferred enum/view creations whose names collided with a dropped
-	// table. Enums come first so any deferred view referencing a same-named new
-	// enum can rely on it existing.
+	// Phase 8b: deferred enum/view creations (and replacements) whose names collided
+	// with a dropped table. Enums come first so any deferred view referencing a
+	// same-named new enum can rely on it existing.
 	changes = append(changes, deferredCreateEnums...)
 	changes = append(changes, deferredCreateViews...)
+	changes = append(changes, deferredReplaceViews...)
 
 	// Phase 9: enums in old but not new → DROP TYPE (after referencing tables are gone).
 	for _, name := range sortedKeys(old.Enums) {

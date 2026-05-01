@@ -23,6 +23,10 @@ type PushResult struct {
 // in the diff and will not be created, altered, or dropped. Use PushSchema
 // (tracked in #136) to manage views and enums via Push.
 //
+// Note: if the diff includes enum value additions (ChangeAlterEnum), the generated
+// ALTER TYPE ... ADD VALUE statements cannot run inside a transaction on PostgreSQL < 12.
+// On PG 9.x–11.x, apply those statements outside a transaction or upgrade to PG 12+.
+//
 // Example:
 //
 //	result, err := kit.Push(ctx, pool, schema.Users, schema.Realms)
@@ -65,6 +69,10 @@ func Push(ctx context.Context, pool *pgxpool.Pool, tables ...pg.TableDefiner) (P
 //
 // Note: like Push, DryRun only diffs tables. Views and named enum types are
 // not included. See PushSchema (#136) for full schema object support.
+//
+// Note: if the diff includes enum value additions (ChangeAlterEnum), the generated
+// ALTER TYPE ... ADD VALUE statements cannot run inside a transaction on PostgreSQL < 12.
+// On PG 9.x–11.x, apply those statements outside a transaction or upgrade to PG 12+.
 func DryRun(ctx context.Context, pool *pgxpool.Pool, tables ...pg.TableDefiner) (PushResult, error) {
 	live, err := introspect.IntrospectPostgres(ctx, pool)
 	if err != nil {

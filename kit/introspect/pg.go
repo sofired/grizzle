@@ -34,6 +34,7 @@ type LiveView struct {
 	SQL    string
 }
 
+// QualifiedName returns the schema-qualified name used as the map key.
 func (v *LiveView) QualifiedName() string {
 	return qualifyName(v.Schema, v.Name)
 }
@@ -45,6 +46,7 @@ type LiveEnum struct {
 	Values []string
 }
 
+// QualifiedName returns the schema-qualified name used as the map key.
 func (e *LiveEnum) QualifiedName() string {
 	return qualifyName(e.Schema, e.Name)
 }

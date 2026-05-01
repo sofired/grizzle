@@ -50,6 +50,10 @@ type StatusResult struct {
 // history table. Calling Migrate twice with an unchanged schema is a no-op.
 // It accepts tables from any dialect via the TableDefiner interface.
 //
+// Note: if the diff includes enum value additions (ChangeAlterEnum), the generated
+// ALTER TYPE ... ADD VALUE statements cannot run inside a transaction on PostgreSQL < 12.
+// On PG 9.x–11.x, apply those statements outside a transaction or upgrade to PG 12+.
+//
 //	result, err := kit.Migrate(ctx, pool, schema.Users, schema.Realms)
 func Migrate(ctx context.Context, pool *pgxpool.Pool, tables ...pg.TableDefiner) (MigrateResult, error) {
 	if err := ensureMigrationsTable(ctx, pool); err != nil {
