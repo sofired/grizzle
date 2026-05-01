@@ -767,6 +767,69 @@ func TestDiff_Ordering_CreateViewAfterAlterTable(t *testing.T) {
 	}
 }
 
+func TestDiff_Ordering_CreateViewAfterDropTable_SameName(t *testing.T) {
+	// A table named "summary" is replaced by a view of the same name.
+	// ChangeDropTable must precede ChangeCreateView: PostgreSQL requires a view
+	// name to be distinct from all existing relations, including the old table.
+	oldTable := pg.Table("summary",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+	).Build()
+	newView := pg.CreateView("summary", `SELECT id FROM users`)
+
+	old := kit.FromSchema(kit.SchemaObjects{Tables: []pg.TableDefiner{oldTable}})
+	new := kit.FromSchema(kit.SchemaObjects{Views: []*pg.ViewDef{newView}})
+
+	changes := kit.Diff(old, new)
+
+	dropTableIdx, createViewIdx := -1, -1
+	for i, c := range changes {
+		if c.Kind == kit.ChangeDropTable && c.ObjectName == "summary" {
+			dropTableIdx = i
+		}
+		if c.Kind == kit.ChangeCreateView && c.ObjectName == "summary" {
+			createViewIdx = i
+		}
+	}
+	if dropTableIdx < 0 || createViewIdx < 0 {
+		t.Fatalf("missing expected changes: dropTable=%d createView=%d", dropTableIdx, createViewIdx)
+	}
+	if dropTableIdx >= createViewIdx {
+		t.Errorf("expected DROP TABLE (idx %d) before CREATE VIEW (idx %d)", dropTableIdx, createViewIdx)
+	}
+}
+
+func TestDiff_Ordering_CreateEnumAfterDropTable_SameName(t *testing.T) {
+	// A table named "status" is removed and a new enum named "status" is added.
+	// ChangeDropTable must precede ChangeCreateEnum: PostgreSQL tables carry an
+	// associated row type that blocks a same-named CREATE TYPE until the table
+	// is dropped.
+	oldTable := pg.Table("status",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+	).Build()
+	newEnum := pg.CreateEnum("status", "pending", "active", "archived")
+
+	old := kit.FromSchema(kit.SchemaObjects{Tables: []pg.TableDefiner{oldTable}})
+	new := kit.FromSchema(kit.SchemaObjects{Enums: []*pg.EnumDef{newEnum}})
+
+	changes := kit.Diff(old, new)
+
+	dropTableIdx, createEnumIdx := -1, -1
+	for i, c := range changes {
+		if c.Kind == kit.ChangeDropTable && c.ObjectName == "status" {
+			dropTableIdx = i
+		}
+		if c.Kind == kit.ChangeCreateEnum && c.ObjectName == "status" {
+			createEnumIdx = i
+		}
+	}
+	if dropTableIdx < 0 || createEnumIdx < 0 {
+		t.Fatalf("missing expected changes: dropTable=%d createEnum=%d", dropTableIdx, createEnumIdx)
+	}
+	if dropTableIdx >= createEnumIdx {
+		t.Errorf("expected DROP TABLE (idx %d) before CREATE ENUM (idx %d)", dropTableIdx, createEnumIdx)
+	}
+}
+
 func TestGenerateChangeSQL_AlterEnum_ConsecutiveInsertion(t *testing.T) {
 	// old=[a,d] → new=[a,b,c,d]: two labels inserted consecutively after 'a'.
 	// 'b' must be AFTER 'a'; 'c' must be AFTER 'b' (not AFTER 'a').

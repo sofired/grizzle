@@ -85,7 +85,11 @@ type Change struct {
 // view (phase 7), the names must naturally sort in dependency order, or the
 // migration will fail at runtime.
 //
-//  1. Create new enums — types may be referenced by table columns and views.
+//  1. Create new enums whose name does not conflict with a table being dropped.
+//     Types may be referenced by table columns and views. Enums that share a
+//     name with a dropped table are deferred to phase 8b because PostgreSQL
+//     tables carry an associated row type that blocks a same-named CREATE TYPE
+//     until the table is gone.
 //  2. Alter existing enums (add/remove/reorder values).
 //     Must run before any CREATE TABLE or CREATE VIEW that may reference a
 //     newly-added label (e.g. as a column default or in a view predicate).
@@ -96,13 +100,19 @@ type Change struct {
 //  4. Alter existing tables (columns + constraints, including drops).
 //     Must run before creating new views (phase 5) so that any new view
 //     referencing freshly-added or renamed columns can rely on them existing.
-//  5. Create new views — views SELECT FROM tables, which must already exist and
-//     be fully altered. Ordering within this phase is alphabetical only
-//     (no view→view dep resolution).
+//  5. Create new views whose name does not conflict with a table being dropped —
+//     views SELECT FROM tables, which must already exist and be fully altered.
+//     Ordering within this phase is alphabetical only (no view→view dep
+//     resolution). Views that share a name with a dropped table are deferred to
+//     phase 8b because PostgreSQL requires a view name to be distinct from all
+//     existing relations, including the to-be-dropped table.
 //  6. Replace changed views (DROP + CREATE, to handle incompatible column changes).
 //  7. Drop removed views — before tables, since views depend on tables.
 //     Ordering within this phase is alphabetical only (no view→view dep resolution).
 //  8. Drop removed tables (unless renamed away).
+//  8b. Create enums and views deferred from phases 1 and 5 whose names collided
+//     with a now-dropped table. Deferred enums are emitted first so any deferred
+//     view that references a same-named new enum can rely on it existing.
 //  9. Drop removed enums — after tables that may reference them are gone.
 //
 // Within each phase, output is sorted by object name for determinism.
@@ -154,15 +164,30 @@ func Diff(old, new Snapshot) []Change {
 		renamedTo[newName] = oldName
 	}
 
+	// Build set of tables that will actually be dropped in phase 8: present in
+	// old but not new, and not renamed away. Used to detect name conflicts for
+	// deferred enum/view creation (phases 1 and 5 respectively).
+	actualDroppedTables := make(map[string]struct{})
+	for name := range droppedTables {
+		if _, wasRenamed := renamedFrom[name]; !wasRenamed {
+			actualDroppedTables[name] = struct{}{}
+		}
+	}
+
 	// Phase 1: new enums not in old → CREATE TYPE ... AS ENUM.
+	// Enums whose name conflicts with a table being dropped are deferred to
+	// phase 8b: PostgreSQL tables carry an associated row type that blocks a
+	// same-named CREATE TYPE until the table is gone.
+	var deferredCreateEnums []Change
 	for _, name := range sortedKeys(new.Enums) {
 		if _, exists := old.Enums[name]; !exists {
 			e := *new.Enums[name]
-			changes = append(changes, Change{
-				Kind:       ChangeCreateEnum,
-				ObjectName: name,
-				NewEnum:    &e,
-			})
+			ch := Change{Kind: ChangeCreateEnum, ObjectName: name, NewEnum: &e}
+			if _, conflict := actualDroppedTables[name]; conflict {
+				deferredCreateEnums = append(deferredCreateEnums, ch)
+			} else {
+				changes = append(changes, ch)
+			}
 		}
 	}
 
@@ -232,14 +257,19 @@ func Diff(old, new Snapshot) []Change {
 	}
 
 	// Phase 5: new views not in old → CREATE VIEW (after tables and their alterations exist).
+	// Views whose name conflicts with a table being dropped are deferred to
+	// phase 8b: PostgreSQL requires a view name to be distinct from existing
+	// relations, so the conflicting table must be dropped first.
+	var deferredCreateViews []Change
 	for _, name := range sortedKeys(new.Views) {
 		if _, exists := old.Views[name]; !exists {
 			v := *new.Views[name]
-			changes = append(changes, Change{
-				Kind:       ChangeCreateView,
-				ObjectName: name,
-				View:       &v,
-			})
+			ch := Change{Kind: ChangeCreateView, ObjectName: name, View: &v}
+			if _, conflict := actualDroppedTables[name]; conflict {
+				deferredCreateViews = append(deferredCreateViews, ch)
+			} else {
+				changes = append(changes, ch)
+			}
 		}
 	}
 
@@ -286,6 +316,12 @@ func Diff(old, new Snapshot) []Change {
 			}
 		}
 	}
+
+	// Phase 8b: deferred enum/view creations whose names collided with a dropped
+	// table. Enums come first so any deferred view referencing a same-named new
+	// enum can rely on it existing.
+	changes = append(changes, deferredCreateEnums...)
+	changes = append(changes, deferredCreateViews...)
 
 	// Phase 9: enums in old but not new → DROP TYPE (after referencing tables are gone).
 	for _, name := range sortedKeys(old.Enums) {
