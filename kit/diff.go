@@ -110,7 +110,7 @@ type Change struct {
 //  7. Drop removed views — before tables, since views depend on tables.
 //     Ordering within this phase is alphabetical only (no view→view dep resolution).
 //  8. Drop removed tables (unless renamed away).
-//  8b. Create enums and views deferred from phases 1 and 5 whose names collided
+//     8b. Create enums and views deferred from phases 1 and 5 whose names collided
 //     with a now-dropped table. Deferred enums are emitted first so any deferred
 //     view that references a same-named new enum can rely on it existing.
 //  9. Drop removed enums — after tables that may reference them are gone.
