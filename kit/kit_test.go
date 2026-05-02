@@ -273,6 +273,103 @@ func TestGenerateChangeSQL_DropColumn(t *testing.T) {
 	}
 }
 
+// TestGenerateChangeSQL_AddFKWithOnUpdate verifies that addConstraintSQL emits
+// ON UPDATE <action> for FK constraints added via migration, matching the
+// createTableSQL path. Regression for issue #229.
+func TestGenerateChangeSQL_AddFKWithOnUpdate(t *testing.T) {
+	snap := kit.FromDefs(usersDef)
+	constraint := pg.Constraint{
+		Kind:       pg.KindForeignKey,
+		Name:       "users_realm_fk",
+		Columns:    []string{"realm_id"},
+		FKTable:    "realms",
+		FKColumns:  []string{"id"},
+		FKOnDelete: pg.FKActionCascade,
+		FKOnUpdate: pg.FKActionCascade,
+	}
+	change := kit.Change{
+		Kind:       kit.ChangeAddConstraint,
+		TableName:  "users",
+		Constraint: &constraint,
+	}
+	stmts := kit.GenerateChangeSQL(snap, change)
+	if len(stmts) != 1 {
+		t.Fatalf("expected 1 statement, got %d: %v", len(stmts), stmts)
+	}
+	got := stmts[0]
+	wantOnDelete := "ON DELETE CASCADE"
+	wantOnUpdate := "ON UPDATE CASCADE"
+	if !strings.Contains(got, wantOnDelete) {
+		t.Errorf("missing %q in:\n  %s", wantOnDelete, got)
+	}
+	if !strings.Contains(got, wantOnUpdate) {
+		t.Errorf("missing %q in:\n  %s", wantOnUpdate, got)
+	}
+}
+
+// TestGenerateChangeSQL_AddFKWithOnUpdateOnly verifies that a FK with only
+// ON UPDATE set (no ON DELETE) emits ON UPDATE but not ON DELETE.
+func TestGenerateChangeSQL_AddFKWithOnUpdateOnly(t *testing.T) {
+	snap := kit.FromDefs(usersDef)
+	constraint := pg.Constraint{
+		Kind:      pg.KindForeignKey,
+		Name:      "users_realm_fk",
+		Columns:   []string{"realm_id"},
+		FKTable:   "realms",
+		FKColumns: []string{"id"},
+		// FKOnDelete intentionally left as zero value (no action, not emitted).
+		FKOnUpdate: pg.FKActionRestrict,
+	}
+	change := kit.Change{
+		Kind:       kit.ChangeAddConstraint,
+		TableName:  "users",
+		Constraint: &constraint,
+	}
+	stmts := kit.GenerateChangeSQL(snap, change)
+	if len(stmts) != 1 {
+		t.Fatalf("expected 1 statement, got %d: %v", len(stmts), stmts)
+	}
+	got := stmts[0]
+	if strings.Contains(got, "ON DELETE") {
+		t.Errorf("unexpected ON DELETE clause when FKOnDelete is default:\n  %s", got)
+	}
+	wantOnUpdate := "ON UPDATE RESTRICT"
+	if !strings.Contains(got, wantOnUpdate) {
+		t.Errorf("missing %q in:\n  %s", wantOnUpdate, got)
+	}
+}
+
+// TestGenerateChangeSQL_AddFKDefaultActions verifies that ON UPDATE NO ACTION
+// (the default) is not emitted to keep SQL clean — matching ON DELETE behaviour.
+func TestGenerateChangeSQL_AddFKDefaultActions(t *testing.T) {
+	snap := kit.FromDefs(usersDef)
+	constraint := pg.Constraint{
+		Kind:       pg.KindForeignKey,
+		Name:       "users_realm_fk",
+		Columns:    []string{"realm_id"},
+		FKTable:    "realms",
+		FKColumns:  []string{"id"},
+		FKOnDelete: pg.FKActionNoAction,
+		FKOnUpdate: pg.FKActionNoAction,
+	}
+	change := kit.Change{
+		Kind:       kit.ChangeAddConstraint,
+		TableName:  "users",
+		Constraint: &constraint,
+	}
+	stmts := kit.GenerateChangeSQL(snap, change)
+	if len(stmts) != 1 {
+		t.Fatalf("expected 1 statement, got %d: %v", len(stmts), stmts)
+	}
+	got := stmts[0]
+	if strings.Contains(got, "ON DELETE") {
+		t.Errorf("unexpected ON DELETE clause for NO ACTION:\n  %s", got)
+	}
+	if strings.Contains(got, "ON UPDATE") {
+		t.Errorf("unexpected ON UPDATE clause for NO ACTION:\n  %s", got)
+	}
+}
+
 // --- Helpers ---
 
 func countKind(changes []kit.Change, kind kit.ChangeKind) int {
