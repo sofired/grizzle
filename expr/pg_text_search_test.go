@@ -796,3 +796,122 @@ func TestToTsqueryWithConfig_NonPG_EmitsNULL(t *testing.T) {
 		}
 	}
 }
+
+func TestPlainToTsqueryWithConfig_NonPG_EmitsNULL(t *testing.T) {
+	for _, name := range []string{"mysql", "sqlite"} {
+		ctx := myCtx()
+		if name == "sqlite" {
+			ctx = sqliteCtx()
+		}
+		got := expr.PlainToTsqueryWithConfig("english", "grizzle orm").ToSQL(ctx)
+		if got != "NULL" {
+			t.Errorf("PlainToTsqueryWithConfig on %s: got %q, want \"NULL\"", name, got)
+		}
+		if len(ctx.Args()) != 0 {
+			t.Errorf("PlainToTsqueryWithConfig on %s: expected no args bound, got %v", name, ctx.Args())
+		}
+	}
+}
+
+func TestPhraseToTsqueryWithConfig_NonPG_EmitsNULL(t *testing.T) {
+	for _, name := range []string{"mysql", "sqlite"} {
+		ctx := myCtx()
+		if name == "sqlite" {
+			ctx = sqliteCtx()
+		}
+		got := expr.PhraseToTsqueryWithConfig("english", "fast full text").ToSQL(ctx)
+		if got != "NULL" {
+			t.Errorf("PhraseToTsqueryWithConfig on %s: got %q, want \"NULL\"", name, got)
+		}
+		if len(ctx.Args()) != 0 {
+			t.Errorf("PhraseToTsqueryWithConfig on %s: expected no args bound, got %v", name, ctx.Args())
+		}
+	}
+}
+
+func TestWebsearchToTsqueryWithConfig_NonPG_EmitsNULL(t *testing.T) {
+	for _, name := range []string{"mysql", "sqlite"} {
+		ctx := myCtx()
+		if name == "sqlite" {
+			ctx = sqliteCtx()
+		}
+		got := expr.WebsearchToTsqueryWithConfig("english", "grizzle -orm").ToSQL(ctx)
+		if got != "NULL" {
+			t.Errorf("WebsearchToTsqueryWithConfig on %s: got %q, want \"NULL\"", name, got)
+		}
+		if len(ctx.Args()) != 0 {
+			t.Errorf("WebsearchToTsqueryWithConfig on %s: expected no args bound, got %v", name, ctx.Args())
+		}
+	}
+}
+
+func TestTsvectorColumn_MatchesPlainWithConfig_NonPG_EmitsFALSE(t *testing.T) {
+	for _, name := range []string{"mysql", "sqlite"} {
+		ctx := myCtx()
+		if name == "sqlite" {
+			ctx = sqliteCtx()
+		}
+		got := ts.ArticlesT.SearchVector.MatchesPlainWithConfig("english", "grizzle orm").ToSQL(ctx)
+		if got != "FALSE" {
+			t.Errorf("TsvectorColumn.MatchesPlainWithConfig on %s: got %q, want \"FALSE\"", name, got)
+		}
+		if len(ctx.Args()) != 0 {
+			t.Errorf("TsvectorColumn.MatchesPlainWithConfig on %s: expected no args bound, got %v", name, ctx.Args())
+		}
+	}
+}
+
+func TestTsvectorColumn_MatchesPhraseWithConfig_NonPG_EmitsFALSE(t *testing.T) {
+	for _, name := range []string{"mysql", "sqlite"} {
+		ctx := myCtx()
+		if name == "sqlite" {
+			ctx = sqliteCtx()
+		}
+		got := ts.ArticlesT.SearchVector.MatchesPhraseWithConfig("english", "fast full text").ToSQL(ctx)
+		if got != "FALSE" {
+			t.Errorf("TsvectorColumn.MatchesPhraseWithConfig on %s: got %q, want \"FALSE\"", name, got)
+		}
+	}
+}
+
+func TestTsvectorColumn_MatchesWebSearchWithConfig_NonPG_EmitsFALSE(t *testing.T) {
+	for _, name := range []string{"mysql", "sqlite"} {
+		ctx := myCtx()
+		if name == "sqlite" {
+			ctx = sqliteCtx()
+		}
+		got := ts.ArticlesT.SearchVector.MatchesWebSearchWithConfig("english", "grizzle -orm").ToSQL(ctx)
+		if got != "FALSE" {
+			t.Errorf("TsvectorColumn.MatchesWebSearchWithConfig on %s: got %q, want \"FALSE\"", name, got)
+		}
+	}
+}
+
+// TsRank and TsRankCd are built on the generic FuncExpr and do not have their
+// own dialect gate. On non-PG dialects the tsquery argument emits NULL (since
+// tsQueryFnExpr is gated), producing TS_RANK(col, NULL) — syntactically valid
+// but semantically meaningless. Callers should check SupportsFullTextSearch()
+// before using TsRank/TsRankCd with non-PG dialects.
+func TestTsRank_NonPG_EmitsWithNullArg(t *testing.T) {
+	cases := []struct {
+		name string
+		ctx  *expr.BuildContext
+		col  string // expected quoted column reference
+	}{
+		{"mysql", myCtx(), "`articles`.`search_vector`"},
+		{"sqlite", sqliteCtx(), `"articles"."search_vector"`},
+	}
+	for _, tc := range cases {
+		tsq := expr.PlainToTsquery("grizzle orm")
+		rank := expr.TsRank(ts.ArticlesT.SearchVector, tsq)
+		got := rank.ToSQL(tc.ctx)
+		// The tsquery arg emits NULL on non-PG; no args should be bound.
+		want := "TS_RANK(" + tc.col + ", NULL)"
+		if got != want {
+			t.Errorf("TsRank on %s: got %q, want %q", tc.name, got, want)
+		}
+		if len(tc.ctx.Args()) != 0 {
+			t.Errorf("TsRank on %s: expected no args bound, got %v", tc.name, tc.ctx.Args())
+		}
+	}
+}
