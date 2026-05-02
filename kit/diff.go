@@ -85,13 +85,14 @@ type Change struct {
 // view (phase 7), the names must naturally sort in dependency order, or the
 // migration will fail at runtime.
 //
-//  1. Create new enums whose name does not conflict with an existing table.
-//     Types may be referenced by table columns and views. Enums that share a
-//     name with a dropped table are deferred to phase 8b because PostgreSQL
-//     tables carry an associated row type that blocks a same-named CREATE TYPE
-//     until the table is gone. Enums that share a name with a renamed-away
-//     table are deferred to phase 3b for the same reason — the rename frees
-//     the old composite row type so the enum can be created right afterward.
+//  1. Create new enums whose name does not conflict with a table being dropped
+//     or renamed in this migration. Types may be referenced by table columns
+//     and views. Enums that share a name with a dropped table are deferred to
+//     phase 8b because PostgreSQL tables carry an associated row type that
+//     blocks a same-named CREATE TYPE until the table is gone. Enums that share
+//     a name with a renamed-away table are deferred to phase 3b for the same
+//     reason — the rename frees the old composite row type so the enum can be
+//     created right afterward.
 //  2. Alter existing enums (add/remove/reorder values).
 //     Must run before any CREATE TABLE or CREATE VIEW that may reference a
 //     newly-added label (e.g. as a column default or in a view predicate).
@@ -178,31 +179,23 @@ func Diff(old, new Snapshot) []Change {
 		}
 	}
 
-	// Build set of old table names that are being renamed away (freed in phase 3).
-	// A new enum whose name matches one of these must be deferred to phase 3b —
-	// PostgreSQL tables carry an associated composite row type that blocks CREATE
-	// TYPE until the table is renamed or dropped.
-	renamedAwayNames := make(map[string]struct{}, len(renamedFrom))
-	for oldName := range renamedFrom {
-		renamedAwayNames[oldName] = struct{}{}
-	}
-
 	// Phase 1: new enums not in old → CREATE TYPE ... AS ENUM.
 	// Enums whose name conflicts with a table being dropped are deferred to
 	// phase 8b: PostgreSQL tables carry an associated row type that blocks a
 	// same-named CREATE TYPE until the table is gone.
 	// Enums whose name conflicts with a table being renamed are deferred to
 	// phase 3b: the RENAME TABLE in phase 3 frees the old composite row type,
-	// so these enums can be created immediately afterward.
-	var deferredCreateEnums []Change       // phase 8b: after table drops
-	var renamedBlockedEnums []Change       // phase 3b: after table renames
+	// so these enums can be created immediately afterward. renamedFrom keys are
+	// the old (source) names of renamed tables.
+	var deferredCreateEnums []Change // phase 8b: after table drops
+	var renamedBlockedEnums []Change // phase 3b: after table renames
 	for _, name := range sortedKeys(new.Enums) {
 		if _, exists := old.Enums[name]; !exists {
 			e := *new.Enums[name]
 			ch := Change{Kind: ChangeCreateEnum, ObjectName: name, NewEnum: &e}
 			if _, conflict := actualDroppedTables[name]; conflict {
 				deferredCreateEnums = append(deferredCreateEnums, ch)
-			} else if _, conflict := renamedAwayNames[name]; conflict {
+			} else if _, conflict := renamedFrom[name]; conflict {
 				renamedBlockedEnums = append(renamedBlockedEnums, ch)
 			} else {
 				changes = append(changes, ch)

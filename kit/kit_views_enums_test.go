@@ -914,12 +914,16 @@ func TestDiff_Ordering_CreateEnumAfterDropTable_SameName(t *testing.T) {
 }
 
 func TestDiff_Ordering_CreateEnumAfterRenameTable_SameName(t *testing.T) {
-	// Table "status" is renamed to "status_old" and a new enum "status" is introduced.
+	// Table "status" is renamed to "status_old" and a new enum "status" is introduced,
+	// plus a new table "events" with a column typed as the new enum.
 	// ChangeRenameTable must precede ChangeCreateEnum: PostgreSQL tables carry an
 	// associated composite row type that blocks a same-named CREATE TYPE until the
 	// table is renamed away. This covers the case where actualDroppedTables would
 	// NOT contain "status" (because it's renamed, not dropped), yet the name is still
 	// occupied until the RENAME TABLE runs.
+	// ChangeCreateEnum must also precede ChangeCreateTable for "events" so that the
+	// enum type exists when the column referencing it is created (phase 3b before
+	// the orderNewTables creates).
 	oldTable := pg.Table("status",
 		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
 	).Build()
@@ -927,16 +931,20 @@ func TestDiff_Ordering_CreateEnumAfterRenameTable_SameName(t *testing.T) {
 		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
 	).RenamedFrom("status").Build()
 	newEnum := pg.CreateEnum("status", "pending", "active", "archived")
+	newTable := pg.Table("events",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+		pg.C("state", pg.EnumColumn("status").NotNull()),
+	).Build()
 
 	old := kit.FromSchema(kit.SchemaObjects{Tables: []pg.TableDefiner{oldTable}})
 	nw := kit.FromSchema(kit.SchemaObjects{
-		Tables: []pg.TableDefiner{renamedTable},
+		Tables: []pg.TableDefiner{renamedTable, newTable},
 		Enums:  []*pg.EnumDef{newEnum},
 	})
 
 	changes := kit.Diff(old, nw)
 
-	renameTableIdx, createEnumIdx := -1, -1
+	renameTableIdx, createEnumIdx, createEventsIdx := -1, -1, -1
 	for i, c := range changes {
 		if c.Kind == kit.ChangeRenameTable && c.ObjectName == "status" {
 			renameTableIdx = i
@@ -944,12 +952,19 @@ func TestDiff_Ordering_CreateEnumAfterRenameTable_SameName(t *testing.T) {
 		if c.Kind == kit.ChangeCreateEnum && c.ObjectName == "status" {
 			createEnumIdx = i
 		}
+		if c.Kind == kit.ChangeCreateTable && c.ObjectName == "events" {
+			createEventsIdx = i
+		}
 	}
-	if renameTableIdx < 0 || createEnumIdx < 0 {
-		t.Fatalf("missing expected changes: renameTable=%d createEnum=%d", renameTableIdx, createEnumIdx)
+	if renameTableIdx < 0 || createEnumIdx < 0 || createEventsIdx < 0 {
+		t.Fatalf("missing expected changes: renameTable=%d createEnum=%d createEvents=%d",
+			renameTableIdx, createEnumIdx, createEventsIdx)
 	}
 	if renameTableIdx >= createEnumIdx {
 		t.Errorf("expected RENAME TABLE (idx %d) before CREATE ENUM (idx %d)", renameTableIdx, createEnumIdx)
+	}
+	if createEnumIdx >= createEventsIdx {
+		t.Errorf("expected CREATE ENUM (idx %d) before CREATE TABLE events (idx %d)", createEnumIdx, createEventsIdx)
 	}
 }
 
