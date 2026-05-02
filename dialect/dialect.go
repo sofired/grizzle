@@ -121,9 +121,10 @@ type Dialect interface {
 	// regular expression match operators (~, ~*, !~, !~*).
 	// True for PostgreSQL only; false for MySQL and SQLite.
 	//
-	// When false, regex expression types (regexpExpr) emit FALSE in the SQL output,
-	// which causes the predicate to evaluate to false without producing a syntax error.
-	// Callers should check this flag before building queries with regex operators.
+	// When false, all four operators — including the NOT-match operators (!~, !~*) —
+	// emit FALSE in the SQL output. Note: NOT-match operators emit FALSE (no rows),
+	// not TRUE (all rows), so expr.Not(col.NotRegexpMatch(...)) yields TRUE on
+	// unsupported dialects. Callers should check this flag before using regex operators.
 	SupportsRegexpMatch() bool
 
 	// SupportsFullTextSearch reports whether the dialect supports PostgreSQL-style

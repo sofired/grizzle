@@ -606,6 +606,9 @@ func TestNotRegexpMatch_NonPG_EmitsFALSE(t *testing.T) {
 		if got != "FALSE" {
 			t.Errorf("NotRegexpMatch on %s: got %q, want \"FALSE\"", name, got)
 		}
+		if len(ctx.Args()) != 0 {
+			t.Errorf("NotRegexpMatch on %s: expected no args bound, got %v", name, ctx.Args())
+		}
 	}
 }
 
@@ -618,6 +621,9 @@ func TestNotRegexpMatchI_NonPG_EmitsFALSE(t *testing.T) {
 		got := ts.UsersT.Email.NotRegexpMatchI("^alice").ToSQL(ctx)
 		if got != "FALSE" {
 			t.Errorf("NotRegexpMatchI on %s: got %q, want \"FALSE\"", name, got)
+		}
+		if len(ctx.Args()) != 0 {
+			t.Errorf("NotRegexpMatchI on %s: expected no args bound, got %v", name, ctx.Args())
 		}
 	}
 }
@@ -649,6 +655,9 @@ func TestTsvectorColumn_MatchesPlain_NonPG_EmitsFALSE(t *testing.T) {
 		if got != "FALSE" {
 			t.Errorf("TsvectorColumn.MatchesPlain on %s: got %q, want \"FALSE\"", name, got)
 		}
+		if len(ctx.Args()) != 0 {
+			t.Errorf("TsvectorColumn.MatchesPlain on %s: expected no args bound, got %v", name, ctx.Args())
+		}
 	}
 }
 
@@ -678,6 +687,9 @@ func TestTsvectorColumn_MatchesPhrase_NonPG_EmitsFALSE(t *testing.T) {
 		if got != "FALSE" {
 			t.Errorf("TsvectorColumn.MatchesPhrase on %s: got %q, want \"FALSE\"", name, got)
 		}
+		if len(ctx.Args()) != 0 {
+			t.Errorf("TsvectorColumn.MatchesPhrase on %s: expected no args bound, got %v", name, ctx.Args())
+		}
 	}
 }
 
@@ -690,6 +702,9 @@ func TestTsvectorColumn_MatchesWebSearch_NonPG_EmitsFALSE(t *testing.T) {
 		got := ts.ArticlesT.SearchVector.MatchesWebSearch("grizzle -orm").ToSQL(ctx)
 		if got != "FALSE" {
 			t.Errorf("TsvectorColumn.MatchesWebSearch on %s: got %q, want \"FALSE\"", name, got)
+		}
+		if len(ctx.Args()) != 0 {
+			t.Errorf("TsvectorColumn.MatchesWebSearch on %s: expected no args bound, got %v", name, ctx.Args())
 		}
 	}
 }
@@ -752,6 +767,9 @@ func TestPlainToTsquery_NonPG_EmitsNULL(t *testing.T) {
 		if got != "NULL" {
 			t.Errorf("PlainToTsquery on %s: got %q, want \"NULL\"", name, got)
 		}
+		if len(ctx.Args()) != 0 {
+			t.Errorf("PlainToTsquery on %s: expected no args bound, got %v", name, ctx.Args())
+		}
 	}
 }
 
@@ -765,6 +783,9 @@ func TestPhraseToTsquery_NonPG_EmitsNULL(t *testing.T) {
 		if got != "NULL" {
 			t.Errorf("PhraseToTsquery on %s: got %q, want \"NULL\"", name, got)
 		}
+		if len(ctx.Args()) != 0 {
+			t.Errorf("PhraseToTsquery on %s: expected no args bound, got %v", name, ctx.Args())
+		}
 	}
 }
 
@@ -777,6 +798,9 @@ func TestWebsearchToTsquery_NonPG_EmitsNULL(t *testing.T) {
 		got := expr.WebsearchToTsquery("grizzle -orm").ToSQL(ctx)
 		if got != "NULL" {
 			t.Errorf("WebsearchToTsquery on %s: got %q, want \"NULL\"", name, got)
+		}
+		if len(ctx.Args()) != 0 {
+			t.Errorf("WebsearchToTsquery on %s: expected no args bound, got %v", name, ctx.Args())
 		}
 	}
 }
@@ -871,6 +895,9 @@ func TestTsvectorColumn_MatchesPhraseWithConfig_NonPG_EmitsFALSE(t *testing.T) {
 		if got != "FALSE" {
 			t.Errorf("TsvectorColumn.MatchesPhraseWithConfig on %s: got %q, want \"FALSE\"", name, got)
 		}
+		if len(ctx.Args()) != 0 {
+			t.Errorf("TsvectorColumn.MatchesPhraseWithConfig on %s: expected no args bound, got %v", name, ctx.Args())
+		}
 	}
 }
 
@@ -883,6 +910,9 @@ func TestTsvectorColumn_MatchesWebSearchWithConfig_NonPG_EmitsFALSE(t *testing.T
 		got := ts.ArticlesT.SearchVector.MatchesWebSearchWithConfig("english", "grizzle -orm").ToSQL(ctx)
 		if got != "FALSE" {
 			t.Errorf("TsvectorColumn.MatchesWebSearchWithConfig on %s: got %q, want \"FALSE\"", name, got)
+		}
+		if len(ctx.Args()) != 0 {
+			t.Errorf("TsvectorColumn.MatchesWebSearchWithConfig on %s: expected no args bound, got %v", name, ctx.Args())
 		}
 	}
 }
@@ -912,6 +942,29 @@ func TestTsRank_NonPG_EmitsWithNullArg(t *testing.T) {
 		}
 		if len(tc.ctx.Args()) != 0 {
 			t.Errorf("TsRank on %s: expected no args bound, got %v", tc.name, tc.ctx.Args())
+		}
+	}
+}
+
+func TestTsRankCd_NonPG_EmitsWithNullArg(t *testing.T) {
+	cases := []struct {
+		name string
+		ctx  *expr.BuildContext
+		col  string
+	}{
+		{"mysql", myCtx(), "`articles`.`search_vector`"},
+		{"sqlite", sqliteCtx(), `"articles"."search_vector"`},
+	}
+	for _, tc := range cases {
+		tsq := expr.PlainToTsquery("grizzle orm")
+		rank := expr.TsRankCd(ts.ArticlesT.SearchVector, tsq)
+		got := rank.ToSQL(tc.ctx)
+		want := "TS_RANK_CD(" + tc.col + ", NULL)"
+		if got != want {
+			t.Errorf("TsRankCd on %s: got %q, want %q", tc.name, got, want)
+		}
+		if len(tc.ctx.Args()) != 0 {
+			t.Errorf("TsRankCd on %s: expected no args bound, got %v", tc.name, tc.ctx.Args())
 		}
 	}
 }
