@@ -80,9 +80,11 @@ Note: the primary key is excluded from `<Table>Update` because it is passed sepa
 
 ### Status
 
-Implemented for PostgreSQL and SQLite. MySQL struct generation has known gaps:
+Implemented for PostgreSQL, MySQL, and SQLite.
 
-- **#130** — `applyBaseType()` missing MySQL-specific types: `mediumint`, inline `enum`, `set`, `year`
+### Known limitations
+
+**`json:` struct tags are not generated** — the generator emits only `db:` struct tags. The examples in this file reflect that: all generated structs use only `db:` tags. If your application serialises generated structs to JSON, add `json:` tags manually or embed them in a wrapper struct. A `--json-tags` flag is not yet planned.
 
 ---
 
