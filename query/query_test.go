@@ -2095,6 +2095,22 @@ func TestDelete_Limit_SQLite(t *testing.T) {
 	}
 }
 
+func TestUpdate_Limit_Zero_NoClause(t *testing.T) {
+	q := query.Update(ts.UsersT).Set("enabled", false).Limit(0)
+	got, _ := q.Build(dialect.MySQL)
+	if strings.Contains(got, "LIMIT") {
+		t.Errorf("LIMIT should not appear when Limit(0): %s", got)
+	}
+}
+
+func TestDelete_Limit_Zero_NoClause(t *testing.T) {
+	q := query.DeleteFrom(ts.UsersT).Limit(0)
+	got, _ := q.Build(dialect.MySQL)
+	if strings.Contains(got, "LIMIT") {
+		t.Errorf("LIMIT should not appear when Limit(0): %s", got)
+	}
+}
+
 // -------------------------------------------------------------------
 // Column-to-column operator tests
 // -------------------------------------------------------------------

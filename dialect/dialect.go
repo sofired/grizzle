@@ -118,9 +118,11 @@ type Dialect interface {
 	SupportsForShareOf() bool
 
 	// SupportsLimitOnMutate reports whether the dialect supports a LIMIT clause
-	// on UPDATE and DELETE statements.
-	// True for MySQL and SQLite; false for PostgreSQL, which does not support
-	// LIMIT on mutating statements.
+	// on UPDATE and DELETE statements. True for MySQL and SQLite; false for
+	// PostgreSQL, which does not support LIMIT on mutating statements.
+	//
+	// When false, the LIMIT clause is silently dropped from UPDATE and DELETE
+	// statements at Build() time.
 	SupportsLimitOnMutate() bool
 }
 
