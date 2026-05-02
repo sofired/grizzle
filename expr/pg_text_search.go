@@ -13,6 +13,9 @@ type regexpExpr struct {
 }
 
 func (e regexpExpr) ToSQL(ctx *BuildContext) string {
+	if !ctx.Dialect().SupportsRegexpMatch() {
+		return "FALSE"
+	}
 	return e.ref.colRef(ctx) + " " + e.op + " " + ctx.Add(e.pattern)
 }
 
@@ -34,6 +37,9 @@ type ftsMatchExpr struct {
 }
 
 func (e ftsMatchExpr) ToSQL(ctx *BuildContext) string {
+	if !ctx.Dialect().SupportsFullTextSearch() {
+		return "FALSE"
+	}
 	var tsq string
 	if e.hasConfig {
 		tsq = e.tsFn + "(" + ctx.Add(e.config) + ", " + ctx.Add(e.query) + ")"
@@ -70,6 +76,9 @@ func (e TsvectorExpr) renderCore(ctx *BuildContext) string {
 }
 
 func (e TsvectorExpr) ToSQL(ctx *BuildContext) string {
+	if !ctx.Dialect().SupportsFullTextSearch() {
+		return "NULL"
+	}
 	s := e.renderCore(ctx)
 	if e.alias != "" {
 		s += " AS " + ctx.Quote(e.alias)
@@ -77,7 +86,12 @@ func (e TsvectorExpr) ToSQL(ctx *BuildContext) string {
 	return s
 }
 
-func (e TsvectorExpr) colRef(ctx *BuildContext) string { return e.renderCore(ctx) }
+func (e TsvectorExpr) colRef(ctx *BuildContext) string {
+	if !ctx.Dialect().SupportsFullTextSearch() {
+		return "NULL"
+	}
+	return e.renderCore(ctx)
+}
 
 // ColumnName implements SelectableColumn.
 func (e TsvectorExpr) ColumnName() string {
@@ -181,6 +195,9 @@ type ftsMatchExprOnExpr struct {
 }
 
 func (e ftsMatchExprOnExpr) ToSQL(ctx *BuildContext) string {
+	if !ctx.Dialect().SupportsFullTextSearch() {
+		return "FALSE"
+	}
 	// Render the left side first so its args are bound before the tsquery args,
 	// preserving left-to-right parameter numbering ($1, $2, ...).
 	left := e.left.colRef(ctx)
@@ -206,6 +223,9 @@ type tsQueryFnExpr struct {
 }
 
 func (e tsQueryFnExpr) ToSQL(ctx *BuildContext) string {
+	if !ctx.Dialect().SupportsFullTextSearch() {
+		return "NULL"
+	}
 	if e.hasConfig {
 		return e.fn + "(" + ctx.Add(e.config) + ", " + ctx.Add(e.query) + ")"
 	}

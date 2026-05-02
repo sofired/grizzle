@@ -116,6 +116,24 @@ type Dialect interface {
 	// True for PostgreSQL (FOR SHARE OF …); false for MySQL (LOCK IN SHARE MODE
 	// does not accept an OF clause) and SQLite (no row-level locking at all).
 	SupportsForShareOf() bool
+
+	// SupportsRegexpMatch reports whether the dialect supports PostgreSQL-style
+	// regular expression match operators (~, ~*, !~, !~*).
+	// True for PostgreSQL only; false for MySQL and SQLite.
+	//
+	// When false, regex expression types (regexpExpr) emit FALSE in the SQL output,
+	// which causes the predicate to evaluate to false without producing a syntax error.
+	// Callers should check this flag before building queries with regex operators.
+	SupportsRegexpMatch() bool
+
+	// SupportsFullTextSearch reports whether the dialect supports PostgreSQL-style
+	// full-text search operators and functions (@@, to_tsvector, to_tsquery, etc.).
+	// True for PostgreSQL only; false for MySQL and SQLite.
+	//
+	// When false, FTS expression types emit FALSE (for predicates) or NULL (for
+	// scalar expressions such as standalone tsquery constructors) in the SQL output.
+	// Callers should check this flag before building queries with FTS operators.
+	SupportsFullTextSearch() bool
 }
 
 // -------------------------------------------------------------------
@@ -139,6 +157,8 @@ func (postgresDialect) SupportsForNoKeyUpdate() bool  { return true }
 func (postgresDialect) SupportsFullJoin() bool        { return true }
 func (postgresDialect) ForShareClause() string        { return "FOR SHARE" }
 func (postgresDialect) SupportsForShareOf() bool      { return true }
+func (postgresDialect) SupportsRegexpMatch() bool     { return true }
+func (postgresDialect) SupportsFullTextSearch() bool  { return true }
 
 func (postgresDialect) Placeholder(n int) string {
 	return fmt.Sprintf("$%d", n)
@@ -170,6 +190,8 @@ func (mysqlDialect) SupportsForNoKeyUpdate() bool  { return false }
 func (mysqlDialect) SupportsFullJoin() bool        { return false }
 func (mysqlDialect) ForShareClause() string        { return "LOCK IN SHARE MODE" }
 func (mysqlDialect) SupportsForShareOf() bool      { return false }
+func (mysqlDialect) SupportsRegexpMatch() bool     { return false }
+func (mysqlDialect) SupportsFullTextSearch() bool  { return false }
 
 func (mysqlDialect) Placeholder(_ int) string { return "?" }
 
@@ -198,6 +220,8 @@ func (sqliteDialect) SupportsForNoKeyUpdate() bool  { return false }
 func (sqliteDialect) SupportsFullJoin() bool        { return false }
 func (sqliteDialect) ForShareClause() string        { return "" }
 func (sqliteDialect) SupportsForShareOf() bool      { return false }
+func (sqliteDialect) SupportsRegexpMatch() bool     { return false }
+func (sqliteDialect) SupportsFullTextSearch() bool  { return false }
 
 func (sqliteDialect) Placeholder(_ int) string { return "?" }
 
