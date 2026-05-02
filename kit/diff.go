@@ -660,7 +660,7 @@ func diffColumn(tableName string, old, new pg.ColumnDef) []Change {
 			NewCol:     &n,
 		})
 	}
-	if old.DefaultExpr != new.DefaultExpr || old.HasDefault != new.HasDefault {
+	if normalizeDefaultExpr(old.DefaultExpr) != normalizeDefaultExpr(new.DefaultExpr) || old.HasDefault != new.HasDefault {
 		o, n := old, new
 		changes = append(changes, Change{
 			Kind:       ChangeAlterColumnDefault,
@@ -670,6 +670,62 @@ func diffColumn(tableName string, old, new pg.ColumnDef) []Change {
 		})
 	}
 	return changes
+}
+
+// normalizeDefaultExpr canonicalizes a PostgreSQL default expression so that
+// semantically-equivalent expressions compare equal. It trims leading and
+// trailing whitespace and collapses whitespace around :: outside single-quoted
+// string literals (e.g. '{}'  ::  jsonb → '{}'::jsonb), handling the
+// doubled-quote escape for embedded single quotes. Dollar-quoted strings
+// ($$...$$) are not recognized; their delimiters are treated as ordinary
+// characters, so any :: inside them will be incorrectly collapsed.
+// Dollar-quoting is not expected in column default expressions returned by
+// PostgreSQL introspection.
+func normalizeDefaultExpr(expr string) string {
+	expr = strings.TrimSpace(expr)
+	var b strings.Builder
+	b.Grow(len(expr))
+	i := 0
+	for i < len(expr) {
+		if expr[i] == '\'' {
+			// Copy single-quoted literal verbatim, handling '' escape sequences.
+			j := i + 1
+			for j < len(expr) {
+				if expr[j] == '\'' {
+					j++ // move past first ' of potential '' escape
+					if j < len(expr) && expr[j] == '\'' {
+						j++ // second ' of '' escape — keep scanning inside the literal
+					} else {
+						break // closing quote — literal is complete
+					}
+				} else {
+					j++
+				}
+			}
+			b.WriteString(expr[i:j])
+			i = j
+		} else if expr[i] == ':' && i+1 < len(expr) && expr[i+1] == ':' {
+			// Strip any trailing whitespace already written, then write ::,
+			// then skip any leading whitespace that follows. We read-back and
+			// reset the builder because strings.Builder provides no seek; this
+			// is O(n) per :: operator but cast chains are short in practice.
+			// b.Reset() retains the underlying buffer; b.Grow re-establishes
+			// the capacity hint so the following writes stay allocation-free.
+			s := strings.TrimRight(b.String(), " \t")
+			b.Reset()
+			b.Grow(len(expr))
+			b.WriteString(s)
+			b.WriteString("::")
+			i += 2
+			for i < len(expr) && (expr[i] == ' ' || expr[i] == '\t') {
+				i++
+			}
+		} else {
+			b.WriteByte(expr[i])
+			i++
+		}
+	}
+	return b.String()
 }
 
 func colMap(cols []pg.ColumnDef) map[string]pg.ColumnDef {

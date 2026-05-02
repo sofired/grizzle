@@ -1904,3 +1904,104 @@ func TestDiff_LocalColumnRename_FKToSameNamedColumn(t *testing.T) {
 		t.Errorf("expected 0 FK constraint changes (FK references a different table's column), got %d drops %d adds: %v", drops, adds, changes)
 	}
 }
+
+// TestDiff_DefaultExpr_SpacedCast_NoSpuriousChange verifies that Diff does not
+// emit AlterColumnDefault when the old and new DefaultExpr strings are
+// semantically equivalent PostgreSQL cast expressions that differ only in the
+// whitespace around the :: operator.
+func TestDiff_DefaultExpr_SpacedCast_NoSpuriousChange(t *testing.T) {
+	cases := []struct {
+		name    string
+		oldExpr string
+		newExpr string
+	}{
+		{
+			name:    "space before cast",
+			oldExpr: "'{}' ::jsonb",
+			newExpr: "'{}'::jsonb",
+		},
+		{
+			name:    "spaces around cast",
+			oldExpr: "'{}' :: jsonb",
+			newExpr: "'{}'::jsonb",
+		},
+		{
+			name:    "tab after cast",
+			oldExpr: "'{}'::	jsonb",
+			newExpr: "'{}'::jsonb",
+		},
+		{
+			name:    "array default spaced cast",
+			oldExpr: "'[]' ::jsonb",
+			newExpr: "'[]'::jsonb",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			old := kit.Snapshot{
+				Version: "1",
+				Tables: map[string]*kit.TableSnap{
+					"items": {
+						Name: "items",
+						Columns: []pg.ColumnDef{
+							{Name: "id", SQLType: "uuid", NotNull: true, PrimaryKey: true},
+							{Name: "meta", SQLType: "jsonb", HasDefault: true, DefaultExpr: tc.oldExpr},
+						},
+					},
+				},
+			}
+			newSnap := kit.Snapshot{
+				Version: "2",
+				Tables: map[string]*kit.TableSnap{
+					"items": {
+						Name: "items",
+						Columns: []pg.ColumnDef{
+							{Name: "id", SQLType: "uuid", NotNull: true, PrimaryKey: true},
+							{Name: "meta", SQLType: "jsonb", HasDefault: true, DefaultExpr: tc.newExpr},
+						},
+					},
+				},
+			}
+			changes := kit.Diff(old, newSnap)
+			if len(changes) != 0 {
+				t.Errorf("expected 0 changes for equivalent cast expressions %q vs %q, got %d: %v",
+					tc.oldExpr, tc.newExpr, len(changes), changes)
+			}
+		})
+	}
+}
+
+// TestDiff_DefaultExpr_TrulyChanged_EmitsChange verifies that a genuine change
+// in DefaultExpr still produces an AlterColumnDefault change.
+func TestDiff_DefaultExpr_TrulyChanged_EmitsChange(t *testing.T) {
+	old := kit.Snapshot{
+		Version: "1",
+		Tables: map[string]*kit.TableSnap{
+			"items": {
+				Name: "items",
+				Columns: []pg.ColumnDef{
+					{Name: "id", SQLType: "uuid", NotNull: true, PrimaryKey: true},
+					{Name: "meta", SQLType: "jsonb", HasDefault: true, DefaultExpr: "'{}'::jsonb"},
+				},
+			},
+		},
+	}
+	newSnap := kit.Snapshot{
+		Version: "2",
+		Tables: map[string]*kit.TableSnap{
+			"items": {
+				Name: "items",
+				Columns: []pg.ColumnDef{
+					{Name: "id", SQLType: "uuid", NotNull: true, PrimaryKey: true},
+					{Name: "meta", SQLType: "jsonb", HasDefault: true, DefaultExpr: "'null'::jsonb"},
+				},
+			},
+		},
+	}
+	changes := kit.Diff(old, newSnap)
+	alters := countKind(changes, kit.ChangeAlterColumnDefault)
+	if alters != 1 {
+		t.Errorf("expected 1 AlterColumnDefault for genuinely different defaults, got %d: %v", alters, changes)
+	}
+}
