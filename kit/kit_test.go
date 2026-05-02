@@ -17,7 +17,7 @@ var realmsDef = pg.Table("realms",
 	pg.C("name", pg.Varchar(255).NotNull()),
 	pg.C("display_name", pg.Varchar(255)),
 	pg.C("enabled", pg.Boolean().NotNull().Default(true)),
-	pg.C("settings", pg.JSONB().DefaultEmpty()),
+	pg.C("settings", pg.JSONB().Default("{}")),
 	pg.C("created_at", pg.Timestamp().WithTimezone().NotNull().DefaultNow()),
 	pg.C("updated_at", pg.Timestamp().WithTimezone().NotNull().DefaultNow()),
 ).WithConstraints(func(t pg.TableRef) []pg.Constraint {
