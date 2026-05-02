@@ -78,7 +78,7 @@ In Drizzle, the column name is the first argument to the type function: `uuid('i
 | `point(name)` | DEVIATION:GAP (not designed) | — |
 | `line(name)` | DEVIATION:GAP (not designed) | — |
 | `geometry(name)` | DEVIATION:GAP (not designed) | — |
-| `pgEnum(name, vals)` | `pg.Enum(typeName, vals...)` | PARITY — Go type `string`; enum type must already exist in the database |
+| `pgEnum(name, vals)` (inline column) | `pg.Enum(typeName, vals...)` | PARITY — Go type `string`; references a named type defined with `pg.CreateEnum()` |
 | `vector(name, {dim})` | DEVIATION:GAP (not designed) | — |
 | `halfvec(name, {dim})` | DEVIATION:GAP (not designed) | — |
 | `tsvector(name)` | `pg.Tsvector()` | PARITY — Go type `string`; `@@` matching already available via `Matches*` helpers on `TsvectorColumn`; additional FTS support tracked in #140 |
@@ -169,6 +169,61 @@ var Users = pg.SchemaTable("myschema", "users", ...).Build()
 ```
 
 **Status:** PARITY for basic schema qualification. The `pgSchema` shared-object pattern (reusable schema reference) is DEVIATION:GAP (not designed).
+
+## Views — GRIZZLE-ONLY (kit migration support)
+
+**Drizzle:**
+```typescript
+const activeUsers = pgView('active_users').as((qb) =>
+  qb.select().from(users).where(eq(users.enabled, true))
+)
+```
+
+**Grizzle:**
+```go
+var ActiveUsers = pg.CreateView("active_users",
+    `SELECT id, username, email FROM users WHERE enabled = true`)
+```
+
+| Drizzle | Grizzle | Status |
+|---|---|---|
+| `pgView(name).as(qb)` or `.as(sql\`...\`)` | `pg.CreateView(name, sql)` | PARITY — raw SQL path; query builder form is DEVIATION:LANGUAGE (Go has no template literal types) |
+| `pgSchema("s").view(name).as(...)` | `pg.SchemaView(schema, name, sql)` | PARITY |
+| `pgMaterializedView(name)` | DEVIATION:GAP (not designed) | — |
+
+**Note on kit support:** Drizzle Kit v0.30 does not support views in migrations — views must be managed manually. Grizzle's `Diff` and the SQL generation layer fully support views via `ChangeCreateView`, `ChangeReplaceView`, and `ChangeDropView`. `Push` and `Migrate` are table-only for now because `liveToSnapshot` intentionally excludes live views to avoid silently dropping unmanaged views. Full `Push`/`Migrate` support for views is tracked in #136 (`PushSchema`). This is **GRIZZLE-ONLY** capability.
+
+`pg.CreateView(name, sql)` panics if `name` or `sql` is empty.
+
+## Named enum types (PostgreSQL)
+
+**Drizzle:**
+```typescript
+const statusEnum = pgEnum('status', ['pending', 'active', 'archived'])
+
+export const orders = pgTable('orders', {
+  status: statusEnum(),
+})
+```
+
+**Grizzle:**
+```go
+var StatusEnum = pg.CreateEnum("status", "pending", "active", "archived")
+
+var Orders = pg.Table("orders",
+    pg.C("status", pg.EnumColumn("status").NotNull()),
+)
+```
+
+| Drizzle | Grizzle | Status |
+|---|---|---|
+| `pgEnum(name, vals)` | `pg.CreateEnum(name, vals...)` | PARITY |
+| `pgSchema("s").enum(name, vals)` | `pg.SchemaCreateEnum(schema, name, vals...)` | PARITY |
+| `enumCol()` — column referencing named type | `pg.EnumColumn(typeName)` | PARITY |
+
+`pg.CreateEnum` and `pg.SchemaCreateEnum` panic if `name` is empty or if any value is empty. Values must be declared in the order they should appear in the database — PostgreSQL preserves declaration order and `ALTER TYPE ... ADD VALUE` uses `AFTER`/`BEFORE` anchors to maintain ordering when new values are inserted.
+
+See also `pg.Enum(typeName, vals...)` in the column types table for the inline MySQL-style enum variant (no separate `CREATE TYPE` statement).
 
 ## `drizzle()` instance — DEVIATION:INTENTIONAL
 
