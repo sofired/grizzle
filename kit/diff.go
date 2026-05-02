@@ -23,15 +23,31 @@ const (
 	ChangeRenameTable        ChangeKind = "rename_table"
 	ChangeAddConstraint      ChangeKind = "add_constraint"
 	ChangeDropConstraint     ChangeKind = "drop_constraint"
+
+	// View change kinds.
+	ChangeCreateView ChangeKind = "create_view" // brand-new view
+	// ChangeReplaceView emits DROP VIEW IF EXISTS + CREATE VIEW rather than
+	// CREATE OR REPLACE VIEW so that incompatible column changes (renames, type
+	// changes, reordering) are handled correctly. Without CASCADE, the DROP
+	// fails with a clear error if other views depend on this one.
+	ChangeReplaceView ChangeKind = "replace_view"
+	ChangeDropView    ChangeKind = "drop_view"
+
+	// Enum change kinds (PostgreSQL only).
+	ChangeCreateEnum ChangeKind = "create_enum"
+	ChangeAlterEnum  ChangeKind = "alter_enum" // adds, removes, or reorders values; removals/reorders emit WARNING SQL comments
+	ChangeDropEnum   ChangeKind = "drop_enum"
 )
 
 // Change represents a single schema mutation — the unit that SQL generation works from.
 type Change struct {
-	Kind      ChangeKind
-	TableName string // qualified name; for ChangeRenameTable this is the old (source) name
+	Kind ChangeKind
+	// ObjectName is the qualified name of the affected object (table, view, or enum).
+	// For ChangeRenameTable this is the old (source) name — see RenameTarget for the new name.
+	ObjectName string
 
-	// RenameTarget is set only for ChangeRenameTable: it holds the new table name.
-	// For all other change kinds this field is empty.
+	// RenameTarget holds the new (destination) name for ChangeRenameTable.
+	// ObjectName holds the old (source) name. Empty for all other change kinds.
 	RenameTarget string
 
 	// Set for column-level changes.
@@ -40,6 +56,13 @@ type Change struct {
 
 	// Set for constraint-level changes.
 	Constraint *pg.Constraint
+
+	// Set for view-level changes.
+	View *ViewSnap
+
+	// Set for enum-level changes.
+	OldEnum *EnumSnap
+	NewEnum *EnumSnap
 }
 
 // Diff computes the ordered list of Changes needed to transition from
@@ -54,27 +77,71 @@ type Change struct {
 // most one rename; for tables, the first match in sorted new-table-name order
 // wins, and for columns, the first match in new.Columns slice order wins.
 //
-// Ordering is deterministic:
-//  1. Rename or create new tables (renames before creates; creates are ordered
-//     by FK dependency so referenced tables are created before their dependants).
-//  2. Alter existing tables (columns first, then constraints).
-//  3. Drop removed tables.
+// Ordering is deterministic. The phase sequence prevents cross-type dependency
+// errors (e.g. enums before tables, tables before views, views before drops).
+// One caveat: within phases 5 and 7 views are sorted alphabetically only —
+// view→view dependencies are not resolved. If a newly-created view selects from
+// another new view (phase 5), or a removed view is referenced by another removed
+// view (phase 7), the names must naturally sort in dependency order, or the
+// migration will fail at runtime.
 //
-// Output is sorted for determinism: within each phase, changes are sorted by
-// table name. Within a single table, changes are emitted in slice order
-// (renamed/added/modified columns first, then dropped columns, then
-// added/dropped constraints). No secondary sort by change kind or column name
-// is applied.
+//  1. Create new enums whose name does not conflict with a table being dropped
+//     or renamed in this migration. Types may be referenced by table columns
+//     and views. Enums that share a name with a dropped table are deferred to
+//     phase 8b because PostgreSQL tables carry an associated row type that
+//     blocks a same-named CREATE TYPE until the table is gone. Enums that share
+//     a name with a renamed-away table are deferred to phase 3b for the same
+//     reason — the rename frees the old composite row type so the enum can be
+//     created right afterward.
+//  2. Alter existing enums (add/remove/reorder values).
+//     Must run before any CREATE TABLE or CREATE VIEW that may reference a
+//     newly-added label (e.g. as a column default or in a view predicate).
+//     Value removal and reordering emit WARNING SQL comments — PostgreSQL
+//     cannot perform those operations automatically.
+//  3. Rename or create new tables (renames before creates; creates are ordered
+//     by FK dependency so referenced tables are created before their dependants).
+//     3b. Create enums deferred from phase 1 because a same-named table was
+//     being renamed. The RENAME TABLE has freed the old composite row type.
+//  4. Alter existing tables (columns + constraints, including drops).
+//     Must run before creating new views (phase 5) so that any new view
+//     referencing freshly-added or renamed columns can rely on them existing.
+//  5. Create new views whose name does not conflict with a table being dropped —
+//     views SELECT FROM tables, which must already exist and be fully altered.
+//     Ordering within this phase is alphabetical only (no view→view dep
+//     resolution). Views that share a name with a dropped table are deferred to
+//     phase 8b because PostgreSQL requires a view name to be distinct from all
+//     existing relations, including the to-be-dropped table.
+//  6. Replace changed views (DROP + CREATE, to handle incompatible column changes).
+//  7. Drop removed views — before tables, since views depend on tables.
+//     Ordering within this phase is alphabetical only (no view→view dep resolution).
+//  8. Drop removed tables (unless renamed away).
+//     8b. Create enums and views deferred from phases 1 and 5 whose names collided
+//     with a now-dropped table. Deferred enums are emitted first so any deferred
+//     view that references a same-named new enum can rely on it existing.
+//  9. Drop removed enums — after tables that may reference them are gone.
+//
+// Within each phase, output is sorted by object name for determinism.
 func Diff(old, new Snapshot) []Change {
 	var changes []Change
 
-	// Collect sorted table names to ensure deterministic output.
-	newNames := sortedTableNames(new.Tables)
-	oldNames := sortedTableNames(old.Tables)
+	// Normalise nil maps so range loops are safe.
+	if old.Views == nil {
+		old.Views = make(map[string]*ViewSnap)
+	}
+	if old.Enums == nil {
+		old.Enums = make(map[string]*EnumSnap)
+	}
+	if new.Views == nil {
+		new.Views = make(map[string]*ViewSnap)
+	}
+	if new.Enums == nil {
+		new.Enums = make(map[string]*EnumSnap)
+	}
+
+	newNames := sortedKeys(new.Tables)
+	oldNames := sortedKeys(old.Tables)
 
 	// Build sets of added and dropped tables for rename detection.
-	// A table is "added" if it appears in new but not in old.
-	// A table is "dropped" if it appears in old but not in new.
 	droppedTables := make(map[string]struct{})
 	for _, name := range oldNames {
 		if _, exists := new.Tables[name]; !exists {
@@ -102,7 +169,66 @@ func Diff(old, new Snapshot) []Change {
 		renamedTo[newName] = oldName
 	}
 
-	// Phase 1: new tables not in old.
+	// Build set of tables that will actually be dropped in phase 8: present in
+	// old but not new, and not renamed away. Used to detect name conflicts for
+	// deferred enum/view creation (phases 1 and 5 respectively).
+	actualDroppedTables := make(map[string]struct{})
+	for name := range droppedTables {
+		if _, wasRenamed := renamedFrom[name]; !wasRenamed {
+			actualDroppedTables[name] = struct{}{}
+		}
+	}
+
+	// Phase 1: new enums not in old → CREATE TYPE ... AS ENUM.
+	// Enums whose name conflicts with a table being dropped are deferred to
+	// phase 8b: PostgreSQL tables carry an associated row type that blocks a
+	// same-named CREATE TYPE until the table is gone.
+	// Enums whose name conflicts with a table being renamed are deferred to
+	// phase 3b: the RENAME TABLE in phase 3 frees the old composite row type,
+	// so these enums can be created immediately afterward. renamedFrom keys are
+	// the old (source) names of renamed tables.
+	var deferredCreateEnums []Change // phase 8b: after table drops
+	var renamedBlockedEnums []Change // phase 3b: after table renames
+	for _, name := range sortedKeys(new.Enums) {
+		if _, exists := old.Enums[name]; !exists {
+			e := *new.Enums[name]
+			ch := Change{Kind: ChangeCreateEnum, ObjectName: name, NewEnum: &e}
+			if _, conflict := actualDroppedTables[name]; conflict {
+				deferredCreateEnums = append(deferredCreateEnums, ch)
+			} else if _, conflict := renamedFrom[name]; conflict {
+				renamedBlockedEnums = append(renamedBlockedEnums, ch)
+			} else {
+				changes = append(changes, ch)
+			}
+		}
+	}
+
+	// Phase 2: enums in both → diff values.
+	// Must run before any CREATE TABLE or CREATE VIEW so that newly-added labels
+	// are present when PostgreSQL processes column defaults or view predicates
+	// that reference them. Also emitted when values are removed or reordered so
+	// callers receive warning SQL comments — PostgreSQL cannot remove or reorder
+	// enum values without manual work.
+	for _, name := range sortedKeys(new.Enums) {
+		oldE, exists := old.Enums[name]
+		if !exists {
+			continue // handled in phase 1
+		}
+		newE := new.Enums[name]
+		addedVals := enumAddedValues(oldE, newE)
+		removedVals, reordered := enumDrift(oldE, newE)
+		if len(addedVals) > 0 || len(removedVals) > 0 || reordered {
+			o, n := *oldE, *newE
+			changes = append(changes, Change{
+				Kind:       ChangeAlterEnum,
+				ObjectName: name,
+				OldEnum:    &o,
+				NewEnum:    &n,
+			})
+		}
+	}
+
+	// Phase 3: new tables not in old.
 	// Renames are collected and appended before creates so that FK references
 	// from a newly created table to the renamed table's new name are safe,
 	// regardless of alphabetical ordering.
@@ -113,7 +239,7 @@ func Diff(old, new Snapshot) []Change {
 			if oldName, isRename := renamedTo[name]; isRename {
 				renames = append(renames, Change{
 					Kind:         ChangeRenameTable,
-					TableName:    oldName,
+					ObjectName:   oldName,
 					RenameTarget: name,
 				})
 			} else {
@@ -122,15 +248,22 @@ func Diff(old, new Snapshot) []Change {
 		}
 	}
 	changes = append(changes, renames...)
+	// Phase 3b: enums deferred from phase 1 because a same-named table was being
+	// renamed. The RENAME TABLE above has freed the old composite row type, so
+	// these enums can be created now — before any CREATE TABLE or CREATE VIEW that
+	// may reference them by name.
+	changes = append(changes, renamedBlockedEnums...)
 	for _, name := range orderNewTables(createNames, new.Tables) {
 		changes = append(changes, Change{
-			Kind:      ChangeCreateTable,
-			TableName: name,
+			Kind:       ChangeCreateTable,
+			ObjectName: name,
 		})
 	}
 
-	// Phase 2: tables present in both → diff columns and constraints.
+	// Phase 4: tables present in both → diff columns and constraints.
 	// Also handle tables that were renamed: diff the renamed table's contents.
+	// Must run before creating new views (phase 5) so that any new view referencing
+	// freshly-added columns can rely on those columns already existing.
 	for _, name := range newNames {
 		if _, exists := old.Tables[name]; exists {
 			changes = append(changes, diffTable(name, old.Tables[name], new.Tables[name], renamedFrom)...)
@@ -140,29 +273,211 @@ func Diff(old, new Snapshot) []Change {
 		}
 	}
 
-	// Phase 3: tables in old but not new → DROP TABLE (unless renamed away).
+	// Phase 5: new views not in old → CREATE VIEW (after tables and their alterations exist).
+	// Views whose name conflicts with a table being dropped are deferred to
+	// phase 8b: PostgreSQL requires a view name to be distinct from existing
+	// relations, so the conflicting table must be dropped first.
+	var deferredCreateViews []Change
+	for _, name := range sortedKeys(new.Views) {
+		if _, exists := old.Views[name]; !exists {
+			v := *new.Views[name]
+			ch := Change{Kind: ChangeCreateView, ObjectName: name, View: &v}
+			if _, conflict := actualDroppedTables[name]; conflict {
+				deferredCreateViews = append(deferredCreateViews, ch)
+			} else {
+				changes = append(changes, ch)
+			}
+		}
+	}
+
+	// Phase 6: views present in both — replace if SQL differs.
+	// ChangeReplaceView generates DROP VIEW IF EXISTS + CREATE VIEW so the view always
+	// converges to the target definition, including incompatible column changes (renames,
+	// type changes, reordering, removals) that CREATE OR REPLACE VIEW cannot handle in
+	// PostgreSQL. Without CASCADE, a DROP on a view with dependents produces a clear
+	// PostgreSQL error explaining which objects depend on it.
+	//
+	// Deferral: if the view's name conflicts with a table being dropped in this same
+	// migration, the replace must be deferred to phase 8b for the same reason as
+	// ChangeCreateView — PostgreSQL requires a view name to be distinct from all
+	// existing relations, including the to-be-dropped table.
+	var deferredReplaceViews []Change
+	for _, name := range sortedKeys(new.Views) {
+		oldV, exists := old.Views[name]
+		if !exists {
+			continue // handled above
+		}
+		newV := new.Views[name]
+		if normalizeViewSQL(oldV.SQL) != normalizeViewSQL(newV.SQL) {
+			n := *newV
+			ch := Change{Kind: ChangeReplaceView, ObjectName: name, View: &n}
+			if _, conflict := actualDroppedTables[name]; conflict {
+				deferredReplaceViews = append(deferredReplaceViews, ch)
+			} else {
+				changes = append(changes, ch)
+			}
+		}
+	}
+
+	// Phase 7: views in old but not new → DROP VIEW (before tables, views depend on tables).
+	for _, name := range sortedKeys(old.Views) {
+		if _, exists := new.Views[name]; !exists {
+			v := *old.Views[name]
+			changes = append(changes, Change{
+				Kind:       ChangeDropView,
+				ObjectName: name,
+				View:       &v,
+			})
+		}
+	}
+
+	// Phase 8: tables in old but not new → DROP TABLE (unless renamed away).
 	for _, name := range oldNames {
 		if _, exists := new.Tables[name]; !exists {
 			if _, wasRenamed := renamedFrom[name]; !wasRenamed {
 				changes = append(changes, Change{
-					Kind:      ChangeDropTable,
-					TableName: name,
+					Kind:       ChangeDropTable,
+					ObjectName: name,
 				})
 			}
+		}
+	}
+
+	// Phase 8b: deferred enum/view creations (and replacements) whose names collided
+	// with a dropped table. Enums come first so any deferred view referencing a
+	// same-named new enum can rely on it existing.
+	changes = append(changes, deferredCreateEnums...)
+	changes = append(changes, deferredCreateViews...)
+	changes = append(changes, deferredReplaceViews...)
+
+	// Phase 9: enums in old but not new → DROP TYPE (after referencing tables are gone).
+	for _, name := range sortedKeys(old.Enums) {
+		if _, exists := new.Enums[name]; !exists {
+			e := *old.Enums[name]
+			changes = append(changes, Change{
+				Kind:       ChangeDropEnum,
+				ObjectName: name,
+				OldEnum:    &e,
+			})
 		}
 	}
 
 	return changes
 }
 
-// sortedTableNames returns the keys of the given map, sorted alphabetically.
-func sortedTableNames(tables map[string]*TableSnap) []string {
-	names := make([]string, 0, len(tables))
-	for name := range tables {
-		names = append(names, name)
+// sortedKeys returns the keys of the given map sorted alphabetically.
+func sortedKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
 	}
-	sort.Strings(names)
-	return names
+	sort.Strings(keys)
+	return keys
+}
+
+// enumValueAddition describes a single new label to add to an existing PostgreSQL enum.
+type enumValueAddition struct {
+	Value  string
+	After  string // non-empty: ADD VALUE ... AFTER 'After'
+	Before string // non-empty and After=="": ADD VALUE ... BEFORE 'Before' (prepend case)
+	// both empty: plain ADD VALUE (append to end)
+}
+
+// enumAddedValues returns the labels present in newE but absent in oldE, in the order
+// they appear in newE, each paired with an AFTER/BEFORE anchor so that PostgreSQL places
+// them at the correct position even when values are inserted in the middle of the ordering.
+// It scans newE left-to-right, tracking the nearest preceding label (existing or newly added)
+// as the AFTER anchor; for a label that must be inserted before all existing labels it uses
+// the first following existing label as a BEFORE anchor instead.
+// The anchor is updated to each newly-added label after it is emitted, so that consecutive
+// new labels anchor to each other rather than all anchoring to the same existing predecessor.
+func enumAddedValues(oldE, newE *EnumSnap) []enumValueAddition {
+	existing := make(map[string]bool, len(oldE.Values))
+	for _, v := range oldE.Values {
+		existing[v] = true
+	}
+	var added []enumValueAddition
+	var lastAnchor string // last existing-or-added label seen while scanning left-to-right
+	for i, v := range newE.Values {
+		if existing[v] {
+			lastAnchor = v
+			continue
+		}
+		if lastAnchor != "" {
+			added = append(added, enumValueAddition{Value: v, After: lastAnchor})
+		} else {
+			// No preceding label yet; find the first existing label that follows.
+			var before string
+			for _, next := range newE.Values[i+1:] {
+				if existing[next] {
+					before = next
+					break
+				}
+			}
+			added = append(added, enumValueAddition{Value: v, Before: before})
+		}
+		// Update the anchor to this newly-added label so the next consecutive
+		// insertion anchors to it, not to the same preceding existing label.
+		lastAnchor = v
+	}
+	return added
+}
+
+// enumDrift returns the list of values present in oldE but absent in newE
+// (removed values), and reports whether any retained values have been reordered
+// relative to their positions in oldE. PostgreSQL cannot remove or reorder enum
+// values, so callers use this to surface warning SQL comments.
+func enumDrift(oldE, newE *EnumSnap) (removed []string, reordered bool) {
+	newSet := make(map[string]bool, len(newE.Values))
+	for _, v := range newE.Values {
+		newSet[v] = true
+	}
+	oldSet := make(map[string]bool, len(oldE.Values))
+	for _, v := range oldE.Values {
+		oldSet[v] = true
+		if !newSet[v] {
+			removed = append(removed, v)
+		}
+	}
+	// Build the subsequence of newE values that exist in old, then compare
+	// with the subsequence of oldE values that exist in new. Any mismatch
+	// means a reorder occurred.
+	var inNewOrder []string
+	for _, v := range newE.Values {
+		if oldSet[v] {
+			inNewOrder = append(inNewOrder, v)
+		}
+	}
+	var inOldOrder []string
+	for _, v := range oldE.Values {
+		if newSet[v] {
+			inOldOrder = append(inOldOrder, v)
+		}
+	}
+	// Both slices contain only the intersection of old and new values, so their
+	// lengths are always equal for valid (duplicate-free) input. This guard is a
+	// defensive check against malformed enum definitions — it cannot fire from a
+	// simple value removal, which only affects the removed[] result above.
+	if len(inOldOrder) != len(inNewOrder) {
+		reordered = true
+		return
+	}
+	for i := range inOldOrder {
+		if inOldOrder[i] != inNewOrder[i] {
+			reordered = true
+			return
+		}
+	}
+	return
+}
+
+// normalizeViewSQL strips leading/trailing whitespace and trailing semicolons
+// to avoid spurious diffs from PostgreSQL's view-definition reformatting.
+// This handles the most common cases; PostgreSQL may also fully-qualify column
+// references, rewrite aliases, and expand wildcards in ways that produce
+// spurious diffs after introspection (see #39).
+func normalizeViewSQL(sql string) string {
+	return strings.TrimRight(strings.TrimSpace(sql), ";")
 }
 
 // diffTable computes column- and constraint-level changes for one table.
@@ -212,10 +527,10 @@ func diffTable(tableName string, old, new *TableSnap, tableRenames map[string]st
 				oldColDef := oldCols[oldColName]
 				o, n := oldColDef, nc
 				changes = append(changes, Change{
-					Kind:      ChangeRenameColumn,
-					TableName: tableName,
-					OldCol:    &o,
-					NewCol:    &n,
+					Kind:       ChangeRenameColumn,
+					ObjectName: tableName,
+					OldCol:     &o,
+					NewCol:     &n,
 				})
 				// Also diff the old vs new column definitions (targeting the new
 				// column name) so that type/nullability/default changes that
@@ -228,9 +543,9 @@ func diffTable(tableName string, old, new *TableSnap, tableRenames map[string]st
 				changes = append(changes, diffColumn(tableName, oldColRenamed, nc)...)
 			} else {
 				changes = append(changes, Change{
-					Kind:      ChangeAddColumn,
-					TableName: tableName,
-					NewCol:    &nc,
+					Kind:       ChangeAddColumn,
+					ObjectName: tableName,
+					NewCol:     &nc,
 				})
 			}
 			continue
@@ -245,9 +560,9 @@ func diffTable(tableName string, old, new *TableSnap, tableRenames map[string]st
 			if _, wasRenamed := colRenamedFrom[oc.Name]; !wasRenamed {
 				oc := oc // copy
 				changes = append(changes, Change{
-					Kind:      ChangeDropColumn,
-					TableName: tableName,
-					OldCol:    &oc,
+					Kind:       ChangeDropColumn,
+					ObjectName: tableName,
+					OldCol:     &oc,
 				})
 			}
 		}
@@ -286,7 +601,7 @@ func diffTable(tableName string, old, new *TableSnap, tableRenames map[string]st
 			nc := nc
 			changes = append(changes, Change{
 				Kind:       ChangeAddConstraint,
-				TableName:  tableName,
+				ObjectName: tableName,
 				Constraint: &nc,
 			})
 		}
@@ -308,15 +623,15 @@ func diffTable(tableName string, old, new *TableSnap, tableRenames map[string]st
 			oc := oc
 			changes = append(changes, Change{
 				Kind:       ChangeDropConstraint,
-				TableName:  tableName,
+				ObjectName: tableName,
 				Constraint: &oc,
 			})
 		} else if !constraintsEqual(oc, nc) {
 			// Changed: drop then recreate.
 			oc, nc := oc, nc
 			changes = append(changes,
-				Change{Kind: ChangeDropConstraint, TableName: tableName, Constraint: &oc},
-				Change{Kind: ChangeAddConstraint, TableName: tableName, Constraint: &nc},
+				Change{Kind: ChangeDropConstraint, ObjectName: tableName, Constraint: &oc},
+				Change{Kind: ChangeAddConstraint, ObjectName: tableName, Constraint: &nc},
 			)
 		}
 	}
@@ -330,31 +645,87 @@ func diffColumn(tableName string, old, new pg.ColumnDef) []Change {
 	if old.SQLType != new.SQLType {
 		o, n := old, new
 		changes = append(changes, Change{
-			Kind:      ChangeAlterColumnType,
-			TableName: tableName,
-			OldCol:    &o,
-			NewCol:    &n,
+			Kind:       ChangeAlterColumnType,
+			ObjectName: tableName,
+			OldCol:     &o,
+			NewCol:     &n,
 		})
 	}
 	if old.NotNull != new.NotNull {
 		o, n := old, new
 		changes = append(changes, Change{
-			Kind:      ChangeAlterColumnNull,
-			TableName: tableName,
-			OldCol:    &o,
-			NewCol:    &n,
+			Kind:       ChangeAlterColumnNull,
+			ObjectName: tableName,
+			OldCol:     &o,
+			NewCol:     &n,
 		})
 	}
-	if old.DefaultExpr != new.DefaultExpr || old.HasDefault != new.HasDefault {
+	if normalizeDefaultExpr(old.DefaultExpr) != normalizeDefaultExpr(new.DefaultExpr) || old.HasDefault != new.HasDefault {
 		o, n := old, new
 		changes = append(changes, Change{
-			Kind:      ChangeAlterColumnDefault,
-			TableName: tableName,
-			OldCol:    &o,
-			NewCol:    &n,
+			Kind:       ChangeAlterColumnDefault,
+			ObjectName: tableName,
+			OldCol:     &o,
+			NewCol:     &n,
 		})
 	}
 	return changes
+}
+
+// normalizeDefaultExpr canonicalizes a PostgreSQL default expression so that
+// semantically-equivalent expressions compare equal. It trims leading and
+// trailing whitespace and collapses whitespace around :: outside single-quoted
+// string literals (e.g. '{}'  ::  jsonb → '{}'::jsonb), handling the
+// doubled-quote escape for embedded single quotes. Dollar-quoted strings
+// ($$...$$) are not recognized; their delimiters are treated as ordinary
+// characters, so any :: inside them will be incorrectly collapsed.
+// Dollar-quoting is not expected in column default expressions returned by
+// PostgreSQL introspection.
+func normalizeDefaultExpr(expr string) string {
+	expr = strings.TrimSpace(expr)
+	var b strings.Builder
+	b.Grow(len(expr))
+	i := 0
+	for i < len(expr) {
+		if expr[i] == '\'' {
+			// Copy single-quoted literal verbatim, handling '' escape sequences.
+			j := i + 1
+			for j < len(expr) {
+				if expr[j] == '\'' {
+					j++ // move past first ' of potential '' escape
+					if j < len(expr) && expr[j] == '\'' {
+						j++ // second ' of '' escape — keep scanning inside the literal
+					} else {
+						break // closing quote — literal is complete
+					}
+				} else {
+					j++
+				}
+			}
+			b.WriteString(expr[i:j])
+			i = j
+		} else if expr[i] == ':' && i+1 < len(expr) && expr[i+1] == ':' {
+			// Strip any trailing whitespace already written, then write ::,
+			// then skip any leading whitespace that follows. We read-back and
+			// reset the builder because strings.Builder provides no seek; this
+			// is O(n) per :: operator but cast chains are short in practice.
+			// b.Reset() retains the underlying buffer; b.Grow re-establishes
+			// the capacity hint so the following writes stay allocation-free.
+			s := strings.TrimRight(b.String(), " \t")
+			b.Reset()
+			b.Grow(len(expr))
+			b.WriteString(s)
+			b.WriteString("::")
+			i += 2
+			for i < len(expr) && (expr[i] == ' ' || expr[i] == '\t') {
+				i++
+			}
+		} else {
+			b.WriteByte(expr[i])
+			i++
+		}
+	}
+	return b.String()
 }
 
 func colMap(cols []pg.ColumnDef) map[string]pg.ColumnDef {
@@ -367,7 +738,7 @@ func colMap(cols []pg.ColumnDef) map[string]pg.ColumnDef {
 
 // constraintKey returns a stable, collision-free key for a constraint.
 // It incorporates the kind and sorted column list so that unnamed constraints
-// or constraints sharing a name do not collide in the map.
+// or constraints sharing a name do not collide in the map (Fix #6).
 func constraintKey(c pg.Constraint) string {
 	cols := make([]string, len(c.Columns))
 	copy(cols, c.Columns)
@@ -452,7 +823,6 @@ func constraintsEqual(a, b pg.Constraint) bool {
 			return false
 		}
 	}
-	// Compare FK-specific fields when present.
 	if a.Kind == pg.KindForeignKey {
 		if a.FKTable != b.FKTable {
 			return false

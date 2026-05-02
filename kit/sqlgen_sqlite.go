@@ -45,21 +45,21 @@ func GenerateCreateSQLSQLite(tables ...pg.TableDefiner) string {
 func GenerateChangeSQLSQLite(snap Snapshot, c Change) []string {
 	switch c.Kind {
 	case ChangeCreateTable:
-		t := snap.Tables[c.TableName]
+		t := snap.Tables[c.ObjectName]
 		if t == nil {
 			return nil
 		}
 		td := &pg.TableDef{Name: t.Name, Columns: t.Columns, Constraints: t.Constraints}
 		stmts := []string{createTableSQLSQLite(td)}
 		for _, con := range t.Constraints {
-			if sql := indexSQLSQLite(c.TableName, con); sql != "" {
+			if sql := indexSQLSQLite(c.ObjectName, con); sql != "" {
 				stmts = append(stmts, sql)
 			}
 		}
 		return stmts
 
 	case ChangeDropTable:
-		return []string{fmt.Sprintf("DROP TABLE IF EXISTS %s", quoteTableSQLite(c.TableName))}
+		return []string{fmt.Sprintf("DROP TABLE IF EXISTS %s", quoteTableSQLite(c.ObjectName))}
 
 	case ChangeRenameTable:
 		if c.RenameTarget == "" {
@@ -69,7 +69,7 @@ func GenerateChangeSQLSQLite(snap Snapshot, c Change) []string {
 		// Strip any schema qualifier from both source and target.
 		return []string{fmt.Sprintf(
 			"ALTER TABLE %s RENAME TO %s",
-			quoteTableSQLite(c.TableName),
+			quoteTableSQLite(c.ObjectName),
 			quoteTableSQLite(c.RenameTarget),
 		)}
 
@@ -79,7 +79,7 @@ func GenerateChangeSQLSQLite(snap Snapshot, c Change) []string {
 		}
 		return []string{fmt.Sprintf(
 			"ALTER TABLE %s ADD COLUMN %s",
-			quoteTableSQLite(c.TableName),
+			quoteTableSQLite(c.ObjectName),
 			columnDefSQLSQLite(*c.NewCol),
 		)}
 
@@ -90,7 +90,7 @@ func GenerateChangeSQLSQLite(snap Snapshot, c Change) []string {
 		// Supported since SQLite 3.35.0.
 		return []string{fmt.Sprintf(
 			"ALTER TABLE %s DROP COLUMN %s",
-			quoteTableSQLite(c.TableName),
+			quoteTableSQLite(c.ObjectName),
 			qiSQLite(c.OldCol.Name),
 		)}
 
@@ -101,7 +101,7 @@ func GenerateChangeSQLSQLite(snap Snapshot, c Change) []string {
 		// Supported since SQLite 3.25.0.
 		return []string{fmt.Sprintf(
 			"ALTER TABLE %s RENAME COLUMN %s TO %s",
-			quoteTableSQLite(c.TableName),
+			quoteTableSQLite(c.ObjectName),
 			qiSQLite(c.OldCol.Name),
 			qiSQLite(c.NewCol.Name),
 		)}
@@ -117,20 +117,69 @@ func GenerateChangeSQLSQLite(snap Snapshot, c Change) []string {
 		}
 		return []string{fmt.Sprintf(
 			"-- SQLite does not support ALTER COLUMN: manual table rebuild required for %s.%s (%s)",
-			c.TableName, col, string(c.Kind),
+			c.ObjectName, col, string(c.Kind),
 		)}
 
 	case ChangeAddConstraint:
 		if c.Constraint == nil {
 			return nil
 		}
-		return addConstraintSQLSQLite(c.TableName, *c.Constraint)
+		return addConstraintSQLSQLite(c.ObjectName, *c.Constraint)
 
 	case ChangeDropConstraint:
 		if c.Constraint == nil {
 			return nil
 		}
-		return dropConstraintSQLSQLite(c.TableName, *c.Constraint)
+		return dropConstraintSQLSQLite(c.ObjectName, *c.Constraint)
+
+	case ChangeCreateView:
+		if c.View == nil {
+			return nil
+		}
+		// SQLite has no CREATE OR REPLACE VIEW; use DROP IF EXISTS + CREATE.
+		// DROP IF EXISTS is a no-op when the view is absent, so this is safe for new views.
+		return []string{
+			fmt.Sprintf("DROP VIEW IF EXISTS %s", quoteTableSQLite(c.View.QualifiedName())),
+			fmt.Sprintf("CREATE VIEW %s AS %s", quoteTableSQLite(c.View.QualifiedName()), c.View.SQL),
+		}
+
+	case ChangeReplaceView:
+		if c.View == nil {
+			return nil
+		}
+		// Same as ChangeCreateView on SQLite: DROP IF EXISTS + CREATE.
+		return []string{
+			fmt.Sprintf("DROP VIEW IF EXISTS %s", quoteTableSQLite(c.View.QualifiedName())),
+			fmt.Sprintf("CREATE VIEW %s AS %s", quoteTableSQLite(c.View.QualifiedName()), c.View.SQL),
+		}
+
+	case ChangeDropView:
+		if c.View == nil {
+			return nil
+		}
+		return []string{fmt.Sprintf(
+			"DROP VIEW IF EXISTS %s",
+			quoteTableSQLite(c.View.QualifiedName()),
+		)}
+
+	case ChangeCreateEnum:
+		// SQLite does not have named enum types; enforce allowed values via CHECK constraints.
+		return []string{fmt.Sprintf(
+			"-- SQLite: CREATE TYPE AS ENUM is not supported for enum type %q; enforce allowed values on each referencing column via a CHECK constraint",
+			c.ObjectName,
+		)}
+
+	case ChangeAlterEnum:
+		return []string{fmt.Sprintf(
+			"-- SQLite: ALTER TYPE ADD VALUE is not supported for enum type %q; update the CHECK constraint on each referencing column to allow the new value",
+			c.ObjectName,
+		)}
+
+	case ChangeDropEnum:
+		return []string{fmt.Sprintf(
+			"-- SQLite: DROP TYPE is not supported for enum type %q; remove or update CHECK constraints on each referencing column as needed",
+			c.ObjectName,
+		)}
 	}
 	return nil
 }
