@@ -2031,21 +2031,29 @@ func TestUpdate_SetStruct_Nil(t *testing.T) {
 	})
 }
 
+// -------------------------------------------------------------------
+// UPDATE / DELETE LIMIT tests
+// -------------------------------------------------------------------
+
 func TestUpdate_Limit_MySQL(t *testing.T) {
 	q := query.Update(ts.UsersT).
 		Set("enabled", false).
 		Where(ts.UsersT.DeletedAt.IsNotNull()).
 		Limit(100)
-	got, _ := q.Build(dialect.MySQL)
+	got, args := q.Build(dialect.MySQL)
 	want := "UPDATE `users` SET `enabled` = ? WHERE `users`.`deleted_at` IS NOT NULL LIMIT 100"
 	if got != want {
 		t.Errorf("SQL mismatch\n got:  %s\nwant: %s", got, want)
+	}
+	if len(args) != 1 || args[0] != false {
+		t.Errorf("args mismatch: got %v, want [false]", args)
 	}
 }
 
 func TestUpdate_Limit_Postgres_Ignored(t *testing.T) {
 	q := query.Update(ts.UsersT).
 		Set("enabled", false).
+		Where(ts.UsersT.DeletedAt.IsNotNull()).
 		Limit(100)
 	got, _ := q.Build(dialect.Postgres)
 	if strings.Contains(got, "LIMIT") {
@@ -2057,10 +2065,13 @@ func TestDelete_Limit_MySQL(t *testing.T) {
 	q := query.DeleteFrom(ts.UsersT).
 		Where(ts.UsersT.DeletedAt.IsNotNull()).
 		Limit(50)
-	got, _ := q.Build(dialect.MySQL)
+	got, args := q.Build(dialect.MySQL)
 	want := "DELETE FROM `users` WHERE `users`.`deleted_at` IS NOT NULL LIMIT 50"
 	if got != want {
 		t.Errorf("SQL mismatch\n got:  %s\nwant: %s", got, want)
+	}
+	if len(args) != 0 {
+		t.Errorf("args mismatch: got %v, want []", args)
 	}
 }
 
@@ -2077,10 +2088,13 @@ func TestUpdate_Limit_SQLite(t *testing.T) {
 		Set("enabled", false).
 		Where(ts.UsersT.DeletedAt.IsNotNull()).
 		Limit(100)
-	got, _ := q.Build(dialect.SQLite)
+	got, args := q.Build(dialect.SQLite)
 	want := `UPDATE "users" SET "enabled" = ? WHERE "users"."deleted_at" IS NOT NULL LIMIT 100`
 	if got != want {
 		t.Errorf("SQL mismatch\n got:  %s\nwant: %s", got, want)
+	}
+	if len(args) != 1 || args[0] != false {
+		t.Errorf("args mismatch: got %v, want [false]", args)
 	}
 }
 
@@ -2088,26 +2102,80 @@ func TestDelete_Limit_SQLite(t *testing.T) {
 	q := query.DeleteFrom(ts.UsersT).
 		Where(ts.UsersT.DeletedAt.IsNotNull()).
 		Limit(50)
-	got, _ := q.Build(dialect.SQLite)
+	got, args := q.Build(dialect.SQLite)
 	want := `DELETE FROM "users" WHERE "users"."deleted_at" IS NOT NULL LIMIT 50`
 	if got != want {
 		t.Errorf("SQL mismatch\n got:  %s\nwant: %s", got, want)
 	}
+	if len(args) != 0 {
+		t.Errorf("args mismatch: got %v, want []", args)
+	}
+}
+
+func TestUpdate_Limit_SQLite_WithReturning(t *testing.T) {
+	q := query.Update(ts.UsersT).
+		Set("enabled", false).
+		Where(ts.UsersT.DeletedAt.IsNotNull()).
+		Limit(10).
+		Returning(ts.UsersT.ID)
+	got, args := q.Build(dialect.SQLite)
+	want := `UPDATE "users" SET "enabled" = ? WHERE "users"."deleted_at" IS NOT NULL LIMIT 10 RETURNING "users"."id"`
+	if got != want {
+		t.Errorf("SQL mismatch\n got:  %s\nwant: %s", got, want)
+	}
+	if len(args) != 1 || args[0] != false {
+		t.Errorf("args mismatch: got %v, want [false]", args)
+	}
+}
+
+func TestDelete_Limit_SQLite_WithReturning(t *testing.T) {
+	q := query.DeleteFrom(ts.UsersT).
+		Where(ts.UsersT.DeletedAt.IsNotNull()).
+		Limit(10).
+		Returning(ts.UsersT.ID)
+	got, args := q.Build(dialect.SQLite)
+	want := `DELETE FROM "users" WHERE "users"."deleted_at" IS NOT NULL LIMIT 10 RETURNING "users"."id"`
+	if got != want {
+		t.Errorf("SQL mismatch\n got:  %s\nwant: %s", got, want)
+	}
+	if len(args) != 0 {
+		t.Errorf("args mismatch: got %v, want []", args)
+	}
 }
 
 func TestUpdate_Limit_Zero_NoClause(t *testing.T) {
-	q := query.Update(ts.UsersT).Set("enabled", false).Limit(0)
-	got, _ := q.Build(dialect.MySQL)
-	if strings.Contains(got, "LIMIT") {
-		t.Errorf("LIMIT should not appear when Limit(0): %s", got)
+	for _, d := range []dialect.Dialect{dialect.MySQL, dialect.SQLite, dialect.Postgres} {
+		q := query.Update(ts.UsersT).Set("enabled", false).Limit(0)
+		got, _ := q.Build(d)
+		if strings.Contains(got, "LIMIT") {
+			t.Errorf("dialect %s: LIMIT should not appear when Limit(0): %s", d.Name(), got)
+		}
 	}
 }
 
 func TestDelete_Limit_Zero_NoClause(t *testing.T) {
-	q := query.DeleteFrom(ts.UsersT).Limit(0)
+	for _, d := range []dialect.Dialect{dialect.MySQL, dialect.SQLite, dialect.Postgres} {
+		q := query.DeleteFrom(ts.UsersT).Limit(0)
+		got, _ := q.Build(d)
+		if strings.Contains(got, "LIMIT") {
+			t.Errorf("dialect %s: LIMIT should not appear when Limit(0): %s", d.Name(), got)
+		}
+	}
+}
+
+func TestUpdate_Limit_Negative_NoClause(t *testing.T) {
+	q := query.Update(ts.UsersT).Set("enabled", false).Limit(-1)
 	got, _ := q.Build(dialect.MySQL)
 	if strings.Contains(got, "LIMIT") {
-		t.Errorf("LIMIT should not appear when Limit(0): %s", got)
+		t.Errorf("LIMIT should not appear when Limit(-1): %s", got)
+	}
+}
+
+func TestDelete_Limit_Negative_NoClause(t *testing.T) {
+	q := query.DeleteFrom(ts.UsersT).Limit(-1)
+	got, _ := q.Build(dialect.MySQL)
+	if strings.Contains(got, "LIMIT") {
+		t.Errorf("LIMIT should not appear when Limit(-1): %s", got)
 	}
 }
 

@@ -122,7 +122,14 @@ type Dialect interface {
 	// PostgreSQL, which does not support LIMIT on mutating statements.
 	//
 	// When false, the LIMIT clause is silently dropped from UPDATE and DELETE
-	// statements at Build() time.
+	// statements at Build() time. The query builder consults this flag in
+	// UpdateBuilder.Build() and DeleteBuilder.Build().
+	//
+	// SQLite note: LIMIT on UPDATE/DELETE requires the SQLite library to be
+	// compiled with SQLITE_ENABLE_UPDATE_DELETE_LIMIT. This flag is enabled
+	// in modernc.org/sqlite but is absent from most Linux distribution packages
+	// of mattn/go-sqlite3. Callers targeting SQLite should verify their driver
+	// supports this before relying on it.
 	SupportsLimitOnMutate() bool
 }
 

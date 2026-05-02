@@ -28,7 +28,7 @@ dialect.SQLite    // SQLite 3.35+
 | `FOR UPDATE OF` | All tables emitted | All tables emitted (8.0+) | Silently ignored |
 | `FOR SHARE OF` | All tables emitted | Not emitted (`LOCK IN SHARE MODE`) | Silently ignored |
 | `NOWAIT` / `SKIP LOCKED` | Supported | Supported (8.0+) | Silently ignored |
-| `LIMIT` on `UPDATE`/`DELETE` | No (silently dropped) | Yes | Yes |
+| `LIMIT` on `UPDATE`/`DELETE` | No (silently dropped) | Yes | Yes (requires `SQLITE_ENABLE_UPDATE_DELETE_LIMIT` compile flag) |
 
 ## Using a dialect
 
@@ -100,6 +100,7 @@ func (CRDBDialect) SupportsFullJoin() bool        { return true }
 func (CRDBDialect) SupportsForUpdate() bool        { return true }
 func (CRDBDialect) SupportsForNoKeyUpdate() bool   { return true }
 func (CRDBDialect) ForShareClause() string         { return "FOR SHARE" }
+func (CRDBDialect) SupportsForShareOf() bool       { return true }
 func (CRDBDialect) SupportsLimitOnMutate() bool    { return false }
 ```
 
