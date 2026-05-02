@@ -913,6 +913,46 @@ func TestDiff_Ordering_CreateEnumAfterDropTable_SameName(t *testing.T) {
 	}
 }
 
+func TestDiff_Ordering_CreateEnumAfterRenameTable_SameName(t *testing.T) {
+	// Table "status" is renamed to "status_old" and a new enum "status" is introduced.
+	// ChangeRenameTable must precede ChangeCreateEnum: PostgreSQL tables carry an
+	// associated composite row type that blocks a same-named CREATE TYPE until the
+	// table is renamed away. This covers the case where actualDroppedTables would
+	// NOT contain "status" (because it's renamed, not dropped), yet the name is still
+	// occupied until the RENAME TABLE runs.
+	oldTable := pg.Table("status",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+	).Build()
+	renamedTable := pg.Table("status_old",
+		pg.C("id", pg.UUID().PrimaryKey().DefaultRandom()),
+	).RenamedFrom("status").Build()
+	newEnum := pg.CreateEnum("status", "pending", "active", "archived")
+
+	old := kit.FromSchema(kit.SchemaObjects{Tables: []pg.TableDefiner{oldTable}})
+	nw := kit.FromSchema(kit.SchemaObjects{
+		Tables: []pg.TableDefiner{renamedTable},
+		Enums:  []*pg.EnumDef{newEnum},
+	})
+
+	changes := kit.Diff(old, nw)
+
+	renameTableIdx, createEnumIdx := -1, -1
+	for i, c := range changes {
+		if c.Kind == kit.ChangeRenameTable && c.ObjectName == "status" {
+			renameTableIdx = i
+		}
+		if c.Kind == kit.ChangeCreateEnum && c.ObjectName == "status" {
+			createEnumIdx = i
+		}
+	}
+	if renameTableIdx < 0 || createEnumIdx < 0 {
+		t.Fatalf("missing expected changes: renameTable=%d createEnum=%d", renameTableIdx, createEnumIdx)
+	}
+	if renameTableIdx >= createEnumIdx {
+		t.Errorf("expected RENAME TABLE (idx %d) before CREATE ENUM (idx %d)", renameTableIdx, createEnumIdx)
+	}
+}
+
 func TestGenerateChangeSQL_AlterEnum_ConsecutiveInsertion(t *testing.T) {
 	// old=[a,d] → new=[a,b,c,d]: two labels inserted consecutively after 'a'.
 	// 'b' must be AFTER 'a'; 'c' must be AFTER 'b' (not AFTER 'a').
