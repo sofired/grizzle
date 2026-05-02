@@ -61,6 +61,10 @@ func (e ftsMatchExpr) ToSQL(ctx *BuildContext) string {
 // TsvectorExpr is exported so downstream code can name the type in APIs
 // (e.g. store it in a struct field, accept it as a parameter, or return it
 // from a helper).
+//
+// On dialects that do not support full-text search, ToSQL emits NULL; if an
+// alias is set via As, the output is NULL AS "alias" so that the SELECT
+// column position is preserved for struct/row mapping by column name.
 type TsvectorExpr struct {
 	config    string
 	ref       colRefer
@@ -107,7 +111,8 @@ func (e TsvectorExpr) ColumnName() string {
 // TableName implements SelectableColumn.
 func (e TsvectorExpr) TableName() string { return "" }
 
-// As returns a copy with the given SELECT alias.
+// As returns a copy with the given SELECT alias. The alias is retained in the
+// non-PG NULL fallback: ToSQL emits NULL AS "alias" so column mapping is stable.
 func (e TsvectorExpr) As(alias string) TsvectorExpr { e.alias = alias; return e }
 
 // Matches returns an @@ expression: to_tsvector(...) @@ to_tsquery($1).

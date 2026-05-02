@@ -559,7 +559,8 @@ func TestTsvectorExpr_ColumnName(t *testing.T) {
 // Per issue #230: pg-only regex and FTS operators must not emit unconditionally.
 // On non-PG dialects:
 //   - Predicate expressions (regexpExpr, ftsMatchExpr, ftsMatchExprOnExpr) → "FALSE"
-//   - Scalar expressions (TsvectorExpr, tsQueryFnExpr) → "NULL"
+//   - Scalar expressions (tsQueryFnExpr) → "NULL"
+//   - TsvectorExpr without alias → "NULL"; with .As() set → `NULL AS "alias"`
 //
 // No args are bound when the fallback is emitted, so ctx.Args() remains empty.
 
