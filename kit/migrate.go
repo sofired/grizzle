@@ -50,6 +50,10 @@ type StatusResult struct {
 // history table. Calling Migrate twice with an unchanged schema is a no-op.
 // It accepts tables from any dialect via the TableDefiner interface.
 //
+// Note: if the diff includes enum value additions (ChangeAlterEnum), the generated
+// ALTER TYPE ... ADD VALUE statements cannot run inside a transaction on PostgreSQL < 12.
+// On PG 9.x–11.x, apply those statements outside a transaction or upgrade to PG 12+.
+//
 //	result, err := kit.Migrate(ctx, pool, schema.Users, schema.Realms)
 func Migrate(ctx context.Context, pool *pgxpool.Pool, tables ...pg.TableDefiner) (MigrateResult, error) {
 	if err := ensureMigrationsTable(ctx, pool); err != nil {
@@ -209,25 +213,25 @@ func DescribeChanges(changes []Change) string {
 			ChangeAlterColumnNull, ChangeAlterColumnDefault:
 			col := ""
 			if c.NewCol != nil {
-				col = c.TableName + "." + c.NewCol.Name
+				col = c.ObjectName + "." + c.NewCol.Name
 			} else if c.OldCol != nil {
-				col = c.TableName + "." + c.OldCol.Name
+				col = c.ObjectName + "." + c.OldCol.Name
 			}
 			counts[c.Kind] = append(counts[c.Kind], col)
 		case ChangeRenameColumn:
-			col := c.TableName
+			col := c.ObjectName
 			if c.OldCol != nil && c.NewCol != nil {
-				col = c.TableName + "." + c.OldCol.Name + "→" + c.NewCol.Name
+				col = c.ObjectName + "." + c.OldCol.Name + "→" + c.NewCol.Name
 			}
 			counts[c.Kind] = append(counts[c.Kind], col)
 		case ChangeRenameTable:
-			label := c.TableName
+			label := c.ObjectName
 			if c.RenameTarget != "" {
-				label = c.TableName + "→" + c.RenameTarget
+				label = c.ObjectName + "→" + c.RenameTarget
 			}
 			counts[c.Kind] = append(counts[c.Kind], label)
 		default:
-			counts[c.Kind] = append(counts[c.Kind], c.TableName)
+			counts[c.Kind] = append(counts[c.Kind], c.ObjectName)
 		}
 	}
 

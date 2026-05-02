@@ -44,21 +44,21 @@ func GenerateCreateSQLMySQL(tables ...pg.TableDefiner) string {
 func GenerateChangeSQLMySQL(snap Snapshot, c Change) []string {
 	switch c.Kind {
 	case ChangeCreateTable:
-		t := snap.Tables[c.TableName]
+		t := snap.Tables[c.ObjectName]
 		if t == nil {
 			return nil
 		}
 		td := &pg.TableDef{Name: t.Name, Schema: t.Schema, Columns: t.Columns, Constraints: t.Constraints}
 		stmts := []string{createTableSQLMySQL(td)}
 		for _, con := range t.Constraints {
-			if sql := indexSQLMySQL(c.TableName, con); sql != "" {
+			if sql := indexSQLMySQL(c.ObjectName, con); sql != "" {
 				stmts = append(stmts, sql)
 			}
 		}
 		return stmts
 
 	case ChangeDropTable:
-		return []string{fmt.Sprintf("DROP TABLE IF EXISTS %s", quoteTableMySQL(c.TableName))}
+		return []string{fmt.Sprintf("DROP TABLE IF EXISTS %s", quoteTableMySQL(c.ObjectName))}
 
 	case ChangeRenameTable:
 		if c.RenameTarget == "" {
@@ -66,7 +66,7 @@ func GenerateChangeSQLMySQL(snap Snapshot, c Change) []string {
 		}
 		return []string{fmt.Sprintf(
 			"RENAME TABLE %s TO %s",
-			quoteTableMySQL(c.TableName),
+			quoteTableMySQL(c.ObjectName),
 			quoteTableMySQL(c.RenameTarget),
 		)}
 
@@ -76,7 +76,7 @@ func GenerateChangeSQLMySQL(snap Snapshot, c Change) []string {
 		}
 		return []string{fmt.Sprintf(
 			"ALTER TABLE %s ADD COLUMN %s",
-			quoteTableMySQL(c.TableName),
+			quoteTableMySQL(c.ObjectName),
 			columnDefSQLMySQL(*c.NewCol),
 		)}
 
@@ -86,7 +86,7 @@ func GenerateChangeSQLMySQL(snap Snapshot, c Change) []string {
 		}
 		return []string{fmt.Sprintf(
 			"ALTER TABLE %s DROP COLUMN %s",
-			quoteTableMySQL(c.TableName),
+			quoteTableMySQL(c.ObjectName),
 			qiMySQL(c.OldCol.Name),
 		)}
 
@@ -97,7 +97,7 @@ func GenerateChangeSQLMySQL(snap Snapshot, c Change) []string {
 		// MySQL uses MODIFY COLUMN — must repeat the full column definition.
 		return []string{fmt.Sprintf(
 			"ALTER TABLE %s MODIFY COLUMN %s",
-			quoteTableMySQL(c.TableName),
+			quoteTableMySQL(c.ObjectName),
 			columnDefSQLMySQL(*c.NewCol),
 		)}
 
@@ -108,7 +108,7 @@ func GenerateChangeSQLMySQL(snap Snapshot, c Change) []string {
 		// MODIFY COLUMN with the full definition (MySQL requires it).
 		return []string{fmt.Sprintf(
 			"ALTER TABLE %s MODIFY COLUMN %s",
-			quoteTableMySQL(c.TableName),
+			quoteTableMySQL(c.ObjectName),
 			columnDefSQLMySQL(*c.NewCol),
 		)}
 
@@ -119,12 +119,12 @@ func GenerateChangeSQLMySQL(snap Snapshot, c Change) []string {
 		if !c.NewCol.HasDefault {
 			return []string{fmt.Sprintf(
 				"ALTER TABLE %s ALTER COLUMN %s DROP DEFAULT",
-				quoteTableMySQL(c.TableName), qiMySQL(c.NewCol.Name),
+				quoteTableMySQL(c.ObjectName), qiMySQL(c.NewCol.Name),
 			)}
 		}
 		return []string{fmt.Sprintf(
 			"ALTER TABLE %s ALTER COLUMN %s SET DEFAULT %s",
-			quoteTableMySQL(c.TableName), qiMySQL(c.NewCol.Name),
+			quoteTableMySQL(c.ObjectName), qiMySQL(c.NewCol.Name),
 			mysqlDefaultExpr(c.NewCol.DefaultExpr),
 		)}
 
@@ -136,7 +136,7 @@ func GenerateChangeSQLMySQL(snap Snapshot, c Change) []string {
 		// Older MySQL requires CHANGE old new <full_def> — we use the modern syntax.
 		return []string{fmt.Sprintf(
 			"ALTER TABLE %s RENAME COLUMN %s TO %s",
-			quoteTableMySQL(c.TableName),
+			quoteTableMySQL(c.ObjectName),
 			qiMySQL(c.OldCol.Name),
 			qiMySQL(c.NewCol.Name),
 		)}
@@ -145,13 +145,52 @@ func GenerateChangeSQLMySQL(snap Snapshot, c Change) []string {
 		if c.Constraint == nil {
 			return nil
 		}
-		return addConstraintSQLMySQL(c.TableName, *c.Constraint)
+		return addConstraintSQLMySQL(c.ObjectName, *c.Constraint)
 
 	case ChangeDropConstraint:
 		if c.Constraint == nil {
 			return nil
 		}
-		return dropConstraintSQLMySQL(c.TableName, *c.Constraint)
+		return dropConstraintSQLMySQL(c.ObjectName, *c.Constraint)
+
+	case ChangeCreateView, ChangeReplaceView:
+		if c.View == nil {
+			return nil
+		}
+		// MySQL's CREATE OR REPLACE VIEW handles incompatible column changes natively.
+		return []string{fmt.Sprintf(
+			"CREATE OR REPLACE VIEW %s AS %s",
+			quoteTableMySQL(c.View.QualifiedName()),
+			c.View.SQL,
+		)}
+
+	case ChangeDropView:
+		if c.View == nil {
+			return nil
+		}
+		return []string{fmt.Sprintf(
+			"DROP VIEW IF EXISTS %s",
+			quoteTableMySQL(c.View.QualifiedName()),
+		)}
+
+	case ChangeCreateEnum:
+		// MySQL does not have named enum types; ENUM is defined inline on columns.
+		return []string{fmt.Sprintf(
+			"-- MySQL: CREATE TYPE AS ENUM is not supported for enum type %q; update affected columns to use inline ENUM(...) or equivalent CHECK constraints manually",
+			c.ObjectName,
+		)}
+
+	case ChangeAlterEnum:
+		return []string{fmt.Sprintf(
+			"-- MySQL: ALTER TYPE ADD VALUE is not supported for enum type %q; update affected columns' inline ENUM(...) or equivalent CHECK constraints manually",
+			c.ObjectName,
+		)}
+
+	case ChangeDropEnum:
+		return []string{fmt.Sprintf(
+			"-- MySQL: DROP TYPE is not supported for enum type %q; remove or adjust affected columns' inline ENUM(...) or equivalent CHECK constraints manually if needed",
+			c.ObjectName,
+		)}
 	}
 	return nil
 }
@@ -293,6 +332,9 @@ func addConstraintSQLMySQL(tableName string, c pg.Constraint) []string {
 		)
 		if c.FKOnDelete != "" && c.FKOnDelete != pg.FKActionNoAction {
 			sql += " ON DELETE " + string(c.FKOnDelete)
+		}
+		if c.FKOnUpdate != "" && c.FKOnUpdate != pg.FKActionNoAction {
+			sql += " ON UPDATE " + string(c.FKOnUpdate)
 		}
 		return []string{sql}
 	}
