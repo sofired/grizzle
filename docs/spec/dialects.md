@@ -28,7 +28,7 @@ Grizzle's dialect system is the Go equivalent of [Drizzle's multi-dialect suppor
 | `FOR UPDATE` / `FOR SHARE` | Yes | Yes (limited) | No |
 | `FOR NO KEY UPDATE` / `FOR KEY SHARE` | Yes | **No** | No |
 | `FULL JOIN` | Yes | No | No |
-| `LIMIT` on `UPDATE`/`DELETE` | No (silently dropped) | Yes | Yes |
+| `LIMIT` on `UPDATE`/`DELETE` | No (silently dropped) | Yes | Yes (requires `SQLITE_ENABLE_UPDATE_DELETE_LIMIT` compile flag) |
 | JSON operators | `->`, `->>`, `@>`, etc. | Limited | Limited |
 
 ## Dialect interface
