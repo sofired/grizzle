@@ -289,7 +289,7 @@ func TestGenerateChangeSQL_AddFKWithOnUpdate(t *testing.T) {
 	}
 	change := kit.Change{
 		Kind:       kit.ChangeAddConstraint,
-		TableName:  "users",
+		ObjectName: "users",
 		Constraint: &constraint,
 	}
 	stmts := kit.GenerateChangeSQL(snap, change)
@@ -322,7 +322,7 @@ func TestGenerateChangeSQL_AddFKWithOnUpdateOnly(t *testing.T) {
 	}
 	change := kit.Change{
 		Kind:       kit.ChangeAddConstraint,
-		TableName:  "users",
+		ObjectName: "users",
 		Constraint: &constraint,
 	}
 	stmts := kit.GenerateChangeSQL(snap, change)
@@ -354,7 +354,7 @@ func TestGenerateChangeSQL_AddFKDefaultActions(t *testing.T) {
 	}
 	change := kit.Change{
 		Kind:       kit.ChangeAddConstraint,
-		TableName:  "users",
+		ObjectName: "users",
 		Constraint: &constraint,
 	}
 	stmts := kit.GenerateChangeSQL(snap, change)
@@ -531,7 +531,7 @@ func TestMySQLChangeSQL_AddFKWithOnUpdate(t *testing.T) {
 	}
 	change := kit.Change{
 		Kind:       kit.ChangeAddConstraint,
-		TableName:  "users",
+		ObjectName: "users",
 		Constraint: &constraint,
 	}
 	stmts := kit.GenerateChangeSQLMySQL(snap, change)
