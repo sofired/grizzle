@@ -518,6 +518,35 @@ func TestMySQLChangeSQL_DropIndex(t *testing.T) {
 	}
 }
 
+func TestMySQLChangeSQL_AddFKWithOnUpdate(t *testing.T) {
+	snap := kit.FromDefs(realmsDef)
+	constraint := pg.Constraint{
+		Kind:       pg.KindForeignKey,
+		Name:       "users_realm_fk",
+		Columns:    []string{"realm_id"},
+		FKTable:    "realms",
+		FKColumns:  []string{"id"},
+		FKOnDelete: pg.FKActionCascade,
+		FKOnUpdate: pg.FKActionCascade,
+	}
+	change := kit.Change{
+		Kind:       kit.ChangeAddConstraint,
+		TableName:  "users",
+		Constraint: &constraint,
+	}
+	stmts := kit.GenerateChangeSQLMySQL(snap, change)
+	if len(stmts) != 1 {
+		t.Fatalf("expected 1 statement, got %d: %v", len(stmts), stmts)
+	}
+	got := stmts[0]
+	if !strings.Contains(got, "ON DELETE CASCADE") {
+		t.Errorf("missing ON DELETE CASCADE in:\n  %s", got)
+	}
+	if !strings.Contains(got, "ON UPDATE CASCADE") {
+		t.Errorf("missing ON UPDATE CASCADE in:\n  %s", got)
+	}
+}
+
 func TestMySQLChangeSQL_AlterColumnType(t *testing.T) {
 	snap := kit.FromDefs(realmsDef)
 	newCol := pg.ColumnDef{Name: "name", SQLType: "varchar(512)", NotNull: true}
