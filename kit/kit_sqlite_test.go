@@ -99,9 +99,9 @@ func TestSQLiteChangeSQL_AlterColumnType_EmitsComment(t *testing.T) {
 	snap := kit.FromDefs(realmsDef)
 	newCol := pg.ColumnDef{Name: "name", SQLType: "varchar(512)", NotNull: true}
 	change := kit.Change{
-		Kind:      kit.ChangeAlterColumnType,
-		TableName: "realms",
-		NewCol:    &newCol,
+		Kind:       kit.ChangeAlterColumnType,
+		ObjectName: "realms",
+		NewCol:     &newCol,
 	}
 	stmts := kit.GenerateChangeSQLSQLite(snap, change)
 	if len(stmts) != 1 {
@@ -116,9 +116,9 @@ func TestSQLiteChangeSQL_AddColumn(t *testing.T) {
 	snap := kit.FromDefs(realmsDef)
 	newCol := pg.ColumnDef{Name: "bio", SQLType: "text"}
 	change := kit.Change{
-		Kind:      kit.ChangeAddColumn,
-		TableName: "realms",
-		NewCol:    &newCol,
+		Kind:       kit.ChangeAddColumn,
+		ObjectName: "realms",
+		NewCol:     &newCol,
 	}
 	stmts := kit.GenerateChangeSQLSQLite(snap, change)
 	if len(stmts) != 1 {
