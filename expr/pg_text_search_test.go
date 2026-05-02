@@ -741,6 +741,26 @@ func TestToTsvector_NonPG_Scalar_EmitsNULL(t *testing.T) {
 	}
 }
 
+func TestToTsvector_NonPG_ScalarWithAlias_EmitsNULLWithAlias(t *testing.T) {
+	cases := []struct {
+		name string
+		ctx  *expr.BuildContext
+		want string
+	}{
+		{"mysql", myCtx(), "NULL AS `tsv`"},
+		{"sqlite", sqliteCtx(), `NULL AS "tsv"`},
+	}
+	for _, tc := range cases {
+		got := expr.ToTsvector(ts.ArticlesT.Body).As("tsv").ToSQL(tc.ctx)
+		if got != tc.want {
+			t.Errorf("ToTsvector.As on %s: got %q, want %q", tc.name, got, tc.want)
+		}
+		if len(tc.ctx.Args()) != 0 {
+			t.Errorf("ToTsvector.As on %s: expected no args bound, got %v", tc.name, tc.ctx.Args())
+		}
+	}
+}
+
 func TestToTsquery_NonPG_EmitsNULL(t *testing.T) {
 	for _, name := range []string{"mysql", "sqlite"} {
 		ctx := myCtx()

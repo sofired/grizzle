@@ -77,6 +77,9 @@ func (e TsvectorExpr) renderCore(ctx *BuildContext) string {
 
 func (e TsvectorExpr) ToSQL(ctx *BuildContext) string {
 	if !ctx.Dialect().SupportsFullTextSearch() {
+		if e.alias != "" {
+			return "NULL AS " + ctx.Quote(e.alias)
+		}
 		return "NULL"
 	}
 	s := e.renderCore(ctx)
