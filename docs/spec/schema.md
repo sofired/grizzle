@@ -44,6 +44,7 @@ var Users = pg.Table("users",
 | `.$onUpdateFn(fn)` | No equivalent | DEVIATION:LANGUAGE |
 | `.references(tbl, col, opts)` | `.References(table, col, opts...)` | PARITY |
 | `.generatedAlwaysAs(expr)` | DEVIATION:GAP (not designed) | — |
+| *(no Drizzle equivalent)* | `.RenamedFrom(oldName)` | GRIZZLE-ONLY — see below |
 
 ## Column types
 
@@ -123,9 +124,11 @@ In Drizzle, the column name is the first argument to the type function: `uuid('i
 | `sqliteTable(name, cols)` | `sqlite.Table(name, cols...)` | PARITY |
 | `text(name, opts)` | `sqlite.Text()` | PARITY |
 | `integer(name, opts)` | `sqlite.Integer()` | PARITY |
-| `real(name)` | DEVIATION:GAP (designed) | — |
-| `blob(name)` | DEVIATION:GAP (designed) | — |
-| `numeric(name)` | DEVIATION:GAP (designed) | — |
+| `real(name)` | `sqlite.Real()` | PARITY |
+| `blob(name)` | `sqlite.Blob()` | PARITY |
+| `numeric(name)` | `sqlite.Numeric(p, s)` | PARITY |
+| `text(name, { mode: 'json' })` | `sqlite.JSON()` | PARITY — both store as TEXT; `.JSON()` sets the Go scan type to `any` |
+| `blob(name, { mode: 'json' })` or `text(name, { mode: 'json' })` | `sqlite.JSONB()` | PARITY — stored as TEXT; use `.JSONB()` for schemas migrated from PostgreSQL |
 
 ## Table-level constraints
 
@@ -224,6 +227,27 @@ var Orders = pg.Table("orders",
 `pg.CreateEnum` and `pg.SchemaCreateEnum` panic if `name` is empty or if any value is empty. Values must be declared in the order they should appear in the database — PostgreSQL preserves declaration order and `ALTER TYPE ... ADD VALUE` uses `AFTER`/`BEFORE` anchors to maintain ordering when new values are inserted.
 
 See also `pg.Enum(typeName, vals...)` in the column types table for the inline MySQL-style enum variant (no separate `CREATE TYPE` statement).
+
+## `RenamedFrom()` — GRIZZLE-ONLY (kit rename detection)
+
+**Status:** GRIZZLE-ONLY — there is no Drizzle TypeScript equivalent; Drizzle Kit infers renames interactively at diff time. Grizzle uses a schema annotation because Go has no runtime inference.
+
+`.RenamedFrom(oldName)` can be called on any column or table builder to declare that the entity was renamed from `oldName` in the current migration step. The kit diff engine (`kit.Diff`) reads `PreviousName` from the snapshot and emits a `RENAME COLUMN` or `RENAME TABLE` change instead of drop+add.
+
+```go
+// Column rename: "email" was previously "email_address"
+pg.C("email", pg.Varchar(255).NotNull().RenamedFrom("email_address"))
+
+// Table rename: "users" was previously "accounts"
+var Users = pg.Table("users", ...).RenamedFrom("accounts").Build()
+```
+
+**Rules:**
+- Call `.RenamedFrom()` only in the schema version used to generate the migration. Once the migration has been applied, remove the call — it must not persist across snapshot saves. (The `PreviousName` field is tagged `json:"-"` to prevent it from appearing in committed snapshots.)
+- `oldName` for columns is the bare column name. For tables without a schema, pass the bare table name; for schema-qualified tables, pass `"schema.tablename"` to match the snapshot key.
+- If `oldName` does not match a dropped entity in the old snapshot, Diff falls back to drop+add silently.
+
+**Rationale:** Drizzle Kit detects renames interactively (the user chooses "rename" vs "drop+add" during `drizzle-kit push`). In Grizzle the diff engine is non-interactive; the annotation is the only way to communicate intent without user prompting.
 
 ## `drizzle()` instance — DEVIATION:INTENTIONAL
 

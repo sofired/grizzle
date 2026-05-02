@@ -76,8 +76,8 @@ Go has no runtime hook equivalent to Drizzle's `$onUpdate`. The `.OnUpdate()` ma
 ### JSONB
 
 ```go
-pg.JSONB().NotNull().DefaultEmpty()             // jsonb NOT NULL DEFAULT '{}'::jsonb
-pg.JSONB().DefaultEmptyArray()                  // jsonb DEFAULT '[]'::jsonb
+pg.JSONB().NotNull().Default("{}")              // jsonb NOT NULL DEFAULT '{}'::jsonb
+pg.JSONB().Default("[]")                        // jsonb DEFAULT '[]'::jsonb
 pg.JSONB().Type("map[string]any")               // jsonb — sets Go scan type in generated code
 pg.JSON()                                       // json (plain, not binary)
 ```
