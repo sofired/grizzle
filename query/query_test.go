@@ -2072,6 +2072,29 @@ func TestDelete_Limit_Postgres_Ignored(t *testing.T) {
 	}
 }
 
+func TestUpdate_Limit_SQLite(t *testing.T) {
+	q := query.Update(ts.UsersT).
+		Set("enabled", false).
+		Where(ts.UsersT.DeletedAt.IsNotNull()).
+		Limit(100)
+	got, _ := q.Build(dialect.SQLite)
+	want := `UPDATE "users" SET "enabled" = ? WHERE "users"."deleted_at" IS NOT NULL LIMIT 100`
+	if got != want {
+		t.Errorf("SQL mismatch\n got:  %s\nwant: %s", got, want)
+	}
+}
+
+func TestDelete_Limit_SQLite(t *testing.T) {
+	q := query.DeleteFrom(ts.UsersT).
+		Where(ts.UsersT.DeletedAt.IsNotNull()).
+		Limit(50)
+	got, _ := q.Build(dialect.SQLite)
+	want := `DELETE FROM "users" WHERE "users"."deleted_at" IS NOT NULL LIMIT 50`
+	if got != want {
+		t.Errorf("SQL mismatch\n got:  %s\nwant: %s", got, want)
+	}
+}
+
 // -------------------------------------------------------------------
 // Column-to-column operator tests
 // -------------------------------------------------------------------
