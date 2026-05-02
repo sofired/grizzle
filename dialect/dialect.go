@@ -142,19 +142,19 @@ var Postgres Dialect = postgresDialect{}
 
 type postgresDialect struct{}
 
-func (postgresDialect) Name() string                   { return "postgres" }
-func (postgresDialect) SupportsReturning() bool        { return true }
-func (postgresDialect) UpsertStyle() UpsertStyle       { return UpsertOnConflict }
-func (postgresDialect) InsertIgnoreClause() string     { return "" } // use ON CONFLICT … DO NOTHING
-func (postgresDialect) SupportsCTE() bool              { return true }
-func (postgresDialect) SupportsWindowFunctions() bool  { return true }
-func (postgresDialect) SupportsDistinctOn() bool       { return true }
-func (postgresDialect) SupportsForUpdate() bool        { return true }
-func (postgresDialect) SupportsForNoKeyUpdate() bool   { return true }
-func (postgresDialect) SupportsFullJoin() bool         { return true }
-func (postgresDialect) ForShareClause() string         { return "FOR SHARE" }
-func (postgresDialect) SupportsForShareOf() bool       { return true }
-func (postgresDialect) SupportsLimitOnMutate() bool    { return false }
+func (postgresDialect) Name() string                  { return "postgres" }
+func (postgresDialect) SupportsReturning() bool       { return true }
+func (postgresDialect) UpsertStyle() UpsertStyle      { return UpsertOnConflict }
+func (postgresDialect) InsertIgnoreClause() string    { return "" } // use ON CONFLICT … DO NOTHING
+func (postgresDialect) SupportsCTE() bool             { return true }
+func (postgresDialect) SupportsWindowFunctions() bool { return true }
+func (postgresDialect) SupportsDistinctOn() bool      { return true }
+func (postgresDialect) SupportsForUpdate() bool       { return true }
+func (postgresDialect) SupportsForNoKeyUpdate() bool  { return true }
+func (postgresDialect) SupportsFullJoin() bool        { return true }
+func (postgresDialect) ForShareClause() string        { return "FOR SHARE" }
+func (postgresDialect) SupportsForShareOf() bool      { return true }
+func (postgresDialect) SupportsLimitOnMutate() bool   { return false }
 
 func (postgresDialect) Placeholder(n int) string {
 	return fmt.Sprintf("$%d", n)
@@ -174,19 +174,19 @@ var MySQL Dialect = mysqlDialect{}
 
 type mysqlDialect struct{}
 
-func (mysqlDialect) Name() string                   { return "mysql" }
-func (mysqlDialect) SupportsReturning() bool        { return false }
-func (mysqlDialect) UpsertStyle() UpsertStyle       { return UpsertDuplicateKey }
-func (mysqlDialect) InsertIgnoreClause() string     { return "INSERT IGNORE" }
-func (mysqlDialect) SupportsCTE() bool              { return true } // MySQL 8.0+
-func (mysqlDialect) SupportsWindowFunctions() bool  { return true } // MySQL 8.0+
-func (mysqlDialect) SupportsDistinctOn() bool       { return false }
-func (mysqlDialect) SupportsForUpdate() bool        { return true }
-func (mysqlDialect) SupportsForNoKeyUpdate() bool   { return false }
-func (mysqlDialect) SupportsFullJoin() bool         { return false }
-func (mysqlDialect) ForShareClause() string         { return "LOCK IN SHARE MODE" }
-func (mysqlDialect) SupportsForShareOf() bool       { return false }
-func (mysqlDialect) SupportsLimitOnMutate() bool    { return true }
+func (mysqlDialect) Name() string                  { return "mysql" }
+func (mysqlDialect) SupportsReturning() bool       { return false }
+func (mysqlDialect) UpsertStyle() UpsertStyle      { return UpsertDuplicateKey }
+func (mysqlDialect) InsertIgnoreClause() string    { return "INSERT IGNORE" }
+func (mysqlDialect) SupportsCTE() bool             { return true } // MySQL 8.0+
+func (mysqlDialect) SupportsWindowFunctions() bool { return true } // MySQL 8.0+
+func (mysqlDialect) SupportsDistinctOn() bool      { return false }
+func (mysqlDialect) SupportsForUpdate() bool       { return true }
+func (mysqlDialect) SupportsForNoKeyUpdate() bool  { return false }
+func (mysqlDialect) SupportsFullJoin() bool        { return false }
+func (mysqlDialect) ForShareClause() string        { return "LOCK IN SHARE MODE" }
+func (mysqlDialect) SupportsForShareOf() bool      { return false }
+func (mysqlDialect) SupportsLimitOnMutate() bool   { return true }
 
 func (mysqlDialect) Placeholder(_ int) string { return "?" }
 
@@ -203,19 +203,19 @@ var SQLite Dialect = sqliteDialect{}
 
 type sqliteDialect struct{}
 
-func (sqliteDialect) Name() string                   { return "sqlite" }
-func (sqliteDialect) SupportsReturning() bool        { return true } // SQLite 3.35+
-func (sqliteDialect) UpsertStyle() UpsertStyle       { return UpsertOnConflict }
-func (sqliteDialect) InsertIgnoreClause() string     { return "INSERT OR IGNORE" }
-func (sqliteDialect) SupportsCTE() bool              { return true } // SQLite 3.8.3+
-func (sqliteDialect) SupportsWindowFunctions() bool  { return true } // SQLite 3.25+
-func (sqliteDialect) SupportsDistinctOn() bool       { return false }
-func (sqliteDialect) SupportsForUpdate() bool        { return false }
-func (sqliteDialect) SupportsForNoKeyUpdate() bool   { return false }
-func (sqliteDialect) SupportsFullJoin() bool         { return false }
-func (sqliteDialect) ForShareClause() string         { return "" }
-func (sqliteDialect) SupportsForShareOf() bool       { return false }
-func (sqliteDialect) SupportsLimitOnMutate() bool    { return true }
+func (sqliteDialect) Name() string                  { return "sqlite" }
+func (sqliteDialect) SupportsReturning() bool       { return true } // SQLite 3.35+
+func (sqliteDialect) UpsertStyle() UpsertStyle      { return UpsertOnConflict }
+func (sqliteDialect) InsertIgnoreClause() string    { return "INSERT OR IGNORE" }
+func (sqliteDialect) SupportsCTE() bool             { return true } // SQLite 3.8.3+
+func (sqliteDialect) SupportsWindowFunctions() bool { return true } // SQLite 3.25+
+func (sqliteDialect) SupportsDistinctOn() bool      { return false }
+func (sqliteDialect) SupportsForUpdate() bool       { return false }
+func (sqliteDialect) SupportsForNoKeyUpdate() bool  { return false }
+func (sqliteDialect) SupportsFullJoin() bool        { return false }
+func (sqliteDialect) ForShareClause() string        { return "" }
+func (sqliteDialect) SupportsForShareOf() bool      { return false }
+func (sqliteDialect) SupportsLimitOnMutate() bool   { return true }
 
 func (sqliteDialect) Placeholder(_ int) string { return "?" }
 
