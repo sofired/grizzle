@@ -28,6 +28,7 @@ dialect.SQLite    // SQLite 3.35+
 | `FOR UPDATE OF` | All tables emitted | All tables emitted (8.0+) | Silently ignored |
 | `FOR SHARE OF` | All tables emitted | Not emitted (`LOCK IN SHARE MODE`) | Silently ignored |
 | `NOWAIT` / `SKIP LOCKED` | Supported | Supported (8.0+) | Silently ignored |
+| `LIMIT` on `UPDATE`/`DELETE` | No (silently dropped) | Yes | Yes |
 
 ## Using a dialect
 
@@ -73,6 +74,7 @@ type Dialect interface {
     SupportsForUpdate() bool       // false → FOR UPDATE / FOR SHARE dropped
     SupportsForNoKeyUpdate() bool  // false → FOR NO KEY UPDATE / FOR KEY SHARE dropped
     ForShareClause() string        // "FOR SHARE" or "LOCK IN SHARE MODE"
+    SupportsLimitOnMutate() bool   // false → LIMIT on UPDATE/DELETE silently dropped
 }
 ```
 
@@ -95,9 +97,10 @@ func (CRDBDialect) SupportsCTE() bool             { return true }
 func (CRDBDialect) SupportsWindowFunctions() bool { return true }
 func (CRDBDialect) SupportsDistinctOn() bool      { return true }
 func (CRDBDialect) SupportsFullJoin() bool        { return true }
-func (CRDBDialect) SupportsForUpdate() bool       { return true }
-func (CRDBDialect) SupportsForNoKeyUpdate() bool  { return true }
-func (CRDBDialect) ForShareClause() string        { return "FOR SHARE" }
+func (CRDBDialect) SupportsForUpdate() bool        { return true }
+func (CRDBDialect) SupportsForNoKeyUpdate() bool   { return true }
+func (CRDBDialect) ForShareClause() string         { return "FOR SHARE" }
+func (CRDBDialect) SupportsLimitOnMutate() bool    { return false }
 ```
 
 ## Feature detection

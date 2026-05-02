@@ -28,6 +28,7 @@ Grizzle's dialect system is the Go equivalent of [Drizzle's multi-dialect suppor
 | `FOR UPDATE` / `FOR SHARE` | Yes | Yes (limited) | No |
 | `FOR NO KEY UPDATE` / `FOR KEY SHARE` | Yes | **No** | No |
 | `FULL JOIN` | Yes | No | No |
+| `LIMIT` on `UPDATE`/`DELETE` | No | Yes | Yes |
 | JSON operators | `->`, `->>`, `@>`, etc. | Limited | Limited |
 
 ## Dialect interface
@@ -62,6 +63,7 @@ type Dialect interface {
     SupportsForNoKeyUpdate() bool           // PostgreSQL-only; false for MySQL/SQLite
     SupportsFullJoin() bool
     ForShareClause() string                 // "FOR SHARE" (Postgres) / "LOCK IN SHARE MODE" (MySQL)
+    SupportsLimitOnMutate() bool            // false for PostgreSQL; true for MySQL/SQLite
 }
 ```
 
