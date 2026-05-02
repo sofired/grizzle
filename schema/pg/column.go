@@ -210,6 +210,8 @@ func Text() *VarcharBuilder {
 
 func (b *VarcharBuilder) NotNull() *VarcharBuilder { b.setNotNull(); return b }
 func (b *VarcharBuilder) Unique() *VarcharBuilder  { b.def.Unique = true; return b }
+// Default sets the DEFAULT value for the column.
+// Single quotes in val are doubled to produce valid SQL.
 func (b *VarcharBuilder) Default(val string) *VarcharBuilder {
 	b.setDefault(quoteSQLLiteral(val))
 	return b
@@ -411,6 +413,9 @@ func (b *JSONBBuilder) Type(typeExpr string) *JSONBBuilder {
 }
 
 func (b *JSONBBuilder) NotNull() *JSONBBuilder { b.setNotNull(); return b }
+// Default sets the DEFAULT expression for the column. jsonExpr should be a
+// valid JSON literal (e.g. `{"key":"value"}`); it is wrapped in single quotes
+// and cast to the column type. Embedded single quotes are doubled.
 func (b *JSONBBuilder) Default(jsonExpr string) *JSONBBuilder {
 	b.setDefault(quoteSQLLiteral(jsonExpr) + "::" + b.def.SQLType)
 	return b
