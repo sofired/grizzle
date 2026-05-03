@@ -340,7 +340,7 @@ ALTER TABLE _grizzle_migrations ADD COLUMN tag TEXT NOT NULL DEFAULT '';
 ALTER TABLE _grizzle_migrations ADD COLUMN is_baseline INTEGER NOT NULL DEFAULT 0;
 ```
 
-The upgrade is idempotent: each column addition is guarded by an existence check. No downtime is required. On PostgreSQL 11 and later, `ADD COLUMN ... DEFAULT ''` is a metadata-only operation and does not rewrite the table. On PostgreSQL 10 and earlier, this operation performs a full table rewrite and holds an `ACCESS EXCLUSIVE` lock for its duration — operators on those versions should plan for downtime or upgrade to PostgreSQL 11+ before running the automatic schema upgrade.
+The upgrade is idempotent: each column addition is guarded by an existence check. No downtime is required. On PostgreSQL, `ADD COLUMN ... DEFAULT ''` is a metadata-only operation with no table rewrite (PostgreSQL 11+).
 
 **Privilege requirement:** The schema upgrade requires `ALTER TABLE` privilege on `_grizzle_migrations`. In environments where the application runtime credential does not have `ALTER TABLE`, run `grizzle migrate` once under an elevated credential (or apply the DDL above manually). Use `--skip-schema-upgrade` to suppress the automatic upgrade and manage it out-of-band. If `--skip-schema-upgrade` is passed and the `tag` or `is_baseline` columns are absent, `kit.Migrate` returns an error immediately — it does not fall back to the old schema or silently degrade. The operator must apply the upgrade DDL manually before proceeding.
 
