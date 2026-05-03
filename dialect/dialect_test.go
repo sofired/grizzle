@@ -19,6 +19,7 @@ func TestDialectFeatureMatrix(t *testing.T) {
 		supportsForNoKey       bool
 		supportsFullJoin       bool
 		supportsForShareOf     bool
+		supportsLimitOnMutate  bool
 		forShareClause         string
 		supportsRegexpMatch    bool
 		supportsFullTextSearch bool
@@ -35,6 +36,7 @@ func TestDialectFeatureMatrix(t *testing.T) {
 			supportsForNoKey:       true,
 			supportsFullJoin:       true,
 			supportsForShareOf:     true,
+			supportsLimitOnMutate:  false,
 			forShareClause:         "FOR SHARE",
 			supportsRegexpMatch:    true,
 			supportsFullTextSearch: true,
@@ -49,6 +51,7 @@ func TestDialectFeatureMatrix(t *testing.T) {
 			supportsForNoKey:       false,
 			supportsFullJoin:       false,
 			supportsForShareOf:     false,
+			supportsLimitOnMutate:  true,
 			forShareClause:         "LOCK IN SHARE MODE",
 			supportsRegexpMatch:    false,
 			supportsFullTextSearch: false,
@@ -63,6 +66,7 @@ func TestDialectFeatureMatrix(t *testing.T) {
 			supportsForNoKey:       false,
 			supportsFullJoin:       false,
 			supportsForShareOf:     false,
+			supportsLimitOnMutate:  true,
 			forShareClause:         "",
 			supportsRegexpMatch:    false,
 			supportsFullTextSearch: false,
@@ -90,6 +94,7 @@ func TestDialectFeatureMatrix(t *testing.T) {
 			checkBool("SupportsForNoKeyUpdate", c.d.SupportsForNoKeyUpdate(), c.supportsForNoKey)
 			checkBool("SupportsFullJoin", c.d.SupportsFullJoin(), c.supportsFullJoin)
 			checkBool("SupportsForShareOf", c.d.SupportsForShareOf(), c.supportsForShareOf)
+			checkBool("SupportsLimitOnMutate", c.d.SupportsLimitOnMutate(), c.supportsLimitOnMutate)
 			checkStr("ForShareClause", c.d.ForShareClause(), c.forShareClause)
 			checkBool("SupportsRegexpMatch", c.d.SupportsRegexpMatch(), c.supportsRegexpMatch)
 			checkBool("SupportsFullTextSearch", c.d.SupportsFullTextSearch(), c.supportsFullTextSearch)

@@ -59,7 +59,7 @@ func (b *DeleteBuilder) Build(d dialect.Dialect) (string, []any) {
 
 	sb.WriteString(buildWhere(ctx, b.where))
 
-	if b.limit > 0 && d.Name() != "postgres" {
+	if b.limit > 0 && d.SupportsLimitOnMutate() {
 		fmt.Fprintf(&sb, " LIMIT %d", b.limit)
 	}
 

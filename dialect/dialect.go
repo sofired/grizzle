@@ -135,6 +135,21 @@ type Dialect interface {
 	// scalar expressions such as standalone tsquery constructors) in the SQL output.
 	// Callers should check this flag before building queries with FTS operators.
 	SupportsFullTextSearch() bool
+
+	// SupportsLimitOnMutate reports whether the dialect supports a LIMIT clause
+	// on UPDATE and DELETE statements. True for MySQL and SQLite; false for
+	// PostgreSQL, which does not support LIMIT on mutating statements.
+	//
+	// When false, the LIMIT clause is silently dropped from UPDATE and DELETE
+	// statements at Build() time. The query builder consults this flag in
+	// UpdateBuilder.Build() and DeleteBuilder.Build().
+	//
+	// SQLite note: LIMIT on UPDATE/DELETE requires the SQLite library to be
+	// compiled with SQLITE_ENABLE_UPDATE_DELETE_LIMIT. This flag is enabled
+	// in modernc.org/sqlite but is absent from most Linux distribution packages
+	// of mattn/go-sqlite3. Callers targeting SQLite should verify their driver
+	// supports this before relying on it.
+	SupportsLimitOnMutate() bool
 }
 
 // -------------------------------------------------------------------
@@ -160,6 +175,7 @@ func (postgresDialect) ForShareClause() string        { return "FOR SHARE" }
 func (postgresDialect) SupportsForShareOf() bool      { return true }
 func (postgresDialect) SupportsRegexpMatch() bool     { return true }
 func (postgresDialect) SupportsFullTextSearch() bool  { return true }
+func (postgresDialect) SupportsLimitOnMutate() bool   { return false }
 
 func (postgresDialect) Placeholder(n int) string {
 	return fmt.Sprintf("$%d", n)
@@ -193,6 +209,7 @@ func (mysqlDialect) ForShareClause() string        { return "LOCK IN SHARE MODE"
 func (mysqlDialect) SupportsForShareOf() bool      { return false }
 func (mysqlDialect) SupportsRegexpMatch() bool     { return false }
 func (mysqlDialect) SupportsFullTextSearch() bool  { return false }
+func (mysqlDialect) SupportsLimitOnMutate() bool   { return true }
 
 func (mysqlDialect) Placeholder(_ int) string { return "?" }
 
@@ -223,6 +240,7 @@ func (sqliteDialect) ForShareClause() string        { return "" }
 func (sqliteDialect) SupportsForShareOf() bool      { return false }
 func (sqliteDialect) SupportsRegexpMatch() bool     { return false }
 func (sqliteDialect) SupportsFullTextSearch() bool  { return false }
+func (sqliteDialect) SupportsLimitOnMutate() bool   { return true }
 
 func (sqliteDialect) Placeholder(_ int) string { return "?" }
 
