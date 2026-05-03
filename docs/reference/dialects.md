@@ -29,6 +29,8 @@ dialect.SQLite    // SQLite 3.35+
 | `FOR SHARE OF` | All tables emitted | Not emitted (`LOCK IN SHARE MODE`) | Silently ignored |
 | `NOWAIT` / `SKIP LOCKED` | Supported | Supported (8.0+) | Silently ignored |
 | `LIMIT` on `UPDATE`/`DELETE` | No (silently dropped) | Yes | Yes (requires `SQLITE_ENABLE_UPDATE_DELETE_LIMIT` compile flag) |
+| Regex match (`~`, `~*`, `!~`, `!~*`) | Yes | **No** (emits `FALSE`) | **No** (emits `FALSE`) |
+| Full-text search (`@@`, `to_tsvector`, etc.) | Yes | **No** (emits `FALSE`/`NULL`) | **No** (emits `FALSE`/`NULL`) |
 
 ## Using a dialect
 
@@ -74,6 +76,9 @@ type Dialect interface {
     SupportsForUpdate() bool       // false → FOR UPDATE / FOR SHARE dropped
     SupportsForNoKeyUpdate() bool  // false → FOR NO KEY UPDATE / FOR KEY SHARE dropped
     ForShareClause() string        // "FOR SHARE" or "LOCK IN SHARE MODE"
+    SupportsForShareOf() bool      // false → OF table list omitted from FOR SHARE
+    SupportsRegexpMatch() bool     // false → regex exprs emit FALSE (pg-only: ~, ~*, !~, !~*)
+    SupportsFullTextSearch() bool  // false → FTS predicates emit FALSE, scalars emit NULL
     SupportsLimitOnMutate() bool   // false → LIMIT on UPDATE/DELETE silently dropped
 }
 ```
@@ -97,11 +102,13 @@ func (CRDBDialect) SupportsCTE() bool             { return true }
 func (CRDBDialect) SupportsWindowFunctions() bool { return true }
 func (CRDBDialect) SupportsDistinctOn() bool      { return true }
 func (CRDBDialect) SupportsFullJoin() bool        { return true }
-func (CRDBDialect) SupportsForUpdate() bool        { return true }
-func (CRDBDialect) SupportsForNoKeyUpdate() bool   { return true }
-func (CRDBDialect) ForShareClause() string         { return "FOR SHARE" }
-func (CRDBDialect) SupportsForShareOf() bool       { return true }
-func (CRDBDialect) SupportsLimitOnMutate() bool    { return false }
+func (CRDBDialect) SupportsForUpdate() bool       { return true }
+func (CRDBDialect) SupportsForNoKeyUpdate() bool  { return true }
+func (CRDBDialect) ForShareClause() string        { return "FOR SHARE" }
+func (CRDBDialect) SupportsForShareOf() bool      { return true }
+func (CRDBDialect) SupportsRegexpMatch() bool     { return true }  // CockroachDB supports PG regex syntax
+func (CRDBDialect) SupportsFullTextSearch() bool  { return true }  // CockroachDB supports PG FTS
+func (CRDBDialect) SupportsLimitOnMutate() bool   { return false }
 ```
 
 ## Feature detection

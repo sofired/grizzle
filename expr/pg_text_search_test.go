@@ -11,7 +11,9 @@ import (
 
 // helpers
 
-func pgCtx() *expr.BuildContext { return expr.NewBuildContext(dialect.Postgres) }
+func pgCtx() *expr.BuildContext     { return expr.NewBuildContext(dialect.Postgres) }
+func myCtx() *expr.BuildContext     { return expr.NewBuildContext(dialect.MySQL) }
+func sqliteCtx() *expr.BuildContext { return expr.NewBuildContext(dialect.SQLite) }
 
 func sql(e expr.Expression) string { return e.ToSQL(pgCtx()) }
 
@@ -548,5 +550,442 @@ func TestTsvectorExpr_ColumnName(t *testing.T) {
 	withAlias := expr.ToTsvector(ts.ArticlesT.Body).As("tsv")
 	if got, want := withAlias.ColumnName(), "tsv"; got != want {
 		t.Errorf("ColumnName (with alias): got %q, want %q", got, want)
+	}
+}
+
+// -----------------------------------------------------------------------
+// Non-PostgreSQL dialect behaviour: unsupported operators emit safe fallbacks
+// -----------------------------------------------------------------------
+// Per issue #230: pg-only regex and FTS operators must not emit unconditionally.
+// On non-PG dialects:
+//   - Predicate expressions (regexpExpr, ftsMatchExpr, ftsMatchExprOnExpr) → "FALSE"
+//   - Scalar expressions (tsQueryFnExpr) → "NULL"
+//   - TsvectorExpr without alias → "NULL"; with .As() set → `NULL AS "alias"`
+//
+// No args are bound when the fallback is emitted, so ctx.Args() remains empty.
+
+func TestRegexpMatch_NonPG_EmitsFALSE(t *testing.T) {
+	for _, name := range []string{"mysql", "sqlite"} {
+		ctx := myCtx()
+		if name == "sqlite" {
+			ctx = sqliteCtx()
+		}
+		e := ts.UsersT.Email.RegexpMatch("^alice")
+		got := e.ToSQL(ctx)
+		if got != "FALSE" {
+			t.Errorf("RegexpMatch on %s: got %q, want \"FALSE\"", name, got)
+		}
+		if len(ctx.Args()) != 0 {
+			t.Errorf("RegexpMatch on %s: expected no args bound, got %v", name, ctx.Args())
+		}
+	}
+}
+
+func TestRegexpMatchI_NonPG_EmitsFALSE(t *testing.T) {
+	for _, name := range []string{"mysql", "sqlite"} {
+		ctx := myCtx()
+		if name == "sqlite" {
+			ctx = sqliteCtx()
+		}
+		got := ts.UsersT.Email.RegexpMatchI("^alice").ToSQL(ctx)
+		if got != "FALSE" {
+			t.Errorf("RegexpMatchI on %s: got %q, want \"FALSE\"", name, got)
+		}
+		if len(ctx.Args()) != 0 {
+			t.Errorf("RegexpMatchI on %s: expected no args bound, got %v", name, ctx.Args())
+		}
+	}
+}
+
+func TestNotRegexpMatch_NonPG_EmitsFALSE(t *testing.T) {
+	for _, name := range []string{"mysql", "sqlite"} {
+		ctx := myCtx()
+		if name == "sqlite" {
+			ctx = sqliteCtx()
+		}
+		got := ts.UsersT.Email.NotRegexpMatch("^alice").ToSQL(ctx)
+		if got != "FALSE" {
+			t.Errorf("NotRegexpMatch on %s: got %q, want \"FALSE\"", name, got)
+		}
+		if len(ctx.Args()) != 0 {
+			t.Errorf("NotRegexpMatch on %s: expected no args bound, got %v", name, ctx.Args())
+		}
+	}
+}
+
+func TestNotRegexpMatchI_NonPG_EmitsFALSE(t *testing.T) {
+	for _, name := range []string{"mysql", "sqlite"} {
+		ctx := myCtx()
+		if name == "sqlite" {
+			ctx = sqliteCtx()
+		}
+		got := ts.UsersT.Email.NotRegexpMatchI("^alice").ToSQL(ctx)
+		if got != "FALSE" {
+			t.Errorf("NotRegexpMatchI on %s: got %q, want \"FALSE\"", name, got)
+		}
+		if len(ctx.Args()) != 0 {
+			t.Errorf("NotRegexpMatchI on %s: expected no args bound, got %v", name, ctx.Args())
+		}
+	}
+}
+
+func TestTsvectorColumn_Matches_NonPG_EmitsFALSE(t *testing.T) {
+	for _, name := range []string{"mysql", "sqlite"} {
+		ctx := myCtx()
+		if name == "sqlite" {
+			ctx = sqliteCtx()
+		}
+		e := ts.ArticlesT.SearchVector.Matches("grizzle & orm")
+		got := e.ToSQL(ctx)
+		if got != "FALSE" {
+			t.Errorf("TsvectorColumn.Matches on %s: got %q, want \"FALSE\"", name, got)
+		}
+		if len(ctx.Args()) != 0 {
+			t.Errorf("TsvectorColumn.Matches on %s: expected no args bound, got %v", name, ctx.Args())
+		}
+	}
+}
+
+func TestTsvectorColumn_MatchesPlain_NonPG_EmitsFALSE(t *testing.T) {
+	for _, name := range []string{"mysql", "sqlite"} {
+		ctx := myCtx()
+		if name == "sqlite" {
+			ctx = sqliteCtx()
+		}
+		got := ts.ArticlesT.SearchVector.MatchesPlain("grizzle orm").ToSQL(ctx)
+		if got != "FALSE" {
+			t.Errorf("TsvectorColumn.MatchesPlain on %s: got %q, want \"FALSE\"", name, got)
+		}
+		if len(ctx.Args()) != 0 {
+			t.Errorf("TsvectorColumn.MatchesPlain on %s: expected no args bound, got %v", name, ctx.Args())
+		}
+	}
+}
+
+func TestTsvectorColumn_MatchesWithConfig_NonPG_EmitsFALSE(t *testing.T) {
+	for _, name := range []string{"mysql", "sqlite"} {
+		ctx := myCtx()
+		if name == "sqlite" {
+			ctx = sqliteCtx()
+		}
+		got := ts.ArticlesT.SearchVector.MatchesWithConfig("english", "grizzle & orm").ToSQL(ctx)
+		if got != "FALSE" {
+			t.Errorf("TsvectorColumn.MatchesWithConfig on %s: got %q, want \"FALSE\"", name, got)
+		}
+		if len(ctx.Args()) != 0 {
+			t.Errorf("TsvectorColumn.MatchesWithConfig on %s: expected no args bound, got %v", name, ctx.Args())
+		}
+	}
+}
+
+func TestTsvectorColumn_MatchesPhrase_NonPG_EmitsFALSE(t *testing.T) {
+	for _, name := range []string{"mysql", "sqlite"} {
+		ctx := myCtx()
+		if name == "sqlite" {
+			ctx = sqliteCtx()
+		}
+		got := ts.ArticlesT.SearchVector.MatchesPhrase("fast full text").ToSQL(ctx)
+		if got != "FALSE" {
+			t.Errorf("TsvectorColumn.MatchesPhrase on %s: got %q, want \"FALSE\"", name, got)
+		}
+		if len(ctx.Args()) != 0 {
+			t.Errorf("TsvectorColumn.MatchesPhrase on %s: expected no args bound, got %v", name, ctx.Args())
+		}
+	}
+}
+
+func TestTsvectorColumn_MatchesWebSearch_NonPG_EmitsFALSE(t *testing.T) {
+	for _, name := range []string{"mysql", "sqlite"} {
+		ctx := myCtx()
+		if name == "sqlite" {
+			ctx = sqliteCtx()
+		}
+		got := ts.ArticlesT.SearchVector.MatchesWebSearch("grizzle -orm").ToSQL(ctx)
+		if got != "FALSE" {
+			t.Errorf("TsvectorColumn.MatchesWebSearch on %s: got %q, want \"FALSE\"", name, got)
+		}
+		if len(ctx.Args()) != 0 {
+			t.Errorf("TsvectorColumn.MatchesWebSearch on %s: expected no args bound, got %v", name, ctx.Args())
+		}
+	}
+}
+
+func TestToTsvector_NonPG_MatchesPlain_EmitsFALSE(t *testing.T) {
+	for _, name := range []string{"mysql", "sqlite"} {
+		ctx := myCtx()
+		if name == "sqlite" {
+			ctx = sqliteCtx()
+		}
+		got := expr.ToTsvector(ts.ArticlesT.Body).MatchesPlain("grizzle orm").ToSQL(ctx)
+		if got != "FALSE" {
+			t.Errorf("ToTsvector.MatchesPlain on %s: got %q, want \"FALSE\"", name, got)
+		}
+		if len(ctx.Args()) != 0 {
+			t.Errorf("ToTsvector.MatchesPlain on %s: expected no args bound, got %v", name, ctx.Args())
+		}
+	}
+}
+
+func TestToTsvector_NonPG_Scalar_EmitsNULL(t *testing.T) {
+	for _, name := range []string{"mysql", "sqlite"} {
+		ctx := myCtx()
+		if name == "sqlite" {
+			ctx = sqliteCtx()
+		}
+		got := expr.ToTsvector(ts.ArticlesT.Body).ToSQL(ctx)
+		if got != "NULL" {
+			t.Errorf("ToTsvector scalar on %s: got %q, want \"NULL\"", name, got)
+		}
+		if len(ctx.Args()) != 0 {
+			t.Errorf("ToTsvector scalar on %s: expected no args bound, got %v", name, ctx.Args())
+		}
+	}
+}
+
+func TestToTsvector_NonPG_ScalarWithAlias_EmitsNULLWithAlias(t *testing.T) {
+	cases := []struct {
+		name string
+		ctx  *expr.BuildContext
+		want string
+	}{
+		{"mysql", myCtx(), "NULL AS `tsv`"},
+		{"sqlite", sqliteCtx(), `NULL AS "tsv"`},
+	}
+	for _, tc := range cases {
+		got := expr.ToTsvector(ts.ArticlesT.Body).As("tsv").ToSQL(tc.ctx)
+		if got != tc.want {
+			t.Errorf("ToTsvector.As on %s: got %q, want %q", tc.name, got, tc.want)
+		}
+		if len(tc.ctx.Args()) != 0 {
+			t.Errorf("ToTsvector.As on %s: expected no args bound, got %v", tc.name, tc.ctx.Args())
+		}
+	}
+}
+
+func TestToTsquery_NonPG_EmitsNULL(t *testing.T) {
+	for _, name := range []string{"mysql", "sqlite"} {
+		ctx := myCtx()
+		if name == "sqlite" {
+			ctx = sqliteCtx()
+		}
+		got := expr.ToTsquery("grizzle & orm").ToSQL(ctx)
+		if got != "NULL" {
+			t.Errorf("ToTsquery on %s: got %q, want \"NULL\"", name, got)
+		}
+		if len(ctx.Args()) != 0 {
+			t.Errorf("ToTsquery on %s: expected no args bound, got %v", name, ctx.Args())
+		}
+	}
+}
+
+func TestPlainToTsquery_NonPG_EmitsNULL(t *testing.T) {
+	for _, name := range []string{"mysql", "sqlite"} {
+		ctx := myCtx()
+		if name == "sqlite" {
+			ctx = sqliteCtx()
+		}
+		got := expr.PlainToTsquery("grizzle orm").ToSQL(ctx)
+		if got != "NULL" {
+			t.Errorf("PlainToTsquery on %s: got %q, want \"NULL\"", name, got)
+		}
+		if len(ctx.Args()) != 0 {
+			t.Errorf("PlainToTsquery on %s: expected no args bound, got %v", name, ctx.Args())
+		}
+	}
+}
+
+func TestPhraseToTsquery_NonPG_EmitsNULL(t *testing.T) {
+	for _, name := range []string{"mysql", "sqlite"} {
+		ctx := myCtx()
+		if name == "sqlite" {
+			ctx = sqliteCtx()
+		}
+		got := expr.PhraseToTsquery("fast full text").ToSQL(ctx)
+		if got != "NULL" {
+			t.Errorf("PhraseToTsquery on %s: got %q, want \"NULL\"", name, got)
+		}
+		if len(ctx.Args()) != 0 {
+			t.Errorf("PhraseToTsquery on %s: expected no args bound, got %v", name, ctx.Args())
+		}
+	}
+}
+
+func TestWebsearchToTsquery_NonPG_EmitsNULL(t *testing.T) {
+	for _, name := range []string{"mysql", "sqlite"} {
+		ctx := myCtx()
+		if name == "sqlite" {
+			ctx = sqliteCtx()
+		}
+		got := expr.WebsearchToTsquery("grizzle -orm").ToSQL(ctx)
+		if got != "NULL" {
+			t.Errorf("WebsearchToTsquery on %s: got %q, want \"NULL\"", name, got)
+		}
+		if len(ctx.Args()) != 0 {
+			t.Errorf("WebsearchToTsquery on %s: expected no args bound, got %v", name, ctx.Args())
+		}
+	}
+}
+
+func TestToTsqueryWithConfig_NonPG_EmitsNULL(t *testing.T) {
+	for _, name := range []string{"mysql", "sqlite"} {
+		ctx := myCtx()
+		if name == "sqlite" {
+			ctx = sqliteCtx()
+		}
+		got := expr.ToTsqueryWithConfig("english", "grizzle & orm").ToSQL(ctx)
+		if got != "NULL" {
+			t.Errorf("ToTsqueryWithConfig on %s: got %q, want \"NULL\"", name, got)
+		}
+		if len(ctx.Args()) != 0 {
+			t.Errorf("ToTsqueryWithConfig on %s: expected no args bound, got %v", name, ctx.Args())
+		}
+	}
+}
+
+func TestPlainToTsqueryWithConfig_NonPG_EmitsNULL(t *testing.T) {
+	for _, name := range []string{"mysql", "sqlite"} {
+		ctx := myCtx()
+		if name == "sqlite" {
+			ctx = sqliteCtx()
+		}
+		got := expr.PlainToTsqueryWithConfig("english", "grizzle orm").ToSQL(ctx)
+		if got != "NULL" {
+			t.Errorf("PlainToTsqueryWithConfig on %s: got %q, want \"NULL\"", name, got)
+		}
+		if len(ctx.Args()) != 0 {
+			t.Errorf("PlainToTsqueryWithConfig on %s: expected no args bound, got %v", name, ctx.Args())
+		}
+	}
+}
+
+func TestPhraseToTsqueryWithConfig_NonPG_EmitsNULL(t *testing.T) {
+	for _, name := range []string{"mysql", "sqlite"} {
+		ctx := myCtx()
+		if name == "sqlite" {
+			ctx = sqliteCtx()
+		}
+		got := expr.PhraseToTsqueryWithConfig("english", "fast full text").ToSQL(ctx)
+		if got != "NULL" {
+			t.Errorf("PhraseToTsqueryWithConfig on %s: got %q, want \"NULL\"", name, got)
+		}
+		if len(ctx.Args()) != 0 {
+			t.Errorf("PhraseToTsqueryWithConfig on %s: expected no args bound, got %v", name, ctx.Args())
+		}
+	}
+}
+
+func TestWebsearchToTsqueryWithConfig_NonPG_EmitsNULL(t *testing.T) {
+	for _, name := range []string{"mysql", "sqlite"} {
+		ctx := myCtx()
+		if name == "sqlite" {
+			ctx = sqliteCtx()
+		}
+		got := expr.WebsearchToTsqueryWithConfig("english", "grizzle -orm").ToSQL(ctx)
+		if got != "NULL" {
+			t.Errorf("WebsearchToTsqueryWithConfig on %s: got %q, want \"NULL\"", name, got)
+		}
+		if len(ctx.Args()) != 0 {
+			t.Errorf("WebsearchToTsqueryWithConfig on %s: expected no args bound, got %v", name, ctx.Args())
+		}
+	}
+}
+
+func TestTsvectorColumn_MatchesPlainWithConfig_NonPG_EmitsFALSE(t *testing.T) {
+	for _, name := range []string{"mysql", "sqlite"} {
+		ctx := myCtx()
+		if name == "sqlite" {
+			ctx = sqliteCtx()
+		}
+		got := ts.ArticlesT.SearchVector.MatchesPlainWithConfig("english", "grizzle orm").ToSQL(ctx)
+		if got != "FALSE" {
+			t.Errorf("TsvectorColumn.MatchesPlainWithConfig on %s: got %q, want \"FALSE\"", name, got)
+		}
+		if len(ctx.Args()) != 0 {
+			t.Errorf("TsvectorColumn.MatchesPlainWithConfig on %s: expected no args bound, got %v", name, ctx.Args())
+		}
+	}
+}
+
+func TestTsvectorColumn_MatchesPhraseWithConfig_NonPG_EmitsFALSE(t *testing.T) {
+	for _, name := range []string{"mysql", "sqlite"} {
+		ctx := myCtx()
+		if name == "sqlite" {
+			ctx = sqliteCtx()
+		}
+		got := ts.ArticlesT.SearchVector.MatchesPhraseWithConfig("english", "fast full text").ToSQL(ctx)
+		if got != "FALSE" {
+			t.Errorf("TsvectorColumn.MatchesPhraseWithConfig on %s: got %q, want \"FALSE\"", name, got)
+		}
+		if len(ctx.Args()) != 0 {
+			t.Errorf("TsvectorColumn.MatchesPhraseWithConfig on %s: expected no args bound, got %v", name, ctx.Args())
+		}
+	}
+}
+
+func TestTsvectorColumn_MatchesWebSearchWithConfig_NonPG_EmitsFALSE(t *testing.T) {
+	for _, name := range []string{"mysql", "sqlite"} {
+		ctx := myCtx()
+		if name == "sqlite" {
+			ctx = sqliteCtx()
+		}
+		got := ts.ArticlesT.SearchVector.MatchesWebSearchWithConfig("english", "grizzle -orm").ToSQL(ctx)
+		if got != "FALSE" {
+			t.Errorf("TsvectorColumn.MatchesWebSearchWithConfig on %s: got %q, want \"FALSE\"", name, got)
+		}
+		if len(ctx.Args()) != 0 {
+			t.Errorf("TsvectorColumn.MatchesWebSearchWithConfig on %s: expected no args bound, got %v", name, ctx.Args())
+		}
+	}
+}
+
+// TsRank and TsRankCd are built on the generic FuncExpr and do not have their
+// own dialect gate. On non-PG dialects the tsquery argument emits NULL (since
+// tsQueryFnExpr is gated), producing TS_RANK(col, NULL) — syntactically valid
+// but semantically meaningless. Callers should check SupportsFullTextSearch()
+// before using TsRank/TsRankCd with non-PG dialects.
+func TestTsRank_NonPG_EmitsWithNullArg(t *testing.T) {
+	cases := []struct {
+		name string
+		ctx  *expr.BuildContext
+		col  string // expected quoted column reference
+	}{
+		{"mysql", myCtx(), "`articles`.`search_vector`"},
+		{"sqlite", sqliteCtx(), `"articles"."search_vector"`},
+	}
+	for _, tc := range cases {
+		tsq := expr.PlainToTsquery("grizzle orm")
+		rank := expr.TsRank(ts.ArticlesT.SearchVector, tsq)
+		got := rank.ToSQL(tc.ctx)
+		// The tsquery arg emits NULL on non-PG; no args should be bound.
+		want := "TS_RANK(" + tc.col + ", NULL)"
+		if got != want {
+			t.Errorf("TsRank on %s: got %q, want %q", tc.name, got, want)
+		}
+		if len(tc.ctx.Args()) != 0 {
+			t.Errorf("TsRank on %s: expected no args bound, got %v", tc.name, tc.ctx.Args())
+		}
+	}
+}
+
+func TestTsRankCd_NonPG_EmitsWithNullArg(t *testing.T) {
+	cases := []struct {
+		name string
+		ctx  *expr.BuildContext
+		col  string
+	}{
+		{"mysql", myCtx(), "`articles`.`search_vector`"},
+		{"sqlite", sqliteCtx(), `"articles"."search_vector"`},
+	}
+	for _, tc := range cases {
+		tsq := expr.PlainToTsquery("grizzle orm")
+		rank := expr.TsRankCd(ts.ArticlesT.SearchVector, tsq)
+		got := rank.ToSQL(tc.ctx)
+		want := "TS_RANK_CD(" + tc.col + ", NULL)"
+		if got != want {
+			t.Errorf("TsRankCd on %s: got %q, want %q", tc.name, got, want)
+		}
+		if len(tc.ctx.Args()) != 0 {
+			t.Errorf("TsRankCd on %s: expected no args bound, got %v", tc.name, tc.ctx.Args())
+		}
 	}
 }

@@ -204,21 +204,31 @@ func (c StringColumn) NotILike(pattern string) Expression {
 }
 
 // RegexpMatch produces a case-sensitive regex match: col ~ $1 (PostgreSQL-specific).
+// On non-PostgreSQL dialects, emits FALSE and binds no arguments.
+// Check dialect.SupportsRegexpMatch() before using this operator for portability.
 func (c StringColumn) RegexpMatch(pattern string) Expression {
 	return regexpExpr{ref: c.ColBase, op: "~", pattern: pattern}
 }
 
 // RegexpMatchI produces a case-insensitive regex match: col ~* $1 (PostgreSQL-specific).
+// On non-PostgreSQL dialects, emits FALSE and binds no arguments.
+// Check dialect.SupportsRegexpMatch() before using this operator for portability.
 func (c StringColumn) RegexpMatchI(pattern string) Expression {
 	return regexpExpr{ref: c.ColBase, op: "~*", pattern: pattern}
 }
 
 // NotRegexpMatch produces a case-sensitive regex non-match: col !~ $1 (PostgreSQL-specific).
+// On non-PostgreSQL dialects, emits FALSE (no rows matched) — not TRUE — and binds no
+// arguments. This means expr.Not(col.NotRegexpMatch(...)) on a non-PG dialect yields TRUE.
+// Check dialect.SupportsRegexpMatch() before using this operator for portability.
 func (c StringColumn) NotRegexpMatch(pattern string) Expression {
 	return regexpExpr{ref: c.ColBase, op: "!~", pattern: pattern}
 }
 
 // NotRegexpMatchI produces a case-insensitive regex non-match: col !~* $1 (PostgreSQL-specific).
+// On non-PostgreSQL dialects, emits FALSE (no rows matched) — not TRUE — and binds no
+// arguments. This means expr.Not(col.NotRegexpMatchI(...)) on a non-PG dialect yields TRUE.
+// Check dialect.SupportsRegexpMatch() before using this operator for portability.
 func (c StringColumn) NotRegexpMatchI(pattern string) Expression {
 	return regexpExpr{ref: c.ColBase, op: "!~*", pattern: pattern}
 }
@@ -750,7 +760,8 @@ func (c InetColumn) NEQ(val string) Expression {
 
 // TsvectorColumn is a typed column handle for PostgreSQL TSVECTOR values.
 // It exposes PostgreSQL full-text search operators (@@ with various tsquery constructors).
-// These operators are PostgreSQL-specific and must only be used with a PostgreSQL dialect.
+// These operators are PostgreSQL-specific; on non-PostgreSQL dialects all Matches* methods
+// emit FALSE and bind no arguments. Check dialect.SupportsFullTextSearch() for portability.
 type TsvectorColumn struct{ ColBase }
 
 // Matches returns col @@ to_tsquery($1) — matches a tsquery string.

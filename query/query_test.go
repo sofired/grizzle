@@ -2721,6 +2721,8 @@ func (noCTEDialect) SupportsForNoKeyUpdate() bool  { return false }
 func (noCTEDialect) SupportsForShareOf() bool      { return false }
 func (noCTEDialect) SupportsFullJoin() bool        { return false }
 func (noCTEDialect) ForShareClause() string        { return "" }
+func (noCTEDialect) SupportsRegexpMatch() bool     { return false }
+func (noCTEDialect) SupportsFullTextSearch() bool  { return false }
 func (noCTEDialect) SupportsLimitOnMutate() bool   { return false }
 
 // noWindowDialect is a test-only dialect that reports SupportsWindowFunctions() = false.
