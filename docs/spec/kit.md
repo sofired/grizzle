@@ -313,7 +313,7 @@ ALTER TABLE _grizzle_migrations ADD COLUMN is_baseline INTEGER NOT NULL DEFAULT 
 
 The upgrade is idempotent: each column addition is guarded by an existence check. No downtime is required. On PostgreSQL, `ADD COLUMN ... DEFAULT ''` is a metadata-only operation and does not rewrite the table.
 
-**Privilege requirement:** The schema upgrade requires `ALTER TABLE` privilege on `_grizzle_migrations`. In environments where the application runtime credential does not have `ALTER TABLE`, run `grizzle migrate` once under an elevated credential (or apply the DDL above manually). Use `--skip-schema-upgrade` to suppress the automatic upgrade and manage it out-of-band.
+**Privilege requirement:** The schema upgrade requires `ALTER TABLE` privilege on `_grizzle_migrations`. In environments where the application runtime credential does not have `ALTER TABLE`, run `grizzle migrate` once under an elevated credential (or apply the DDL above manually). Use `--skip-schema-upgrade` to suppress the automatic upgrade and manage it out-of-band. If `--skip-schema-upgrade` is passed and the `tag` or `is_baseline` columns are absent, `kit.Migrate` returns an error immediately — it does not fall back to the old schema or silently degrade. The operator must apply the upgrade DDL manually before proceeding.
 
 **SQLite concurrency:** The column-existence check and `ADD COLUMN` are not atomic on SQLite. If two processes race at startup (e.g., serverless cold starts), the second `ADD COLUMN` will fail. The schema upgrade must run on a single, serialized connection; the calling application should ensure exclusive startup locking.
 
@@ -349,7 +349,7 @@ result, err := kit.Migrate(ctx, pool, kit.MigrateOptions{
 
 When `Baseline` is set:
 
-- All migration files whose sequence number is ≤ the baseline tag's sequence number are inserted into `_grizzle_migrations` with `is_baseline = TRUE`, `checksum` = SHA-256 of the file's byte contents, and `sql_batch = ''`.
+- All migration files whose sequence number is ≤ the baseline tag's sequence number are inserted into `_grizzle_migrations` with `is_baseline = TRUE`, `checksum` = SHA-256 of the file's byte contents, and `sql_batch = ''`. The sequence number is the leading decimal integer before the first underscore in the filename (e.g. `0001` from `0001_initial_schema.sql`). If two files in the directory share the same numeric prefix, `kit.Migrate` returns an error — duplicate prefixes are invalid and are rejected at `grizzle generate` time as well.
 - Subsequent migrations (higher sequence numbers) are applied normally.
 - If a row already exists for a given tag, that tag is skipped (idempotent).
 - If a row already exists for a given tag with `is_baseline = FALSE` (previously applied normally), `--baseline` leaves that row untouched.
