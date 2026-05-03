@@ -34,7 +34,8 @@ func (s *stubQuerier) Query(_ context.Context, sql string, args ...any) (pgx.Row
 	return nil, pgx.ErrNoRows
 }
 
-// stubExecer is a poolExecer stub that records the SQL string and args passed to Exec.
+// stubExecer is a poolExecer stub that records the SQL string and args passed to Exec
+// and returns a successful CommandTag. Tests verify both the SQL string and that args pass through unchanged.
 type stubExecer struct {
 	gotSQL  string
 	gotArgs []any
@@ -72,7 +73,8 @@ func TestPreparedSelect_QueryAllUsesSQLNotName(t *testing.T) {
 	}
 }
 
-// TestPreparedSelect_QueryOneUsesSQLNotName is the same guard for queryOneWith.
+// TestPreparedSelect_QueryOneUsesSQLNotName is the same guard for queryOneWith:
+// asserts the SQL string — not the statement name — is submitted, and that args pass through unchanged.
 func TestPreparedSelect_QueryOneUsesSQLNotName(t *testing.T) {
 	realmID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 	b := query.Select(testschema.UsersT.ID).
@@ -95,7 +97,8 @@ func TestPreparedSelect_QueryOneUsesSQLNotName(t *testing.T) {
 	}
 }
 
-// TestPreparedSelect_QueryOptUsesSQLNotName is the same guard for queryOptWith.
+// TestPreparedSelect_QueryOptUsesSQLNotName is the same guard for queryOptWith:
+// asserts the SQL string — not the statement name — is submitted, and that args pass through unchanged.
 func TestPreparedSelect_QueryOptUsesSQLNotName(t *testing.T) {
 	realmID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 	b := query.Select(testschema.UsersT.ID).
@@ -122,9 +125,10 @@ func TestPreparedSelect_QueryOptUsesSQLNotName(t *testing.T) {
 // that the SQL string — not the statement name — is submitted, and that args
 // pass through unchanged.
 func TestPreparedExec_ExecUsesSQLNotName(t *testing.T) {
+	realmID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 	b := query.Update(testschema.UsersT).
 		Set("enabled", false).
-		Where(testschema.UsersT.DeletedAt.IsNull())
+		Where(testschema.UsersT.RealmID.EQ(realmID))
 
 	reg := NewRegistry(nil)
 	stmt := RegisterExec(reg, "disable_users", b)
@@ -179,9 +183,10 @@ func (f *fakePgxTx) Conn() *pgx.Conn                                        { pa
 // ExecTx calls execWith(ctx, tx.tx) — this test constructs a Tx with a fake
 // pgx.Tx to confirm the delegation cannot accidentally be reverted to pass p.name.
 func TestPreparedExec_ExecTxUsesSQLNotName(t *testing.T) {
+	realmID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 	b := query.Update(testschema.UsersT).
 		Set("enabled", false).
-		Where(testschema.UsersT.DeletedAt.IsNull())
+		Where(testschema.UsersT.RealmID.EQ(realmID))
 
 	reg := NewRegistry(nil)
 	stmt := RegisterExec(reg, "disable_users", b)
