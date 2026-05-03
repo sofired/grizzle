@@ -231,31 +231,33 @@ This is the equivalent of Drizzle's `__drizzle_migrations` table. Each row recor
 
 ### Target schema (file-based)
 
-Once `generate` and the file-based `kit.Migrate` are implemented, the table gains a `tag` column that records the migration filename stem (e.g. `0001_initial_schema` for `0001_initial_schema.sql`):
+Once `generate` and the file-based `kit.Migrate` are implemented, the table gains a `tag` column (migration filename stem) and an `is_baseline` column (distinguishes normal applies from baselined rows — see [transition plan](#history-table-transition-plan)):
 
 ```sql
 CREATE TABLE IF NOT EXISTS _grizzle_migrations (
-    id          BIGSERIAL    PRIMARY KEY,
-    applied_at  TIMESTAMPTZ  NOT NULL DEFAULT now(),
-    tag         TEXT         NOT NULL DEFAULT '',
-    checksum    TEXT         NOT NULL DEFAULT '',
-    sql_batch   TEXT         NOT NULL DEFAULT '',
-    description TEXT         NOT NULL DEFAULT ''
+    id           BIGSERIAL    PRIMARY KEY,
+    applied_at   TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    tag          TEXT         NOT NULL DEFAULT '',
+    checksum     TEXT         NOT NULL DEFAULT '',
+    sql_batch    TEXT         NOT NULL DEFAULT '',
+    description  TEXT         NOT NULL DEFAULT '',
+    is_baseline  BOOLEAN      NOT NULL DEFAULT FALSE
 );
 ```
 
-The file-based `kit.Migrate` uses `tag` — not `checksum` — to determine which migration files are already applied. `checksum` in the new schema is computed from the file's byte contents (SHA-256), not from the diff output. `sql_batch` retains the applied SQL for audit purposes.
+The file-based `kit.Migrate` uses `tag` — not `checksum` — to determine which migration files are already applied. `checksum` is the SHA-256 of the `.sql` file's byte contents (not the diff output). `sql_batch` retains the applied SQL for audit purposes. `is_baseline = TRUE` means the row was inserted by `--baseline` (no SQL was executed).
 
 MySQL target:
 
 ```sql
 CREATE TABLE IF NOT EXISTS _grizzle_migrations (
-    id          INT AUTO_INCREMENT PRIMARY KEY,
-    applied_at  DATETIME(6)     NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-    tag         VARCHAR(255)    NOT NULL DEFAULT '',
-    checksum    VARCHAR(64)     NOT NULL DEFAULT '',
-    sql_batch   LONGTEXT        NOT NULL,
-    description TEXT            NOT NULL DEFAULT ''
+    id           INT AUTO_INCREMENT PRIMARY KEY,
+    applied_at   DATETIME(6)     NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    tag          VARCHAR(255)    NOT NULL DEFAULT '',
+    checksum     VARCHAR(64)     NOT NULL DEFAULT '',
+    sql_batch    LONGTEXT        NOT NULL DEFAULT '',
+    description  TEXT            NOT NULL DEFAULT '',
+    is_baseline  TINYINT(1)      NOT NULL DEFAULT 0
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 ```
 
@@ -263,12 +265,13 @@ SQLite target:
 
 ```sql
 CREATE TABLE IF NOT EXISTS _grizzle_migrations (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    applied_at  TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-    tag         TEXT    NOT NULL DEFAULT '',
-    checksum    TEXT    NOT NULL DEFAULT '',
-    sql_batch   TEXT    NOT NULL DEFAULT '',
-    description TEXT    NOT NULL DEFAULT ''
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    applied_at   TEXT     NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    tag          TEXT     NOT NULL DEFAULT '',
+    checksum     TEXT     NOT NULL DEFAULT '',
+    sql_batch    TEXT     NOT NULL DEFAULT '',
+    description  TEXT     NOT NULL DEFAULT '',
+    is_baseline  INTEGER  NOT NULL DEFAULT 0
 )
 ```
 
@@ -278,38 +281,54 @@ CREATE TABLE IF NOT EXISTS _grizzle_migrations (
 
 This section covers how an existing deployment running the old checksum-based `kit.Migrate` upgrades to the file-based workflow.
 
+### Tag format validation
+
+`tag` values (from migration filenames and from the `--baseline` argument) are validated against `^[a-zA-Z0-9_-]+$` before any database operation. The library (`kit.Migrate`) enforces this regardless of whether the tag originates from the CLI or from Go code. Tags that fail validation are rejected with an error; no database operation is attempted. All tag comparisons and inserts use parameterized queries (`$1` / `?` placeholders) — the tag value is never interpolated into SQL.
+
 ### Schema upgrade
 
-**Automatic, on first run.** When the new `kit.Migrate` connects to a database that has an existing `_grizzle_migrations` table without a `tag` column, it detects the missing column and runs:
+**Automatic, on first run.** When the new `kit.Migrate` connects to a database that has an existing `_grizzle_migrations` table missing the `tag` or `is_baseline` columns, it detects which columns are absent and adds only those:
 
 ```sql
--- PostgreSQL / MySQL
+-- PostgreSQL
 ALTER TABLE _grizzle_migrations ADD COLUMN IF NOT EXISTS tag TEXT NOT NULL DEFAULT '';
+ALTER TABLE _grizzle_migrations ADD COLUMN IF NOT EXISTS is_baseline BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE _grizzle_migrations ALTER COLUMN checksum SET DEFAULT '';
 ALTER TABLE _grizzle_migrations ALTER COLUMN sql_batch SET DEFAULT '';
 ```
 
 ```sql
--- SQLite (no IF NOT EXISTS support on ADD COLUMN in SQLite < 3.37.0)
-ALTER TABLE _grizzle_migrations ADD COLUMN tag TEXT NOT NULL DEFAULT '';
+-- MySQL (check column existence before running; ADD COLUMN IF NOT EXISTS requires 8.0.29+)
+ALTER TABLE _grizzle_migrations ADD COLUMN tag VARCHAR(255) NOT NULL DEFAULT '';
+ALTER TABLE _grizzle_migrations ADD COLUMN is_baseline TINYINT(1) NOT NULL DEFAULT 0;
+ALTER TABLE _grizzle_migrations MODIFY COLUMN checksum VARCHAR(64) NOT NULL DEFAULT '';
+ALTER TABLE _grizzle_migrations MODIFY COLUMN sql_batch LONGTEXT NOT NULL DEFAULT '';
 ```
 
-For SQLite, `ADD COLUMN` without `IF NOT EXISTS` is safe here because the upgrade runs only when the column is confirmed absent. The operation is idempotent: if `tag` already exists, the upgrade is skipped.
+```sql
+-- SQLite (check column existence before running; IF NOT EXISTS on ADD COLUMN requires 3.37.0+)
+ALTER TABLE _grizzle_migrations ADD COLUMN tag TEXT NOT NULL DEFAULT '';
+ALTER TABLE _grizzle_migrations ADD COLUMN is_baseline INTEGER NOT NULL DEFAULT 0;
+```
 
-No downtime is required. The `ADD COLUMN ... DEFAULT ''` operation is metadata-only on PostgreSQL and does not rewrite the table.
+The upgrade is idempotent: each column addition is guarded by an existence check. No downtime is required. On PostgreSQL, `ADD COLUMN ... DEFAULT ''` is a metadata-only operation and does not rewrite the table.
+
+**Privilege requirement:** The schema upgrade requires `ALTER TABLE` privilege on `_grizzle_migrations`. In environments where the application runtime credential does not have `ALTER TABLE`, run `grizzle migrate` once under an elevated credential (or apply the DDL above manually). Use `--skip-schema-upgrade` to suppress the automatic upgrade and manage it out-of-band.
+
+**SQLite concurrency:** The column-existence check and `ADD COLUMN` are not atomic on SQLite. If two processes race at startup (e.g., serverless cold starts), the second `ADD COLUMN` will fail. The schema upgrade must run on a single, serialized connection; the calling application should ensure exclusive startup locking.
 
 ### What happens to old rows
 
-Old checksum-based rows **cannot be reliably mapped to migration filenames** — the SQL batch was generated from a live diff and may not correspond to any file on disk. These rows are **preserved as-is** with `tag = ''` (empty string). They remain in the history table for audit purposes and do not interfere with the file-based workflow: the new `kit.Migrate` only looks at rows where `tag != ''` when checking what is already applied.
+Old checksum-based rows **cannot be reliably mapped to migration filenames** — the SQL batch was generated from a live diff and may not correspond to any file on disk. These rows are **preserved as-is** with `tag = ''` and `is_baseline = FALSE`. They remain in the history table for audit purposes and do not interfere with the file-based workflow: the new `kit.Migrate` only checks rows where `tag != ''` when determining which files are already applied.
 
 ### The baseline problem
 
 After upgrading, an existing deployment typically has:
 
 - A populated `_grizzle_migrations` table (old rows, `tag = ''`)
-- A live database schema that matches those old migrations
+- A live database schema that already matches those old migrations
 
-If the developer runs `grizzle generate`, it produces a migration file capturing the full current schema (e.g. `0001_initial_schema.sql`). Running `grizzle migrate` would then attempt to apply that file — re-creating tables that already exist — and fail.
+`grizzle generate` reads Go schema definitions and diffs them against `meta/snapshot.json`. With no existing snapshot, it treats the baseline as empty and produces a migration file containing `CREATE TABLE` DDL for every defined table (e.g. `0001_initial_schema.sql`). Running `grizzle migrate` would then attempt to apply that file — re-creating tables that already exist — and fail.
 
 **Solution: `--baseline` flag**
 
@@ -317,7 +336,7 @@ If the developer runs `grizzle generate`, it produces a migration file capturing
 grizzle migrate --baseline 0001_initial_schema
 ```
 
-`--baseline <tag>` inserts a history record for the named migration (and all preceding migrations, by sequence number) **without executing their SQL**. This marks those files as already applied, allowing the file-based workflow to continue from that point forward.
+`--baseline <tag>` inserts a history record for the named migration (and all preceding migrations, by sequence number) **without executing their SQL**. The value passed to `--baseline` becomes the `tag` column value in the inserted rows. This marks those files as already applied, allowing the file-based workflow to continue from that point forward.
 
 Library API:
 
@@ -330,20 +349,26 @@ result, err := kit.Migrate(ctx, pool, kit.MigrateOptions{
 
 When `Baseline` is set:
 
-- All migration files whose sequence number is ≤ the baseline tag's sequence number are inserted into `_grizzle_migrations` with `sql_batch = ''` and `checksum = ''`.
+- All migration files whose sequence number is ≤ the baseline tag's sequence number are inserted into `_grizzle_migrations` with `is_baseline = TRUE`, `checksum` = SHA-256 of the file's byte contents, and `sql_batch = ''`.
 - Subsequent migrations (higher sequence numbers) are applied normally.
-- `--baseline` is idempotent: if a row already exists for a given tag (from a prior baseline or a normal apply), it is not inserted again.
+- If a row already exists for a given tag, that tag is skipped (idempotent).
+- If a row already exists for a given tag with `is_baseline = FALSE` (previously applied normally), `--baseline` leaves that row untouched.
+- If `--baseline` names a tag that does not correspond to any file in the migrations directory, `kit.Migrate` returns an error and applies nothing.
 
-The `--baseline` flag is for **one-time use** when bootstrapping the file-based workflow on an existing deployment. It should not be used on a fresh database (where `grizzle migrate` without `--baseline` is correct).
+`grizzle migrate --baseline` emits a list to stderr of every migration being baselined (filename and SHA-256 of the file), so operators have an out-of-band record of the operation.
+
+`--baseline` must **not** be used on a fresh database. On a fresh install with an empty `_grizzle_migrations`, run `grizzle migrate` without `--baseline`; all migration files will be applied and recorded normally.
 
 ### Recommended upgrade path
 
 For a deployment currently using the old `kit.Migrate`:
 
 1. **Upgrade Grizzle.**
-2. **Run `grizzle generate`** — snapshots the current live schema and writes `migrations/0001_initial_schema.sql` (or the next available sequence number).
-3. **Run `grizzle migrate --baseline 0001_initial_schema`** — automatically upgrades the history table schema (adds `tag` column), then marks `0001_initial_schema` as applied without running it.
+2. **Run `grizzle generate`** — reads the Go schema definitions and, with no existing snapshot, produces a migration file containing `CREATE TABLE` DDL for all defined tables (e.g. `migrations/0001_initial_schema.sql`). The filename sequence starts at `0001_` when the migrations directory is empty. This command does not connect to a database.
+3. **Run `grizzle migrate --baseline 0001_initial_schema`** — automatically upgrades the history table schema (adds `tag` and `is_baseline` columns), then marks `0001_initial_schema` as baselined without executing it.
 4. **Resume normal workflow** — all future `grizzle generate` + `grizzle migrate` calls follow the file-based path.
+
+**Multi-node deployments:** Ensure all nodes are updated to the new Grizzle version before running step 3. The schema upgrade (`ADD COLUMN tag`, `ADD COLUMN is_baseline`) is safe to run while old-version nodes are still connected — existing rows are unaffected. However, running `--baseline` while old-version nodes are actively writing to `_grizzle_migrations` opens a race window where the same migration could be applied twice. Coordinate the upgrade using a deployment strategy that prevents concurrent old/new writes (e.g., stop old nodes before running step 3).
 
 ### Decision summary
 
@@ -353,7 +378,8 @@ For a deployment currently using the old `kit.Migrate`:
 | Are old checksum-based records preserved? | **Yes** — preserved with `tag = ''`, never deleted or rewritten |
 | Are old records migrated to tags? | **No** — a reliable mapping does not exist |
 | Is a CLI flag needed? | **Yes** — `--baseline <tag>` for existing deployments switching to file-based workflow |
-| Does `--baseline` affect fresh installs? | **No** — fresh installs create the table with `tag` from the start; `--baseline` is a no-op if all named tags already have rows |
+| Should `--baseline` be used on fresh installs? | **No** — on a fresh database, use `grizzle migrate` without `--baseline` |
+| Are baseline rows distinguishable from normal applies? | **Yes** — `is_baseline = TRUE` / `FALSE`; baseline rows store the file checksum but have `sql_batch = ''` |
 
 ---
 
