@@ -27,6 +27,8 @@ Grizzle generates Go structs that mirror your database schema. Every column is a
 
 ## Installation
 
+**Requires Go 1.25 or later.**
+
 ```sh
 go get github.com/sofired/grizzle
 ```
