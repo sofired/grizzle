@@ -19,6 +19,14 @@ type PushResult struct {
 // definitions, and applies all necessary DDL changes in a single transaction.
 // It accepts tables from any dialect via the TableDefiner interface.
 //
+// Note: Push only manages tables. Views and named enum types are not included
+// in the diff and will not be created, altered, or dropped. Use PushSchema
+// (tracked in #136) to manage views and enums via Push.
+//
+// Note: if the diff includes enum value additions (ChangeAlterEnum), the generated
+// ALTER TYPE ... ADD VALUE statements cannot run inside a transaction on PostgreSQL < 12.
+// On PG 9.x–11.x, apply those statements outside a transaction or upgrade to PG 12+.
+//
 // Example:
 //
 //	result, err := kit.Push(ctx, pool, schema.Users, schema.Realms)
@@ -58,6 +66,13 @@ func Push(ctx context.Context, pool *pgxpool.Pool, tables ...pg.TableDefiner) (P
 // DryRun is like Push but does not apply changes — it only computes and
 // returns what would be run.
 // It accepts tables from any dialect via the TableDefiner interface.
+//
+// Note: like Push, DryRun only diffs tables. Views and named enum types are
+// not included. See PushSchema (#136) for full schema object support.
+//
+// Note: if the diff includes enum value additions (ChangeAlterEnum), the generated
+// ALTER TYPE ... ADD VALUE statements cannot run inside a transaction on PostgreSQL < 12.
+// On PG 9.x–11.x, apply those statements outside a transaction or upgrade to PG 12+.
 func DryRun(ctx context.Context, pool *pgxpool.Pool, tables ...pg.TableDefiner) (PushResult, error) {
 	live, err := introspect.IntrospectPostgres(ctx, pool)
 	if err != nil {
@@ -72,9 +87,17 @@ func DryRun(ctx context.Context, pool *pgxpool.Pool, tables ...pg.TableDefiner) 
 
 // liveToSnapshot converts an introspect.LiveSnapshot into a kit.Snapshot
 // so the differ can compare apples to apples.
+//
+// Views and enums are intentionally NOT populated here. Push() and DryRun()
+// accept only table definitions as targets, so populating live views/enums
+// would cause Diff() to emit DROP VIEW / DROP TYPE for every unmanaged live
+// object not listed in the caller's table set. A dedicated PushSchema() API
+// (tracked in #136) is the correct place to manage views and enums via Push.
 func liveToSnapshot(live introspect.LiveSnapshot) Snapshot {
 	snap := Snapshot{
 		Tables: make(map[string]*TableSnap, len(live.Tables)),
+		Views:  make(map[string]*ViewSnap),
+		Enums:  make(map[string]*EnumSnap),
 	}
 	for key, t := range live.Tables {
 		if t.Name == MigrationsTable {

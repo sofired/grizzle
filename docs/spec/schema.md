@@ -44,6 +44,7 @@ var Users = pg.Table("users",
 | `.$onUpdateFn(fn)` | No equivalent | DEVIATION:LANGUAGE |
 | `.references(tbl, col, opts)` | `.References(table, col, opts...)` | PARITY |
 | `.generatedAlwaysAs(expr)` | DEVIATION:GAP (not designed) | — |
+| *(no Drizzle equivalent)* | `.RenamedFrom(oldName)` | GRIZZLE-ONLY — see below |
 
 ## Column types
 
@@ -78,7 +79,7 @@ In Drizzle, the column name is the first argument to the type function: `uuid('i
 | `point(name)` | DEVIATION:GAP (not designed) | — |
 | `line(name)` | DEVIATION:GAP (not designed) | — |
 | `geometry(name)` | DEVIATION:GAP (not designed) | — |
-| `pgEnum(name, vals)` | `pg.Enum(typeName, vals...)` | PARITY — Go type `string`; enum type must already exist in the database |
+| `pgEnum(name, vals)` (inline column) | `pg.Enum(typeName, vals...)` | PARITY — Go type `string`; references a named type defined with `pg.CreateEnum()` |
 | `vector(name, {dim})` | DEVIATION:GAP (not designed) | — |
 | `halfvec(name, {dim})` | DEVIATION:GAP (not designed) | — |
 | `tsvector(name)` | `pg.Tsvector()` | PARITY — Go type `string`; `@@` matching already available via `Matches*` helpers on `TsvectorColumn`; additional FTS support tracked in #140 |
@@ -123,9 +124,11 @@ In Drizzle, the column name is the first argument to the type function: `uuid('i
 | `sqliteTable(name, cols)` | `sqlite.Table(name, cols...)` | PARITY |
 | `text(name, opts)` | `sqlite.Text()` | PARITY |
 | `integer(name, opts)` | `sqlite.Integer()` | PARITY |
-| `real(name)` | DEVIATION:GAP (designed) | — |
-| `blob(name)` | DEVIATION:GAP (designed) | — |
-| `numeric(name)` | DEVIATION:GAP (designed) | — |
+| `real(name)` | `sqlite.Real()` | PARITY |
+| `blob(name)` | `sqlite.Blob()` | PARITY |
+| `numeric(name)` | `sqlite.Numeric(p, s)` | PARITY |
+| `text(name, { mode: 'json' })` | `sqlite.JSON()` | PARITY — both store as TEXT; `.JSON()` sets the Go scan type to `any` |
+| `blob(name, { mode: 'json' })` or `text(name, { mode: 'json' })` | `sqlite.JSONB()` | PARITY — stored as TEXT; use `.JSONB()` for schemas migrated from PostgreSQL |
 
 ## Table-level constraints
 
@@ -169,6 +172,82 @@ var Users = pg.SchemaTable("myschema", "users", ...).Build()
 ```
 
 **Status:** PARITY for basic schema qualification. The `pgSchema` shared-object pattern (reusable schema reference) is DEVIATION:GAP (not designed).
+
+## Views — GRIZZLE-ONLY (kit migration support)
+
+**Drizzle:**
+```typescript
+const activeUsers = pgView('active_users').as((qb) =>
+  qb.select().from(users).where(eq(users.enabled, true))
+)
+```
+
+**Grizzle:**
+```go
+var ActiveUsers = pg.CreateView("active_users",
+    `SELECT id, username, email FROM users WHERE enabled = true`)
+```
+
+| Drizzle | Grizzle | Status |
+|---|---|---|
+| `pgView(name).as(qb)` or `.as(sql\`...\`)` | `pg.CreateView(name, sql)` | PARITY — raw SQL path; query builder form is DEVIATION:LANGUAGE (Go has no template literal types) |
+| `pgSchema("s").view(name).as(...)` | `pg.SchemaView(schema, name, sql)` | PARITY |
+| `pgMaterializedView(name)` | DEVIATION:GAP (not designed) | — |
+
+**Note on kit support:** Drizzle Kit v0.30 does not support views in migrations — views must be managed manually. Grizzle's `Diff` and the SQL generation layer fully support views via `ChangeCreateView`, `ChangeReplaceView`, and `ChangeDropView`. `Push` and `Migrate` are table-only for now because `liveToSnapshot` intentionally excludes live views to avoid silently dropping unmanaged views. Full `Push`/`Migrate` support for views is tracked in #136 (`PushSchema`). This is **GRIZZLE-ONLY** capability.
+
+`pg.CreateView(name, sql)` panics if `name` or `sql` is empty.
+
+## Named enum types (PostgreSQL)
+
+**Drizzle:**
+```typescript
+const statusEnum = pgEnum('status', ['pending', 'active', 'archived'])
+
+export const orders = pgTable('orders', {
+  status: statusEnum(),
+})
+```
+
+**Grizzle:**
+```go
+var StatusEnum = pg.CreateEnum("status", "pending", "active", "archived")
+
+var Orders = pg.Table("orders",
+    pg.C("status", pg.EnumColumn("status").NotNull()),
+)
+```
+
+| Drizzle | Grizzle | Status |
+|---|---|---|
+| `pgEnum(name, vals)` | `pg.CreateEnum(name, vals...)` | PARITY |
+| `pgSchema("s").enum(name, vals)` | `pg.SchemaCreateEnum(schema, name, vals...)` | PARITY |
+| `enumCol()` — column referencing named type | `pg.EnumColumn(typeName)` | PARITY |
+
+`pg.CreateEnum` and `pg.SchemaCreateEnum` panic if `name` is empty or if any value is empty. Values must be declared in the order they should appear in the database — PostgreSQL preserves declaration order and `ALTER TYPE ... ADD VALUE` uses `AFTER`/`BEFORE` anchors to maintain ordering when new values are inserted.
+
+See also `pg.Enum(typeName, vals...)` in the column types table for the inline MySQL-style enum variant (no separate `CREATE TYPE` statement).
+
+## `RenamedFrom()` — GRIZZLE-ONLY (kit rename detection)
+
+**Status:** GRIZZLE-ONLY — there is no Drizzle TypeScript equivalent; Drizzle Kit infers renames interactively at diff time. Grizzle uses a schema annotation because Go has no runtime inference.
+
+`.RenamedFrom(oldName)` can be called on any column or table builder to declare that the entity was renamed from `oldName` in the current migration step. The kit diff engine (`kit.Diff`) reads `PreviousName` from the snapshot and emits a `RENAME COLUMN` or `RENAME TABLE` change instead of drop+add.
+
+```go
+// Column rename: "email" was previously "email_address"
+pg.C("email", pg.Varchar(255).NotNull().RenamedFrom("email_address"))
+
+// Table rename: "users" was previously "accounts"
+var Users = pg.Table("users", ...).RenamedFrom("accounts").Build()
+```
+
+**Rules:**
+- Call `.RenamedFrom()` only in the schema version used to generate the migration. Once the migration has been applied, remove the call — it must not persist across snapshot saves. (The `PreviousName` field is tagged `json:"-"` to prevent it from appearing in committed snapshots.)
+- `oldName` for columns is the bare column name. For tables without a schema, pass the bare table name; for schema-qualified tables, pass `"schema.tablename"` to match the snapshot key.
+- If `oldName` does not match a dropped entity in the old snapshot, Diff falls back to drop+add silently.
+
+**Rationale:** Drizzle Kit detects renames interactively (the user chooses "rename" vs "drop+add" during `drizzle-kit push`). In Grizzle the diff engine is non-interactive; the annotation is the only way to communicate intent without user prompting.
 
 ## `drizzle()` instance — DEVIATION:INTENTIONAL
 

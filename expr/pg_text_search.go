@@ -13,6 +13,9 @@ type regexpExpr struct {
 }
 
 func (e regexpExpr) ToSQL(ctx *BuildContext) string {
+	if !ctx.Dialect().SupportsRegexpMatch() {
+		return "FALSE"
+	}
 	return e.ref.colRef(ctx) + " " + e.op + " " + ctx.Add(e.pattern)
 }
 
@@ -34,6 +37,9 @@ type ftsMatchExpr struct {
 }
 
 func (e ftsMatchExpr) ToSQL(ctx *BuildContext) string {
+	if !ctx.Dialect().SupportsFullTextSearch() {
+		return "FALSE"
+	}
 	var tsq string
 	if e.hasConfig {
 		tsq = e.tsFn + "(" + ctx.Add(e.config) + ", " + ctx.Add(e.query) + ")"
@@ -55,6 +61,10 @@ func (e ftsMatchExpr) ToSQL(ctx *BuildContext) string {
 // TsvectorExpr is exported so downstream code can name the type in APIs
 // (e.g. store it in a struct field, accept it as a parameter, or return it
 // from a helper).
+//
+// On dialects that do not support full-text search, ToSQL emits NULL; if an
+// alias is set via As, the output is NULL AS "alias" so that the SELECT
+// column position is preserved for struct/row mapping by column name.
 type TsvectorExpr struct {
 	config    string
 	ref       colRefer
@@ -70,6 +80,12 @@ func (e TsvectorExpr) renderCore(ctx *BuildContext) string {
 }
 
 func (e TsvectorExpr) ToSQL(ctx *BuildContext) string {
+	if !ctx.Dialect().SupportsFullTextSearch() {
+		if e.alias != "" {
+			return "NULL AS " + ctx.Quote(e.alias)
+		}
+		return "NULL"
+	}
 	s := e.renderCore(ctx)
 	if e.alias != "" {
 		s += " AS " + ctx.Quote(e.alias)
@@ -77,7 +93,12 @@ func (e TsvectorExpr) ToSQL(ctx *BuildContext) string {
 	return s
 }
 
-func (e TsvectorExpr) colRef(ctx *BuildContext) string { return e.renderCore(ctx) }
+func (e TsvectorExpr) colRef(ctx *BuildContext) string {
+	if !ctx.Dialect().SupportsFullTextSearch() {
+		return "NULL"
+	}
+	return e.renderCore(ctx)
+}
 
 // ColumnName implements SelectableColumn.
 func (e TsvectorExpr) ColumnName() string {
@@ -90,7 +111,8 @@ func (e TsvectorExpr) ColumnName() string {
 // TableName implements SelectableColumn.
 func (e TsvectorExpr) TableName() string { return "" }
 
-// As returns a copy with the given SELECT alias.
+// As returns a copy with the given SELECT alias. The alias is retained in the
+// non-PG NULL fallback: ToSQL emits NULL AS "alias" so column mapping is stable.
 func (e TsvectorExpr) As(alias string) TsvectorExpr { e.alias = alias; return e }
 
 // Matches returns an @@ expression: to_tsvector(...) @@ to_tsquery($1).
@@ -181,6 +203,9 @@ type ftsMatchExprOnExpr struct {
 }
 
 func (e ftsMatchExprOnExpr) ToSQL(ctx *BuildContext) string {
+	if !ctx.Dialect().SupportsFullTextSearch() {
+		return "FALSE"
+	}
 	// Render the left side first so its args are bound before the tsquery args,
 	// preserving left-to-right parameter numbering ($1, $2, ...).
 	left := e.left.colRef(ctx)
@@ -206,6 +231,9 @@ type tsQueryFnExpr struct {
 }
 
 func (e tsQueryFnExpr) ToSQL(ctx *BuildContext) string {
+	if !ctx.Dialect().SupportsFullTextSearch() {
+		return "NULL"
+	}
 	if e.hasConfig {
 		return e.fn + "(" + ctx.Add(e.config) + ", " + ctx.Add(e.query) + ")"
 	}

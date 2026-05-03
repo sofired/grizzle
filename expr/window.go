@@ -175,6 +175,8 @@ func WinCount() WindowExpr { return WindowExpr{fn: "COUNT"} }
 
 // WindowFrameBound represents a window frame boundary sentinel.
 // Values are immutable zero-value structs; they cannot be assigned to or mutated.
+//
+// Not yet wired to WindowExpr; full frame spec support is tracked in issue #139.
 type WindowFrameBound struct {
 	sql string
 }

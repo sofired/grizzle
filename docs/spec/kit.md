@@ -161,9 +161,25 @@ This layout mirrors Drizzle Kit's migrations directory. It does not currently ex
       "columns": [...],
       "constraints": [...]
     }
+  },
+  "views": {
+    "active_users": {
+      "name": "active_users",
+      "schema": "",
+      "sql": "SELECT id, username FROM users WHERE enabled = true"
+    }
+  },
+  "enums": {
+    "status": {
+      "name": "status",
+      "schema": "",
+      "values": ["pending", "active", "archived"]
+    }
   }
 }
 ```
+
+`views` and `enums` are omitted from the JSON when empty (`omitempty`), so existing snapshots without these fields load cleanly. Use `kit.FromSchema(kit.SchemaObjects{...})` instead of `kit.FromDefs(...)` when your schema includes views or enums.
 
 Drizzle maintains a dialect-specific snapshot alongside the journal. Grizzle's snapshot is dialect-agnostic (it captures the schema definition, not rendered SQL). Whether to adopt Drizzle's per-dialect snapshot format is **DEVIATION:GAP (not designed)**.
 
@@ -188,6 +204,19 @@ Drizzle maintains a dialect-specific snapshot alongside the journal. Grizzle's s
 | Dropped index | `DROP INDEX …` | PARITY |
 | New constraint | `ALTER TABLE … ADD CONSTRAINT …` | PARITY |
 | Dropped constraint | `ALTER TABLE … DROP CONSTRAINT …` | PARITY |
+| New view | `CREATE OR REPLACE VIEW …` (PostgreSQL, MySQL) / `DROP … + CREATE …` (SQLite) | GRIZZLE-ONLY |
+| Changed view (SQL modified) | `DROP VIEW IF EXISTS … + CREATE VIEW …` (PostgreSQL, SQLite) / `CREATE OR REPLACE VIEW …` (MySQL) | GRIZZLE-ONLY |
+| Dropped view | `DROP VIEW IF EXISTS …` | GRIZZLE-ONLY |
+| New named enum type | `CREATE TYPE … AS ENUM (…)` (PostgreSQL only) | GRIZZLE-ONLY — Drizzle Kit v0.30 does not migrate named enum types |
+| Enum values added | `ALTER TYPE … ADD VALUE … AFTER/BEFORE …` (PostgreSQL only) | GRIZZLE-ONLY |
+| Enum values removed or reordered | WARNING SQL comment — PostgreSQL cannot perform these operations | GRIZZLE-ONLY |
+| Dropped named enum type | `DROP TYPE IF EXISTS …` (PostgreSQL only) | GRIZZLE-ONLY |
+
+**View and enum dependency ordering:** `Diff` emits changes in a fixed 9-phase sequence: new enums → altered enums → renamed/new tables → altered tables → new views → replaced views → dropped views → dropped tables → dropped enums. This prevents referential integrity errors (e.g. a view cannot be created before its base tables exist; an enum cannot be dropped before the tables referencing it are dropped).
+
+**`ALTER TYPE … ADD VALUE` and transactions (PostgreSQL < 12):** In PostgreSQL 9.x–11.x, `ADD VALUE` cannot run inside a transaction. If your migration runner wraps all changes in a single transaction, any migration that adds enum values will fail on those versions. Run the statement outside a transaction or upgrade to PostgreSQL 12+.
+
+**View–view dependency ordering:** Within the new-view and drop-view phases, views are sorted alphabetically only — intra-view dependencies are not resolved. If a newly-created view selects from another new view, the names must sort in dependency order, or the migration will fail at runtime.
 
 ### Column type changes and `USING`
 
@@ -380,6 +409,26 @@ For a deployment currently using the old `kit.Migrate`:
 | Is a CLI flag needed? | **Yes** — `--baseline <tag>` for existing deployments switching to file-based workflow |
 | Should `--baseline` be used on fresh installs? | **No** — on a fresh database, use `grizzle migrate` without `--baseline` |
 | Are baseline rows distinguishable from normal applies? | **Yes** — `is_baseline = TRUE` / `FALSE`; baseline rows store the file checksum but have `sql_batch = ''` |
+
+---
+
+## Breaking changes
+
+### `Change.TableName` renamed to `Change.ObjectName` (PR #220)
+
+The `TableName` field on `kit.Change` was renamed to `ObjectName` to reflect that changes now address tables, views, and enums uniformly.
+
+**Migration:** replace all struct literal field names and field accesses:
+
+```go
+// Before
+c.TableName
+kit.Change{Kind: kit.ChangeCreateTable, TableName: "users"}
+
+// After
+c.ObjectName
+kit.Change{Kind: kit.ChangeCreateTable, ObjectName: "users"}
+```
 
 ---
 

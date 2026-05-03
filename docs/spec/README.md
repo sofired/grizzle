@@ -49,19 +49,30 @@ Anything not labelled targets PARITY.
 
 ## Current completeness
 
-| Area | Implemented | Status |
+| Area | Status | Tracking |
 |---|---|---|
-| Schema DSL — PostgreSQL column types | Partial | Several types missing — see [schema.md](./schema.md) |
-| Schema DSL — MySQL / SQLite column types | Partial | See [schema.md](./schema.md) |
-| Query builder — SELECT / INSERT / UPDATE / DELETE | Mostly complete | Minor gaps — see [query-builder.md](./query-builder.md) |
-| Query builder — CTEs, FOR UPDATE, prepared statements | Not started | DEVIATION:GAP |
-| Kit — `diff` / `sql` / `snapshot` / `migrate` / `status` | Implemented | See [kit.md](./kit.md) for current vs target |
-| Kit — `generate` (write SQL files to disk) | Not started | DEVIATION:GAP (not designed) — highest priority |
-| Kit — `pull` (DB → Go schema) | Not started | DEVIATION:GAP (not designed) |
-| Kit — rename detection | Not started | DEVIATION:GAP (not designed) — data-loss risk |
-| Relations — JOIN helpers | Implemented | PARITY |
-| Relations — relational query API (`findMany`) | Not started | DEVIATION:GAP (not designed) |
-| Code generation (`grizzle gen`) | Implemented | Partial — see [codegen.md](./codegen.md) |
-| Transactions | Implemented | Savepoints gap — see [transactions.md](./transactions.md) |
-| Dialects — PostgreSQL | Primary | Most complete |
-| Dialects — MySQL / SQLite | Partial | See [dialects.md](./dialects.md) |
+| Schema DSL — PostgreSQL column types | Partial — core types done; date, time, real, doublePrecision, char, inet, bytea, interval, pgEnum, array, and geometry types are DEVIATION:GAP | M5 (#32, #137, #144) |
+| Schema DSL — MySQL column types | Partial — datetime, date, time, float, double, decimal, json, smallint, tinyint, binary, varbinary, char are DEVIATION:GAP | M5 (#32) |
+| Schema DSL — SQLite column types | Mostly complete — real, blob, numeric, JSON, JSONB are PARITY; no remaining column type gaps | — |
+| Schema DSL — `generatedAlwaysAs` | Not started — DEVIATION:GAP (designed) | Unmilestoned (#172) |
+| Query builder — SELECT / INSERT / UPDATE / DELETE | Mostly complete — CTEs (recursive + non-recursive) and FOR UPDATE/FOR SHARE are PARITY; see [query-builder.md](./query-builder.md) for remaining gaps | — |
+| Query builder — missing operators | Not started — `NOT LIKE`, `NOT ILIKE`, `NOT BETWEEN` (P1); `NULLS FIRST`/`NULLS LAST` (P1); `WHERE` on `ON CONFLICT` (P1); `UPDATE…FROM` (P1); `CROSS JOIN` (designed) | M4 (#164, #163, #162, #167) |
+| Query builder — prepared statements | Not started — DEVIATION:GAP (not designed) | M6 (#166) |
+| Query builder — window frame spec | Not started — DEVIATION:GAP (designed) | M6 (#139) |
+| Query builder — lateral join, cursor/streaming | Not started — DEVIATION:GAP (not designed) | M6 (#171, #170) |
+| Kit — `diff` / `sql` / `snapshot` / `status` | Implemented — see [kit.md](./kit.md) | — |
+| Kit — `migrate` | DEVIATION:BROKEN — currently introspects live DB rather than reading `.sql` files; must be refactored once `generate` is implemented | M3 (#154, P0) |
+| Kit — `generate` (write SQL migration files to disk) | Not started — DEVIATION:GAP (designed); highest-priority Kit gap | M3 (#153, P0) |
+| Kit — `push` CLI command | Not started — library function exists; CLI wrapper missing | M3 (#157, P1) |
+| Kit — `pull` (DB → Go schema definitions) | Not started — DEVIATION:GAP (not designed); introspection exists internally | M3 (#158, P1) |
+| Kit — `check` command | Not started — DEVIATION:GAP (not designed); only meaningful after `generate` | M3 (#169) |
+| Kit — rename detection | Implemented via `RenamedFrom()` schema annotation — GRIZZLE-ONLY (documented in schema.md) | — |
+| Relations — JOIN helpers (`JoinRel`, `InnerJoinRel`) | Implemented — GRIZZLE-ONLY (documented in query-builder.md) | — |
+| Relations — relational query API (`findMany`) | Not started — DEVIATION:GAP (not designed); manual batch-loading is the current approach | Not milestoned |
+| Code generation (`grizzle gen`) | Implemented for PostgreSQL, MySQL, and SQLite — see [codegen.md](./codegen.md) | — |
+| Transactions — core API | Implemented — PARITY | — |
+| Transactions — isolation levels | Not started — DEVIATION:GAP (designed) | M6 (#159, P1) |
+| Transactions — savepoints / nested transactions | Not started — DEVIATION:GAP (designed) | M6 (#143, P1) |
+| Transactions — MySQL / SQLite wrappers | Not started — DEVIATION:GAP (designed) | M6 (#160, P1) |
+| Dialects — PostgreSQL | Core dialect; most complete | — |
+| Dialects — MySQL / SQLite | Partial — column type gaps above; dialect interface fully implemented (PARITY) | M5 for type gaps |

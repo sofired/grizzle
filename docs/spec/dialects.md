@@ -28,7 +28,10 @@ Grizzle's dialect system is the Go equivalent of [Drizzle's multi-dialect suppor
 | `FOR UPDATE` / `FOR SHARE` | Yes | Yes (limited) | No |
 | `FOR NO KEY UPDATE` / `FOR KEY SHARE` | Yes | **No** | No |
 | `FULL JOIN` | Yes | No | No |
+| `LIMIT` on `UPDATE`/`DELETE` | No (silently dropped) | Yes | Yes (requires `SQLITE_ENABLE_UPDATE_DELETE_LIMIT` compile flag) |
 | JSON operators | `->`, `->>`, `@>`, etc. | Limited | Limited |
+| Regex match (`~`, `~*`, `!~`, `!~*`) | Yes | **No** (emits `FALSE`) | **No** (emits `FALSE`) |
+| Full-text search (`@@`, `to_tsvector`, etc.) | Yes | **No** (emits `FALSE`/`NULL`) | **No** (emits `FALSE`/`NULL`) |
 
 ## Dialect interface
 
@@ -62,6 +65,10 @@ type Dialect interface {
     SupportsForNoKeyUpdate() bool           // PostgreSQL-only; false for MySQL/SQLite
     SupportsFullJoin() bool
     ForShareClause() string                 // "FOR SHARE" (Postgres) / "LOCK IN SHARE MODE" (MySQL)
+    SupportsForShareOf() bool
+    SupportsRegexpMatch() bool              // PostgreSQL-only (~, ~*, !~, !~*); false for MySQL/SQLite
+    SupportsFullTextSearch() bool           // PostgreSQL-only (@@, to_tsvector, etc.); false for MySQL/SQLite
+    SupportsLimitOnMutate() bool            // false for PostgreSQL; true for MySQL/SQLite
 }
 ```
 
@@ -79,15 +86,23 @@ type Dialect interface {
 
 **#110 — FIXED (PR #174).** `FOR NO KEY UPDATE` and `FOR KEY SHARE` were PostgreSQL-only locking clauses that previously emitted for MySQL. Fixed by adding `SupportsForNoKeyUpdate()` to the `Dialect` interface; MySQL and SQLite return `false` and the clauses are now suppressed at build time.
 
+**#230 — FIXED. GRIZZLE-ONLY (safe-fail on non-PG dialects).** PostgreSQL-only regex operators (`~`, `~*`, `!~`, `!~*`) and full-text search expressions (`@@`, `to_tsvector`, `to_tsquery`, etc.) emitted unconditionally regardless of dialect. Fixed by adding `SupportsRegexpMatch()` and `SupportsFullTextSearch()` to the `Dialect` interface. On non-PostgreSQL dialects, predicate expressions (regex match, FTS `@@` operators) emit `FALSE` and scalar expressions (standalone `to_tsquery`, `to_tsvector`) emit `NULL`; no args are bound. Note: the NOT-match operators (`!~`, `!~*`) also emit `FALSE` (not `TRUE`) on unsupported dialects. This is intentional safe-failure behaviour — the query remains syntactically valid but returns no rows, preventing silent data corruption. Callers should check `ctx.Dialect().SupportsRegexpMatch()` or `ctx.Dialect().SupportsFullTextSearch()` before using these operators against non-PG dialects.
+
+**#231 — FIXED (PR #257).** `LIMIT` on `UPDATE`/`DELETE` was gated by a hard-coded `d.Name() != "postgres"` string check in the query builder, violating the rule against dialect-name checks inside builders. Fixed by adding `SupportsLimitOnMutate()` to the `Dialect` interface; PostgreSQL returns `false` and the clause is silently dropped at build time for any dialect that does not support it.
+
 ## PostgreSQL-specific features
 
 ### JSONB operators — DEVIATION:GAP (not designed)
 
 `->`, `->>`, `@>`, `<@`, `?`, `?|`, `?&`, `#>`, `#-`. Tracked as part of #140.
 
-### Full-text search — DEVIATION:GAP (designed)
+### Full-text search — GRIZZLE-ONLY (safe-fail on non-PG dialects)
 
-`tsvector`, `tsquery`, `@@`, `to_tsvector()`, `to_tsquery()`, `plainto_tsquery()`. Tracked as #140.
+`tsvector`, `tsquery`, `@@`, `to_tsvector()`, `to_tsquery()`, `plainto_tsquery()`. These are PostgreSQL-specific; Grizzle supports them but gates their emission behind `SupportsFullTextSearch()`. On MySQL and SQLite, FTS predicate expressions emit `FALSE` and scalar FTS expressions emit `NULL` (issue #230, fixed). Callers must check `SupportsFullTextSearch()` before building FTS queries for portability.
+
+### Regex match operators — GRIZZLE-ONLY (safe-fail on non-PG dialects)
+
+`~`, `~*`, `!~`, `!~*`. PostgreSQL POSIX regex match operators exposed via `StringColumn.RegexpMatch()`, `RegexpMatchI()`, `NotRegexpMatch()`, `NotRegexpMatchI()`. On non-PostgreSQL dialects, these emit `FALSE` (issue #230, fixed). Callers must check `SupportsRegexpMatch()` for portability.
 
 ### Array operators — DEVIATION:GAP (not designed)
 

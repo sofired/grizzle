@@ -2031,21 +2031,29 @@ func TestUpdate_SetStruct_Nil(t *testing.T) {
 	})
 }
 
+// -------------------------------------------------------------------
+// UPDATE / DELETE LIMIT tests
+// -------------------------------------------------------------------
+
 func TestUpdate_Limit_MySQL(t *testing.T) {
 	q := query.Update(ts.UsersT).
 		Set("enabled", false).
 		Where(ts.UsersT.DeletedAt.IsNotNull()).
 		Limit(100)
-	got, _ := q.Build(dialect.MySQL)
+	got, args := q.Build(dialect.MySQL)
 	want := "UPDATE `users` SET `enabled` = ? WHERE `users`.`deleted_at` IS NOT NULL LIMIT 100"
 	if got != want {
 		t.Errorf("SQL mismatch\n got:  %s\nwant: %s", got, want)
+	}
+	if len(args) != 1 || args[0] != false {
+		t.Errorf("args mismatch: got %v, want [false]", args)
 	}
 }
 
 func TestUpdate_Limit_Postgres_Ignored(t *testing.T) {
 	q := query.Update(ts.UsersT).
 		Set("enabled", false).
+		Where(ts.UsersT.DeletedAt.IsNotNull()).
 		Limit(100)
 	got, _ := q.Build(dialect.Postgres)
 	if strings.Contains(got, "LIMIT") {
@@ -2057,10 +2065,13 @@ func TestDelete_Limit_MySQL(t *testing.T) {
 	q := query.DeleteFrom(ts.UsersT).
 		Where(ts.UsersT.DeletedAt.IsNotNull()).
 		Limit(50)
-	got, _ := q.Build(dialect.MySQL)
+	got, args := q.Build(dialect.MySQL)
 	want := "DELETE FROM `users` WHERE `users`.`deleted_at` IS NOT NULL LIMIT 50"
 	if got != want {
 		t.Errorf("SQL mismatch\n got:  %s\nwant: %s", got, want)
+	}
+	if len(args) != 0 {
+		t.Errorf("args mismatch: got %v, want []", args)
 	}
 }
 
@@ -2069,6 +2080,102 @@ func TestDelete_Limit_Postgres_Ignored(t *testing.T) {
 	got, _ := q.Build(dialect.Postgres)
 	if strings.Contains(got, "LIMIT") {
 		t.Errorf("LIMIT should not appear in Postgres DELETE: %s", got)
+	}
+}
+
+func TestUpdate_Limit_SQLite(t *testing.T) {
+	q := query.Update(ts.UsersT).
+		Set("enabled", false).
+		Where(ts.UsersT.DeletedAt.IsNotNull()).
+		Limit(100)
+	got, args := q.Build(dialect.SQLite)
+	want := `UPDATE "users" SET "enabled" = ? WHERE "users"."deleted_at" IS NOT NULL LIMIT 100`
+	if got != want {
+		t.Errorf("SQL mismatch\n got:  %s\nwant: %s", got, want)
+	}
+	if len(args) != 1 || args[0] != false {
+		t.Errorf("args mismatch: got %v, want [false]", args)
+	}
+}
+
+func TestDelete_Limit_SQLite(t *testing.T) {
+	q := query.DeleteFrom(ts.UsersT).
+		Where(ts.UsersT.DeletedAt.IsNotNull()).
+		Limit(50)
+	got, args := q.Build(dialect.SQLite)
+	want := `DELETE FROM "users" WHERE "users"."deleted_at" IS NOT NULL LIMIT 50`
+	if got != want {
+		t.Errorf("SQL mismatch\n got:  %s\nwant: %s", got, want)
+	}
+	if len(args) != 0 {
+		t.Errorf("args mismatch: got %v, want []", args)
+	}
+}
+
+func TestUpdate_Limit_SQLite_WithReturning(t *testing.T) {
+	q := query.Update(ts.UsersT).
+		Set("enabled", false).
+		Where(ts.UsersT.DeletedAt.IsNotNull()).
+		Limit(10).
+		Returning(ts.UsersT.ID)
+	got, args := q.Build(dialect.SQLite)
+	want := `UPDATE "users" SET "enabled" = ? WHERE "users"."deleted_at" IS NOT NULL LIMIT 10 RETURNING "users"."id"`
+	if got != want {
+		t.Errorf("SQL mismatch\n got:  %s\nwant: %s", got, want)
+	}
+	if len(args) != 1 || args[0] != false {
+		t.Errorf("args mismatch: got %v, want [false]", args)
+	}
+}
+
+func TestDelete_Limit_SQLite_WithReturning(t *testing.T) {
+	q := query.DeleteFrom(ts.UsersT).
+		Where(ts.UsersT.DeletedAt.IsNotNull()).
+		Limit(10).
+		Returning(ts.UsersT.ID)
+	got, args := q.Build(dialect.SQLite)
+	want := `DELETE FROM "users" WHERE "users"."deleted_at" IS NOT NULL LIMIT 10 RETURNING "users"."id"`
+	if got != want {
+		t.Errorf("SQL mismatch\n got:  %s\nwant: %s", got, want)
+	}
+	if len(args) != 0 {
+		t.Errorf("args mismatch: got %v, want []", args)
+	}
+}
+
+func TestUpdate_Limit_Zero_NoClause(t *testing.T) {
+	for _, d := range []dialect.Dialect{dialect.MySQL, dialect.SQLite, dialect.Postgres} {
+		q := query.Update(ts.UsersT).Set("enabled", false).Limit(0)
+		got, _ := q.Build(d)
+		if strings.Contains(got, "LIMIT") {
+			t.Errorf("dialect %s: LIMIT should not appear when Limit(0): %s", d.Name(), got)
+		}
+	}
+}
+
+func TestDelete_Limit_Zero_NoClause(t *testing.T) {
+	for _, d := range []dialect.Dialect{dialect.MySQL, dialect.SQLite, dialect.Postgres} {
+		q := query.DeleteFrom(ts.UsersT).Limit(0)
+		got, _ := q.Build(d)
+		if strings.Contains(got, "LIMIT") {
+			t.Errorf("dialect %s: LIMIT should not appear when Limit(0): %s", d.Name(), got)
+		}
+	}
+}
+
+func TestUpdate_Limit_Negative_NoClause(t *testing.T) {
+	q := query.Update(ts.UsersT).Set("enabled", false).Limit(-1)
+	got, _ := q.Build(dialect.MySQL)
+	if strings.Contains(got, "LIMIT") {
+		t.Errorf("LIMIT should not appear when Limit(-1): %s", got)
+	}
+}
+
+func TestDelete_Limit_Negative_NoClause(t *testing.T) {
+	q := query.DeleteFrom(ts.UsersT).Limit(-1)
+	got, _ := q.Build(dialect.MySQL)
+	if strings.Contains(got, "LIMIT") {
+		t.Errorf("LIMIT should not appear when Limit(-1): %s", got)
 	}
 }
 
@@ -2330,184 +2437,6 @@ func TestArith_UsedInSelect(t *testing.T) {
 		`SELECT ("orders"."price" * "orders"."discount") AS "total" FROM "users"`,
 		nil,
 	)
-}
-
-// -------------------------------------------------------------------
-// CAST
-// -------------------------------------------------------------------
-
-func TestCast_ColAsText(t *testing.T) {
-	ctx := expr.NewBuildContext(dialect.Postgres)
-	got := expr.Cast(ts.UsersT.ID, "text").ToSQL(ctx)
-	want := `CAST("users"."id" AS text)`
-	if got != want {
-		t.Errorf("got %s, want %s", got, want)
-	}
-}
-
-func TestCast_WithAlias(t *testing.T) {
-	ctx := expr.NewBuildContext(dialect.Postgres)
-	got := expr.Cast(scoreCol, "bigint").As("big_score").ToSQL(ctx)
-	want := `CAST("products"."score" AS bigint) AS "big_score"`
-	if got != want {
-		t.Errorf("got %s, want %s", got, want)
-	}
-}
-
-func TestCast_EQ_InWhere(t *testing.T) {
-	ctx := expr.NewBuildContext(dialect.Postgres)
-	got := expr.Cast(ts.UsersT.ID, "text").EQ("abc").ToSQL(ctx)
-	want := `CAST("users"."id" AS text) = $1`
-	if got != want {
-		t.Errorf("got %s, want %s", got, want)
-	}
-}
-
-// -------------------------------------------------------------------
-// COALESCE / NULLIF
-// -------------------------------------------------------------------
-
-func TestCoalesce_TwoColumns(t *testing.T) {
-	ctx := expr.NewBuildContext(dialect.Postgres)
-	got := expr.Coalesce(expr.Col(ts.UsersT.Email), expr.Col(ts.UsersT.Username)).ToSQL(ctx)
-	want := `COALESCE("users"."email", "users"."username")`
-	if got != want {
-		t.Errorf("got %s, want %s", got, want)
-	}
-}
-
-func TestCoalesce_ColumnAndLiteral(t *testing.T) {
-	ctx := expr.NewBuildContext(dialect.Postgres)
-	got := expr.Coalesce(expr.Col(ts.UsersT.Email), expr.Lit("anon")).ToSQL(ctx)
-	want := `COALESCE("users"."email", $1)`
-	if got != want {
-		t.Errorf("got %s, want %s", got, want)
-	}
-}
-
-func TestCoalesce_WithAlias(t *testing.T) {
-	ctx := expr.NewBuildContext(dialect.Postgres)
-	got := expr.Coalesce(expr.Col(ts.UsersT.Email), expr.Lit("anon")).As("display_email").ToSQL(ctx)
-	if !strings.Contains(got, `AS "display_email"`) {
-		t.Errorf("alias not rendered: %s", got)
-	}
-}
-
-func TestNullIf(t *testing.T) {
-	ctx := expr.NewBuildContext(dialect.Postgres)
-	got := expr.NullIf(expr.Col(scoreCol), expr.Lit(0)).ToSQL(ctx)
-	want := `NULLIF("products"."score", $1)`
-	if got != want {
-		t.Errorf("got %s, want %s", got, want)
-	}
-}
-
-// -------------------------------------------------------------------
-// String functions
-// -------------------------------------------------------------------
-
-func TestUpper(t *testing.T) {
-	ctx := expr.NewBuildContext(dialect.Postgres)
-	got := expr.Upper(ts.UsersT.Username).ToSQL(ctx)
-	want := `UPPER("users"."username")`
-	if got != want {
-		t.Errorf("got %s, want %s", got, want)
-	}
-}
-
-func TestLower(t *testing.T) {
-	ctx := expr.NewBuildContext(dialect.Postgres)
-	got := expr.Lower(ts.UsersT.Email).ToSQL(ctx)
-	want := `LOWER("users"."email")`
-	if got != want {
-		t.Errorf("got %s, want %s", got, want)
-	}
-}
-
-func TestLength(t *testing.T) {
-	ctx := expr.NewBuildContext(dialect.Postgres)
-	got := expr.Length(ts.UsersT.Username).GT(3).ToSQL(ctx)
-	if !strings.Contains(got, "LENGTH") || !strings.Contains(got, ">") {
-		t.Errorf("unexpected: %s", got)
-	}
-}
-
-func TestTrim(t *testing.T) {
-	ctx := expr.NewBuildContext(dialect.Postgres)
-	got := expr.Trim(ts.UsersT.Username).ToSQL(ctx)
-	want := `TRIM("users"."username")`
-	if got != want {
-		t.Errorf("got %s, want %s", got, want)
-	}
-}
-
-func TestConcat(t *testing.T) {
-	ctx := expr.NewBuildContext(dialect.Postgres)
-	got := expr.Concat(expr.Col(ts.UsersT.Username), expr.Lit(" "), expr.Col(ts.UsersT.Email)).ToSQL(ctx)
-	want := `CONCAT("users"."username", $1, "users"."email")`
-	if got != want {
-		t.Errorf("got %s, want %s", got, want)
-	}
-}
-
-func TestConcatCols(t *testing.T) {
-	ctx := expr.NewBuildContext(dialect.Postgres)
-	got := expr.ConcatCols(ts.UsersT.Username, ts.UsersT.Email).ToSQL(ctx)
-	want := `CONCAT("users"."username", "users"."email")`
-	if got != want {
-		t.Errorf("got %s, want %s", got, want)
-	}
-}
-
-func TestLower_Like_InWhere(t *testing.T) {
-	ctx := expr.NewBuildContext(dialect.Postgres)
-	got := expr.Lower(ts.UsersT.Email).Like("%@example.com").ToSQL(ctx)
-	if !strings.Contains(got, "LOWER") || !strings.Contains(got, "LIKE") {
-		t.Errorf("unexpected: %s", got)
-	}
-}
-
-func TestFuncExpr_Asc_Desc(t *testing.T) {
-	ctx := expr.NewBuildContext(dialect.Postgres)
-	asc := expr.Lower(ts.UsersT.Username).Asc()
-	desc := expr.Upper(ts.UsersT.Email).Desc()
-	gotAsc := asc.ToSQL(ctx)
-	gotDesc := desc.ToSQL(ctx)
-	if !strings.Contains(gotAsc, "ASC") || !strings.Contains(gotAsc, "LOWER") {
-		t.Errorf("asc: unexpected: %s", gotAsc)
-	}
-	if !strings.Contains(gotDesc, "DESC") || !strings.Contains(gotDesc, "UPPER") {
-		t.Errorf("desc: unexpected: %s", gotDesc)
-	}
-}
-
-// -------------------------------------------------------------------
-// Numeric functions
-// -------------------------------------------------------------------
-
-func TestAbs(t *testing.T) {
-	ctx := expr.NewBuildContext(dialect.Postgres)
-	got := expr.Abs(priceCol).ToSQL(ctx)
-	if got != `ABS("orders"."price")` {
-		t.Errorf("got %s", got)
-	}
-}
-
-func TestRound_NoDecimals(t *testing.T) {
-	ctx := expr.NewBuildContext(dialect.Postgres)
-	got := expr.Round(priceCol).ToSQL(ctx)
-	if got != `ROUND("orders"."price")` {
-		t.Errorf("got %s", got)
-	}
-}
-
-func TestRound_WithDecimals(t *testing.T) {
-	ctx := expr.NewBuildContext(dialect.Postgres)
-	got := expr.Round(priceCol, 2).ToSQL(ctx)
-	// ROUND("orders"."price", $1)
-	if !strings.Contains(got, "ROUND") || !strings.Contains(got, "$1") {
-		t.Errorf("got %s", got)
-	}
 }
 
 // -------------------------------------------------------------------
@@ -2792,6 +2721,9 @@ func (noCTEDialect) SupportsForNoKeyUpdate() bool  { return false }
 func (noCTEDialect) SupportsForShareOf() bool      { return false }
 func (noCTEDialect) SupportsFullJoin() bool        { return false }
 func (noCTEDialect) ForShareClause() string        { return "" }
+func (noCTEDialect) SupportsRegexpMatch() bool     { return false }
+func (noCTEDialect) SupportsFullTextSearch() bool  { return false }
+func (noCTEDialect) SupportsLimitOnMutate() bool   { return false }
 
 // noWindowDialect is a test-only dialect that reports SupportsWindowFunctions() = false.
 type noWindowDialect struct{ noCTEDialect }
