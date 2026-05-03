@@ -306,7 +306,7 @@ ALTER TABLE _grizzle_migrations MODIFY COLUMN sql_batch LONGTEXT NOT NULL DEFAUL
 ```
 
 ```sql
--- SQLite (check column existence before running; IF NOT EXISTS on ADD COLUMN requires 3.37.0+)
+-- SQLite does NOT support IF NOT EXISTS on ADD COLUMN — check column existence via PRAGMA table_info before running
 ALTER TABLE _grizzle_migrations ADD COLUMN tag TEXT NOT NULL DEFAULT '';
 ALTER TABLE _grizzle_migrations ADD COLUMN is_baseline INTEGER NOT NULL DEFAULT 0;
 ```
