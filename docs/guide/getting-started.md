@@ -2,6 +2,8 @@
 
 ## Installation
 
+**Requires Go 1.25 or later.**
+
 Add Grizzle to your Go module:
 
 ```sh
