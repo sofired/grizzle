@@ -10,54 +10,58 @@ import (
 // capabilities for all feature-detection methods added in #155.
 func TestDialectFeatureMatrix(t *testing.T) {
 	type row struct {
-		name               string
-		d                  dialect.Dialect
-		supportsCTE        bool
-		supportsWindow     bool
-		supportsDistinctOn bool
-		supportsForUpdate  bool
-		supportsForNoKey   bool
-		supportsFullJoin   bool
-		supportsForShareOf bool
-		forShareClause     string
+		name                  string
+		d                     dialect.Dialect
+		supportsCTE           bool
+		supportsWindow        bool
+		supportsDistinctOn    bool
+		supportsForUpdate     bool
+		supportsForNoKey      bool
+		supportsFullJoin      bool
+		supportsForShareOf    bool
+		supportsLimitOnMutate bool
+		forShareClause        string
 	}
 
 	cases := []row{
 		{
-			name:               "postgres",
-			d:                  dialect.Postgres,
-			supportsCTE:        true,
-			supportsWindow:     true,
-			supportsDistinctOn: true,
-			supportsForUpdate:  true,
-			supportsForNoKey:   true,
-			supportsFullJoin:   true,
-			supportsForShareOf: true,
-			forShareClause:     "FOR SHARE",
+			name:                  "postgres",
+			d:                     dialect.Postgres,
+			supportsCTE:           true,
+			supportsWindow:        true,
+			supportsDistinctOn:    true,
+			supportsForUpdate:     true,
+			supportsForNoKey:      true,
+			supportsFullJoin:      true,
+			supportsForShareOf:    true,
+			supportsLimitOnMutate: false,
+			forShareClause:        "FOR SHARE",
 		},
 		{
-			name:               "mysql",
-			d:                  dialect.MySQL,
-			supportsCTE:        true,
-			supportsWindow:     true,
-			supportsDistinctOn: false,
-			supportsForUpdate:  true,
-			supportsForNoKey:   false,
-			supportsFullJoin:   false,
-			supportsForShareOf: false,
-			forShareClause:     "LOCK IN SHARE MODE",
+			name:                  "mysql",
+			d:                     dialect.MySQL,
+			supportsCTE:           true,
+			supportsWindow:        true,
+			supportsDistinctOn:    false,
+			supportsForUpdate:     true,
+			supportsForNoKey:      false,
+			supportsFullJoin:      false,
+			supportsForShareOf:    false,
+			supportsLimitOnMutate: true,
+			forShareClause:        "LOCK IN SHARE MODE",
 		},
 		{
-			name:               "sqlite",
-			d:                  dialect.SQLite,
-			supportsCTE:        true,
-			supportsWindow:     true,
-			supportsDistinctOn: false,
-			supportsForUpdate:  false,
-			supportsForNoKey:   false,
-			supportsFullJoin:   false,
-			supportsForShareOf: false,
-			forShareClause:     "",
+			name:                  "sqlite",
+			d:                     dialect.SQLite,
+			supportsCTE:           true,
+			supportsWindow:        true,
+			supportsDistinctOn:    false,
+			supportsForUpdate:     false,
+			supportsForNoKey:      false,
+			supportsFullJoin:      false,
+			supportsForShareOf:    false,
+			supportsLimitOnMutate: true,
+			forShareClause:        "",
 		},
 	}
 
@@ -82,6 +86,7 @@ func TestDialectFeatureMatrix(t *testing.T) {
 			checkBool("SupportsForNoKeyUpdate", c.d.SupportsForNoKeyUpdate(), c.supportsForNoKey)
 			checkBool("SupportsFullJoin", c.d.SupportsFullJoin(), c.supportsFullJoin)
 			checkBool("SupportsForShareOf", c.d.SupportsForShareOf(), c.supportsForShareOf)
+			checkBool("SupportsLimitOnMutate", c.d.SupportsLimitOnMutate(), c.supportsLimitOnMutate)
 			checkStr("ForShareClause", c.d.ForShareClause(), c.forShareClause)
 		})
 	}
