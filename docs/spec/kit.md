@@ -57,7 +57,7 @@ grizzle generate [--out ./migrations] [--schema ./schema] [--dialect postgres|my
 - Reads schema definitions from Go source
 - Loads the last snapshot from `./migrations/meta/snapshot.json` (or treats as empty if none)
 - Computes diff
-- Writes a new numbered `.sql` migration file (e.g. `0003_add_users_table.sql`)
+- Writes a new numbered `.sql` migration file (e.g. `0003_add_users_table.sql`). Sequence numbers are zero-padded to four digits (`0001`, `0002`, …). The next number is `max(existing prefix) + 1`, or `0001` if the directory is empty. Duplicate sequence prefixes are rejected.
 - Updates `./migrations/meta/snapshot.json`
 - Does **not** connect to a database; does **not** apply anything
 
@@ -349,7 +349,7 @@ result, err := kit.Migrate(ctx, pool, kit.MigrateOptions{
 
 When `Baseline` is set:
 
-- All migration files whose sequence number is ≤ the baseline tag's sequence number are inserted into `_grizzle_migrations` with `is_baseline = TRUE`, `checksum` = SHA-256 of the file's byte contents, and `sql_batch = ''`. The sequence number is the leading decimal integer before the first underscore in the filename (e.g. `0001` from `0001_initial_schema.sql`). If two files in the directory share the same numeric prefix, `kit.Migrate` returns an error — duplicate prefixes are invalid and are rejected at `grizzle generate` time as well.
+- All migration files whose sequence number is ≤ the baseline tag's sequence number are inserted into `_grizzle_migrations` with `is_baseline = TRUE`, `checksum` = SHA-256 of the file's byte contents, and `sql_batch = ''`. The sequence number is the leading decimal integer before the first underscore in the filename (e.g. `0001` from `0001_initial_schema.sql`). If two files in the directory share the same numeric prefix, `kit.Migrate` returns an error — duplicate prefixes are invalid and are rejected at `grizzle generate` time as well. All baseline inserts for a single `--baseline` run are committed in a single transaction; a crash mid-run leaves the table unchanged, and re-running will resume from the first tag that is still absent.
 - Subsequent migrations (higher sequence numbers) are applied normally.
 - If a row already exists for a given tag, that tag is skipped (idempotent).
 - If a row already exists for a given tag with `is_baseline = FALSE` (previously applied normally), `--baseline` leaves that row untouched.
