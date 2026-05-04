@@ -50,7 +50,7 @@ type StatusResult struct {
 // twice is idempotent — files already recorded by tag are skipped.
 //
 // If opts.Baseline is non-empty, migration files up to and including the named
-// tag are inserted as baseline records (is_baseline = TRUE, sql_batch = '') in
+// tag are inserted as baseline records (is_baseline=TRUE, empty sql_batch) in
 // a single transaction without executing their SQL. Use this only on existing
 // deployments switching to the file-based workflow; on a fresh database, omit
 // Baseline and let Migrate apply all files normally.
