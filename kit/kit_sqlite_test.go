@@ -761,6 +761,37 @@ func TestSQLite_NormalRow_IsBaselineFalse(t *testing.T) {
 	t.Error("row for 0001_init not found in history")
 }
 
+func TestSQLite_MigrationWithLeadingComments_Executes(t *testing.T) {
+	// A migration file that opens with a line comment must still have its SQL
+	// executed. Previously the HasPrefix("--") guard in applyMigrationFileSQLite
+	// silently dropped the entire statement.
+	db := openSQLiteMemory(t)
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	writeMigrationFile(t, dir, "0001_with_comment.sql",
+		"-- create the items table\nCREATE TABLE \"items\" (\"id\" INTEGER PRIMARY KEY)")
+
+	opts := kit.MigrateOptions{MigrationsDir: dir}
+	result, err := kit.MigrateSQLite(ctx, db, opts)
+	if err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if len(result.Applied) != 1 {
+		t.Errorf("expected 1 applied migration, got %d", len(result.Applied))
+	}
+
+	var count int
+	if err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='items'`,
+	).Scan(&count); err != nil {
+		t.Fatalf("check table existence: %v", err)
+	}
+	if count != 1 {
+		t.Error("table 'items' was not created; migration with leading comment was silently skipped")
+	}
+}
+
 func TestSQLite_PushSQLite_StillWorks(t *testing.T) {
 	// PushSQLite uses the live-introspect workflow; verify it still compiles and runs.
 	db := openSQLiteMemory(t)

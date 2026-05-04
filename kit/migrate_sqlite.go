@@ -318,8 +318,12 @@ func applyMigrationFileSQLite(ctx context.Context, db *sql.DB, tag, sqlText, che
 		if stmt == "" {
 			continue
 		}
-		// Skip comment-only statements (ALTER COLUMN stubs).
-		if strings.HasPrefix(stmt, "--") {
+		// Strip leading comment lines so migration files that open with a
+		// descriptive comment block are not silently skipped. Fragments that
+		// contain only comment lines (e.g. ALTER COLUMN stubs from the push
+		// workflow) are still discarded after stripping.
+		stmt = stripLeadingCommentLines(stmt)
+		if stmt == "" {
 			continue
 		}
 		if _, err := tx.ExecContext(ctx, stmt); err != nil {
@@ -422,6 +426,24 @@ func execTransactionSQLite(ctx context.Context, db *sql.DB, stmts []string) erro
 		}
 	}
 	return tx.Commit()
+}
+
+// stripLeadingCommentLines removes blank lines and "--" comment lines from the
+// start of s and returns the trimmed result. It is used so that migration files
+// beginning with a descriptive comment block still execute their SQL, while
+// fragments that contain only SQL comments (ALTER COLUMN stubs from the push
+// workflow) are correctly identified as empty and skipped.
+func stripLeadingCommentLines(s string) string {
+	lines := strings.Split(s, "\n")
+	for len(lines) > 0 {
+		t := strings.TrimSpace(lines[0])
+		if t == "" || strings.HasPrefix(t, "--") {
+			lines = lines[1:]
+		} else {
+			break
+		}
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
 
 // parseSQLiteTime parses common SQLite timestamp string formats into time.Time.
