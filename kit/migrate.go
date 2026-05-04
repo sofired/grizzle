@@ -18,13 +18,13 @@ const MigrationsTable = "_grizzle_migrations"
 
 // MigrationRecord is a row in the history table.
 type MigrationRecord struct {
-	ID         int64     `db:"id"`
-	AppliedAt  time.Time `db:"applied_at"`
-	Tag        string    `db:"tag"`        // migration filename stem (e.g. "0001_initial_schema"); empty for old checksum-based rows
-	Checksum   string    `db:"checksum"`   // SHA-256 hex of the file bytes (file-based) or SQL batch (legacy)
-	SQLBatch   string    `db:"sql_batch"`  // full SQL that was applied; empty for baseline rows
-	IsBaseline bool      `db:"is_baseline"` // true for rows inserted by --baseline (no SQL executed)
-	Description string   `db:"description"` // human-readable summary of changes
+	ID          int64     `db:"id"`
+	AppliedAt   time.Time `db:"applied_at"`
+	Tag         string    `db:"tag"`         // migration filename stem (e.g. "0001_initial_schema"); empty for old checksum-based rows
+	Checksum    string    `db:"checksum"`    // SHA-256 hex of the file bytes (file-based) or SQL batch (legacy)
+	SQLBatch    string    `db:"sql_batch"`   // full SQL that was applied; empty for baseline rows
+	IsBaseline  bool      `db:"is_baseline"` // true for rows inserted by --baseline (no SQL executed)
+	Description string    `db:"description"` // human-readable summary of changes
 }
 
 // MigrateResult contains the outcome of a Migrate call.
@@ -50,7 +50,7 @@ type StatusResult struct {
 // twice is idempotent — files already recorded by tag are skipped.
 //
 // If opts.Baseline is non-empty, migration files up to and including the named
-// tag are inserted as baseline records (is_baseline = TRUE, sql_batch = '') in
+// tag are inserted as baseline records (is_baseline = TRUE, sql_batch = ”) in
 // a single transaction without executing their SQL.
 //
 // Example:
@@ -262,7 +262,7 @@ func ensureMigrationsTable(ctx context.Context, pool *pgxpool.Pool, skipUpgrade 
 }
 
 // upgradeSchemaPostgres adds tag and is_baseline columns if absent, and ensures
-// checksum and sql_batch have DEFAULT '' (idempotent).
+// checksum and sql_batch have DEFAULT ” (idempotent).
 func upgradeSchemaPostgres(ctx context.Context, pool *pgxpool.Pool) error {
 	const q = `
 ALTER TABLE ` + MigrationsTable + ` ADD COLUMN IF NOT EXISTS tag TEXT NOT NULL DEFAULT '';
@@ -326,7 +326,7 @@ func applyMigrationFilePostgres(ctx context.Context, pool *pgxpool.Pool, tag, sq
 }
 
 // insertBaselinePostgres inserts baseline records for all files in a single
-// transaction. Each record has is_baseline = TRUE and sql_batch = ''.
+// transaction. Each record has is_baseline = TRUE and sql_batch = ”.
 func insertBaselinePostgres(ctx context.Context, pool *pgxpool.Pool, files []MigrationFile) error {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
@@ -470,4 +470,3 @@ func splitSQLStatements(sql string) []string {
 	}
 	return result
 }
-
