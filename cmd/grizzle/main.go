@@ -6,8 +6,8 @@
 //	grizzle sql      [--schema <dir>] [--dialect postgres|mysql|sqlite]
 //	grizzle diff     [--schema <dir>] [--snapshot <file>] [--dialect postgres|mysql|sqlite]
 //	grizzle snapshot [--schema <dir>] [--out <file>]
-//	grizzle migrate  [--schema <dir>] --db <dsn> [--dialect postgres|mysql|sqlite]
-//	grizzle status   [--schema <dir>] --db <dsn> [--dialect postgres|mysql|sqlite]
+//	grizzle migrate  [--migrations <dir>] --db <dsn> [--dialect postgres|mysql|sqlite] [--baseline <tag>] [--skip-schema-upgrade]
+//	grizzle status   [--migrations <dir>] --db <dsn> [--dialect postgres|mysql|sqlite]
 package main
 
 import (
@@ -249,13 +249,15 @@ func runDiff(args []string) error {
 	return nil
 }
 
-// runMigrate applies schema changes to a live database and records the history.
+// runMigrate applies pending SQL migration files to a live database and records
+// the history in _grizzle_migrations.
 func runMigrate(args []string) error {
 	fs := flag.NewFlagSet("migrate", flag.ExitOnError)
-	schemaDir := fs.String("schema", ".", "directory containing schema Go files")
+	migrationsDir := fs.String("migrations", "./migrations", "directory containing .sql migration files")
 	dsn := fs.String("db", "", "database connection string (required)")
 	dialect := fs.String("dialect", "postgres", "target dialect: postgres, mysql, or sqlite")
-	dryRun := fs.Bool("dry-run", false, "print SQL without applying it")
+	baseline := fs.String("baseline", "", "bootstrap file-based workflow: mark this tag (and all preceding) as applied without executing SQL")
+	skipUpgrade := fs.Bool("skip-schema-upgrade", false, "skip automatic _grizzle_migrations schema upgrade; error if columns are absent")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -263,45 +265,32 @@ func runMigrate(args []string) error {
 		return fmt.Errorf("--db <connection-string> is required")
 	}
 
-	tables, err := parseSchemaDir(*schemaDir)
-	if err != nil {
-		return err
+	opts := kit.MigrateOptions{
+		MigrationsDir:     *migrationsDir,
+		Baseline:          *baseline,
+		SkipSchemaUpgrade: *skipUpgrade,
 	}
 
 	ctx := context.Background()
 
 	switch *dialect {
 	case "mysql":
-		return runMigrateMySQL(ctx, *dsn, *dryRun, tables...)
+		return runMigrateMySQL(ctx, *dsn, opts)
 	case "sqlite":
-		return runMigrateSQLite(ctx, *dsn, *dryRun, tables...)
+		return runMigrateSQLite(ctx, *dsn, opts)
 	default:
-		return runMigratePostgres(ctx, *dsn, *dryRun, tables...)
+		return runMigratePostgres(ctx, *dsn, opts)
 	}
 }
 
-func runMigratePostgres(ctx context.Context, dsn string, dryRun bool, tables ...pg.TableDefiner) error {
+func runMigratePostgres(ctx context.Context, dsn string, opts kit.MigrateOptions) error {
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
 		return fmt.Errorf("connect: %w", err)
 	}
 	defer pool.Close()
 
-	if dryRun {
-		result, err := kit.DryRun(ctx, pool, tables...)
-		if err != nil {
-			return err
-		}
-		if len(result.SQL) == 0 {
-			fmt.Println("-- Already current, nothing to apply.")
-			return nil
-		}
-		fmt.Println(strings.Join(result.SQL, ";\n") + ";")
-		log.Printf("(dry-run) %d change(s), %d statement(s)", len(result.Changes), len(result.SQL))
-		return nil
-	}
-
-	result, err := kit.Migrate(ctx, pool, tables...)
+	result, err := kit.Migrate(ctx, pool, opts)
 	if err != nil {
 		return err
 	}
@@ -309,33 +298,29 @@ func runMigratePostgres(ctx context.Context, dsn string, dryRun bool, tables ...
 		log.Println("already current — nothing to apply")
 		return nil
 	}
-	log.Printf("applied %d change(s) in %d statement(s) [checksum: %s]",
-		len(result.Changes), len(result.SQL), result.Checksum[:8])
+	if len(result.Baselined) > 0 {
+		log.Printf("baselined %d migration(s)", len(result.Baselined))
+		for _, f := range result.Baselined {
+			log.Printf("  baselined: %s", f.FileName)
+		}
+	}
+	if len(result.Applied) > 0 {
+		log.Printf("applied %d migration(s)", len(result.Applied))
+		for _, f := range result.Applied {
+			log.Printf("  applied: %s", f.FileName)
+		}
+	}
 	return nil
 }
 
-func runMigrateMySQL(ctx context.Context, dsn string, dryRun bool, tables ...pg.TableDefiner) error {
+func runMigrateMySQL(ctx context.Context, dsn string, opts kit.MigrateOptions) error {
 	db, err := openMySQL(dsn)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = db.Close() }()
 
-	if dryRun {
-		result, err := kit.DryRunMySQL(ctx, db, tables...)
-		if err != nil {
-			return err
-		}
-		if len(result.SQL) == 0 {
-			fmt.Println("-- Already current, nothing to apply.")
-			return nil
-		}
-		fmt.Println(strings.Join(result.SQL, ";\n") + ";")
-		log.Printf("(dry-run) %d change(s), %d statement(s)", len(result.Changes), len(result.SQL))
-		return nil
-	}
-
-	result, err := kit.MigrateMySQL(ctx, db, tables...)
+	result, err := kit.MigrateMySQL(ctx, db, opts)
 	if err != nil {
 		return err
 	}
@@ -343,33 +328,29 @@ func runMigrateMySQL(ctx context.Context, dsn string, dryRun bool, tables ...pg.
 		log.Println("already current — nothing to apply")
 		return nil
 	}
-	log.Printf("applied %d change(s) in %d statement(s) [checksum: %s]",
-		len(result.Changes), len(result.SQL), result.Checksum[:8])
+	if len(result.Baselined) > 0 {
+		log.Printf("baselined %d migration(s)", len(result.Baselined))
+		for _, f := range result.Baselined {
+			log.Printf("  baselined: %s", f.FileName)
+		}
+	}
+	if len(result.Applied) > 0 {
+		log.Printf("applied %d migration(s)", len(result.Applied))
+		for _, f := range result.Applied {
+			log.Printf("  applied: %s", f.FileName)
+		}
+	}
 	return nil
 }
 
-func runMigrateSQLite(ctx context.Context, dsn string, dryRun bool, tables ...pg.TableDefiner) error {
+func runMigrateSQLite(ctx context.Context, dsn string, opts kit.MigrateOptions) error {
 	db, err := sql.Open("sqlite3", dsn)
 	if err != nil {
 		return fmt.Errorf("open sqlite3: %w", err)
 	}
 	defer func() { _ = db.Close() }()
 
-	if dryRun {
-		result, err := kit.DryRunSQLite(ctx, db, tables...)
-		if err != nil {
-			return err
-		}
-		if len(result.SQL) == 0 {
-			fmt.Println("-- Already current, nothing to apply.")
-			return nil
-		}
-		fmt.Println(strings.Join(result.SQL, ";\n") + ";")
-		log.Printf("(dry-run) %d change(s), %d statement(s)", len(result.Changes), len(result.SQL))
-		return nil
-	}
-
-	result, err := kit.MigrateSQLite(ctx, db, tables...)
+	result, err := kit.MigrateSQLite(ctx, db, opts)
 	if err != nil {
 		return err
 	}
@@ -377,17 +358,28 @@ func runMigrateSQLite(ctx context.Context, dsn string, dryRun bool, tables ...pg
 		log.Println("already current — nothing to apply")
 		return nil
 	}
-	log.Printf("applied %d change(s) in %d statement(s) [checksum: %s]",
-		len(result.Changes), len(result.SQL), result.Checksum[:8])
+	if len(result.Baselined) > 0 {
+		log.Printf("baselined %d migration(s)", len(result.Baselined))
+		for _, f := range result.Baselined {
+			log.Printf("  baselined: %s", f.FileName)
+		}
+	}
+	if len(result.Applied) > 0 {
+		log.Printf("applied %d migration(s)", len(result.Applied))
+		for _, f := range result.Applied {
+			log.Printf("  applied: %s", f.FileName)
+		}
+	}
 	return nil
 }
 
-// runStatus shows migration history and any pending changes.
+// runStatus shows migration history and any pending migration files.
 func runStatus(args []string) error {
 	fs := flag.NewFlagSet("status", flag.ExitOnError)
-	schemaDir := fs.String("schema", ".", "directory containing schema Go files")
+	migrationsDir := fs.String("migrations", "./migrations", "directory containing .sql migration files")
 	dsn := fs.String("db", "", "database connection string (required)")
 	dialect := fs.String("dialect", "postgres", "target dialect: postgres or mysql or sqlite")
+	skipUpgrade := fs.Bool("skip-schema-upgrade", false, "skip automatic _grizzle_migrations schema upgrade")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -395,9 +387,9 @@ func runStatus(args []string) error {
 		return fmt.Errorf("--db <connection-string> is required")
 	}
 
-	tables, err := parseSchemaDir(*schemaDir)
-	if err != nil {
-		return err
+	opts := kit.MigrateOptions{
+		MigrationsDir:     *migrationsDir,
+		SkipSchemaUpgrade: *skipUpgrade,
 	}
 
 	ctx := context.Background()
@@ -410,7 +402,7 @@ func runStatus(args []string) error {
 			return err
 		}
 		defer func() { _ = db.Close() }()
-		status, err = kit.StatusMySQL(ctx, db, tables...)
+		status, err = kit.StatusMySQL(ctx, db, opts)
 		if err != nil {
 			return err
 		}
@@ -420,7 +412,7 @@ func runStatus(args []string) error {
 			return fmt.Errorf("open sqlite3: %w", err)
 		}
 		defer func() { _ = db.Close() }()
-		status, err = kit.StatusSQLite(ctx, db, tables...)
+		status, err = kit.StatusSQLite(ctx, db, opts)
 		if err != nil {
 			return err
 		}
@@ -430,7 +422,7 @@ func runStatus(args []string) error {
 			return fmt.Errorf("connect: %w", err)
 		}
 		defer pool.Close()
-		status, err = kit.Status(ctx, pool, tables...)
+		status, err = kit.Status(ctx, pool, opts)
 		if err != nil {
 			return err
 		}
@@ -441,20 +433,36 @@ func runStatus(args []string) error {
 	} else {
 		fmt.Printf("Applied migrations (%d):\n", len(status.Applied))
 		for _, r := range status.Applied {
-			fmt.Printf("  [%s] %s  (checksum: %s)\n",
-				r.AppliedAt.Format("2006-01-02 15:04:05Z"), r.Description, r.Checksum[:8])
+			baselineMarker := ""
+			if r.IsBaseline {
+				baselineMarker = " [baseline]"
+			}
+			tagDisplay := r.Tag
+			if tagDisplay == "" {
+				tagDisplay = "(legacy)"
+			}
+			fmt.Printf("  [%s] %s%s  (checksum: %s)\n",
+				r.AppliedAt.Format("2006-01-02 15:04:05Z"), tagDisplay, baselineMarker, truncate(r.Checksum, 8))
 		}
 	}
 
 	if len(status.Pending) == 0 {
-		fmt.Println("\nSchema is current — no pending changes.")
+		fmt.Println("\nSchema is current — no pending migrations.")
 	} else {
-		fmt.Printf("\nPending changes (%d):\n", len(status.Pending))
-		for _, s := range status.SQL {
-			fmt.Printf("  %s\n", s)
+		fmt.Printf("\nPending migrations (%d):\n", len(status.Pending))
+		for _, f := range status.Pending {
+			fmt.Printf("  %s\n", f.FileName)
 		}
 	}
 	return nil
+}
+
+// truncate returns at most n characters from s.
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n]
 }
 
 // openMySQL opens a *sql.DB for MySQL, ensuring parseTime=true is set so
@@ -512,8 +520,8 @@ Commands:
   sql       Print CREATE TABLE SQL for a schema (fresh DB init)
   snapshot  Write schema to a JSON snapshot file
   diff      Compare schema against snapshot, print migration SQL
-  migrate   Apply schema changes to a live DB and record history
-  status    Show applied migrations and pending changes
+  migrate   Apply pending .sql migration files to a live DB and record history
+  status    Show applied migrations and pending .sql files
 
 gen flags:
   --schema <dir>    Directory containing schema Go files (default: .)
@@ -530,11 +538,20 @@ snapshot flags:
   --schema <dir>    Directory containing schema Go files (default: .)
   --out <file>      Output snapshot path (default: schema.snapshot.json)
 
-migrate / status flags:
-  --schema <dir>      Directory containing schema Go files (default: .)
-  --db <dsn>          Database connection string (required)
-  --dialect <dialect> Target SQL dialect: postgres (default), mysql, or sqlite
-  --dry-run           (migrate only) Print SQL without applying it
+migrate flags:
+  --migrations <dir>       Directory containing .sql migration files (default: ./migrations)
+  --db <dsn>               Database connection string (required)
+  --dialect <dialect>      Target SQL dialect: postgres (default), mysql, or sqlite
+  --baseline <tag>         Bootstrap file-based workflow: mark this tag (and all with
+                           lower sequence numbers) as applied without executing SQL
+  --skip-schema-upgrade    Skip automatic _grizzle_migrations schema upgrade;
+                           returns error if tag/is_baseline columns are absent
+
+status flags:
+  --migrations <dir>       Directory containing .sql migration files (default: ./migrations)
+  --db <dsn>               Database connection string (required)
+  --dialect <dialect>      Target SQL dialect: postgres (default), mysql, or sqlite
+  --skip-schema-upgrade    Skip automatic _grizzle_migrations schema upgrade
 
 Examples:
   grizzle gen --schema ./db/schema --out ./db/schema --package schema
@@ -543,10 +560,10 @@ Examples:
   grizzle snapshot --schema ./db/schema --out ./db/schema.snapshot.json
   grizzle diff --schema ./db/schema --snapshot ./db/schema.snapshot.json
   grizzle diff --schema ./db/schema --dialect mysql
-  grizzle migrate --schema ./db/schema --db "postgres://user:pass@localhost/mydb"
-  grizzle migrate --schema ./db/schema --db "postgres://..." --dry-run
-  grizzle migrate --schema ./db/schema --db "user:pass@tcp(localhost:3306)/mydb" --dialect mysql
-  grizzle status  --schema ./db/schema --db "postgres://user:pass@localhost/mydb"
-  grizzle status  --schema ./db/schema --db "user:pass@tcp(localhost:3306)/mydb" --dialect mysql
+  grizzle migrate --migrations ./db/migrations --db "postgres://user:pass@localhost/mydb"
+  grizzle migrate --migrations ./db/migrations --db "user:pass@tcp(localhost:3306)/mydb" --dialect mysql
+  grizzle migrate --migrations ./db/migrations --db "postgres://..." --baseline 0001_initial_schema
+  grizzle status  --migrations ./db/migrations --db "postgres://user:pass@localhost/mydb"
+  grizzle status  --migrations ./db/migrations --db "user:pass@tcp(localhost:3306)/mydb" --dialect mysql
 `)
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -20,16 +21,18 @@ import (
 //
 //	import _ "github.com/mattn/go-sqlite3"
 //	db, _ := sql.Open("sqlite3", "./mydb.sqlite?_foreign_keys=on")
-//	result, err := kit.MigrateSQLite(ctx, db, schema.Users, schema.Realms)
+//	result, err := kit.MigrateSQLite(ctx, db, kit.MigrateOptions{MigrationsDir: "./migrations"})
 // ---------------------------------------------------------------------------
 
 const createMigrationsTableSQLite = `
 CREATE TABLE IF NOT EXISTS ` + MigrationsTable + ` (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    applied_at  TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-    checksum    TEXT    NOT NULL,
-    sql_batch   TEXT    NOT NULL,
-    description TEXT    NOT NULL DEFAULT ''
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    applied_at   TEXT     NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    tag          TEXT     NOT NULL DEFAULT '',
+    checksum     TEXT     NOT NULL DEFAULT '',
+    sql_batch    TEXT     NOT NULL DEFAULT '',
+    description  TEXT     NOT NULL DEFAULT '',
+    is_baseline  INTEGER  NOT NULL DEFAULT 0
 )`
 
 // PushSQLite inspects the live SQLite database, diffs it against the provided
@@ -71,93 +74,260 @@ func DryRunSQLite(ctx context.Context, db *sql.DB, tables ...pg.TableDefiner) (P
 	return PushResult{Changes: changes, SQL: stmts}, nil
 }
 
-// MigrateSQLite is like PushSQLite but records the applied SQL in the
-// _grizzle_migrations history table.
-// It accepts tables from any dialect via the TableDefiner interface.
-func MigrateSQLite(ctx context.Context, db *sql.DB, tables ...pg.TableDefiner) (MigrateResult, error) {
-	if err := ensureMigrationsTableSQLite(ctx, db); err != nil {
+// MigrateSQLite reads pending .sql files from opts.MigrationsDir and applies
+// them in sequence order, recording each in _grizzle_migrations.
+// It accepts a *sql.DB connected to a SQLite database.
+func MigrateSQLite(ctx context.Context, db *sql.DB, opts MigrateOptions) (MigrateResult, error) {
+	if opts.MigrationsDir == "" {
+		return MigrateResult{}, fmt.Errorf("MigrateOptions.MigrationsDir must be set")
+	}
+
+	if opts.Baseline != "" {
+		if err := ValidateTag(opts.Baseline); err != nil {
+			return MigrateResult{}, fmt.Errorf("--baseline: %w", err)
+		}
+	}
+
+	if err := ensureMigrationsTableSQLite(ctx, db, opts.SkipSchemaUpgrade); err != nil {
 		return MigrateResult{}, err
 	}
 
-	live, err := introspect.IntrospectSQLite(ctx, db)
+	files, err := LoadMigrationFiles(opts.MigrationsDir)
 	if err != nil {
-		return MigrateResult{}, fmt.Errorf("introspect: %w", err)
+		return MigrateResult{}, err
 	}
-	current := liveToSnapshot(live)
-	target := FromDefs(tables...)
-	changes := SQLiteApplyableChanges(Diff(current, target))
 
-	if len(changes) == 0 {
+	if len(files) == 0 {
 		return MigrateResult{AlreadyCurrent: true}, nil
 	}
 
-	stmts := AllChangeSQLSQLite(target, changes)
-	checksum := ChecksumSQL(stmts)
-	desc := DescribeChanges(changes)
-
-	if err := applyWithHistorySQLite(ctx, db, stmts, checksum, desc); err != nil {
-		return MigrateResult{Changes: changes, SQL: stmts, Checksum: checksum},
-			fmt.Errorf("apply: %w", err)
+	applied, err := loadAppliedTagsSQLite(ctx, db)
+	if err != nil {
+		return MigrateResult{}, err
 	}
-	return MigrateResult{Changes: changes, SQL: stmts, Checksum: checksum}, nil
+
+	var result MigrateResult
+
+	if opts.Baseline != "" {
+		baselineSeq, err := parseSequenceNumber(opts.Baseline)
+		if err != nil {
+			return MigrateResult{}, fmt.Errorf("--baseline %q: %w", opts.Baseline, err)
+		}
+		found := false
+		for _, f := range files {
+			if f.Tag == opts.Baseline {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return MigrateResult{}, fmt.Errorf("--baseline %q does not correspond to any file in %s", opts.Baseline, opts.MigrationsDir)
+		}
+
+		var toBaseline []MigrationFile
+		for _, f := range files {
+			if f.SeqNum <= baselineSeq && !applied[f.Tag] {
+				toBaseline = append(toBaseline, f)
+			}
+		}
+
+		if len(toBaseline) > 0 {
+			if err := insertBaselineSQLite(ctx, db, toBaseline); err != nil {
+				return MigrateResult{}, fmt.Errorf("baseline: %w", err)
+			}
+			result.Baselined = toBaseline
+			for _, f := range toBaseline {
+				cs, _ := ChecksumFile(f.Path)
+				fmt.Fprintf(os.Stderr, "grizzle: baseline %s  sha256:%s\n", f.FileName, cs)
+			}
+			for _, f := range toBaseline {
+				applied[f.Tag] = true
+			}
+		}
+	}
+
+	var toApply []MigrationFile
+	for _, f := range files {
+		if !applied[f.Tag] {
+			if opts.Baseline != "" {
+				baselineSeq, _ := parseSequenceNumber(opts.Baseline)
+				if f.SeqNum <= baselineSeq {
+					continue
+				}
+			}
+			toApply = append(toApply, f)
+		}
+	}
+
+	if len(toApply) == 0 {
+		if len(result.Baselined) == 0 {
+			result.AlreadyCurrent = true
+		}
+		return result, nil
+	}
+
+	for _, f := range toApply {
+		data, err := os.ReadFile(f.Path)
+		if err != nil {
+			return result, fmt.Errorf("read %s: %w", f.FileName, err)
+		}
+		cs := checksumBytes(data)
+		sqlText := string(data)
+
+		if err := applyMigrationFileSQLite(ctx, db, f.Tag, sqlText, cs); err != nil {
+			return result, fmt.Errorf("apply %s: %w", f.FileName, err)
+		}
+		result.Applied = append(result.Applied, f)
+	}
+
+	return result, nil
 }
 
-// StatusSQLite reports the applied migration history and any pending changes
-// for a SQLite database without modifying it.
-// It accepts tables from any dialect via the TableDefiner interface.
-func StatusSQLite(ctx context.Context, db *sql.DB, tables ...pg.TableDefiner) (StatusResult, error) {
-	if err := ensureMigrationsTableSQLite(ctx, db); err != nil {
+// StatusSQLite reports the applied migration history and any pending migration
+// files for a SQLite database without modifying it.
+func StatusSQLite(ctx context.Context, db *sql.DB, opts MigrateOptions) (StatusResult, error) {
+	if opts.MigrationsDir == "" {
+		return StatusResult{}, fmt.Errorf("MigrateOptions.MigrationsDir must be set")
+	}
+
+	if err := ensureMigrationsTableSQLite(ctx, db, opts.SkipSchemaUpgrade); err != nil {
 		return StatusResult{}, err
 	}
 
-	applied, err := loadHistorySQLite(ctx, db)
+	history, err := LoadHistorySQLite(ctx, db)
 	if err != nil {
 		return StatusResult{}, err
 	}
 
-	live, err := introspect.IntrospectSQLite(ctx, db)
+	files, err := LoadMigrationFiles(opts.MigrationsDir)
 	if err != nil {
-		return StatusResult{}, fmt.Errorf("introspect: %w", err)
+		return StatusResult{}, err
 	}
-	current := liveToSnapshot(live)
-	target := FromDefs(tables...)
-	changes := SQLiteApplyableChanges(Diff(current, target))
-	stmts := AllChangeSQLSQLite(target, changes)
 
-	return StatusResult{Applied: applied, Pending: changes, SQL: stmts}, nil
+	appliedSet := make(map[string]bool, len(history))
+	for _, r := range history {
+		if r.Tag != "" {
+			appliedSet[r.Tag] = true
+		}
+	}
+
+	var pending []MigrationFile
+	for _, f := range files {
+		if !appliedSet[f.Tag] {
+			pending = append(pending, f)
+		}
+	}
+
+	return StatusResult{Applied: history, Pending: pending}, nil
+}
+
+// LoadHistorySQLite returns all rows from _grizzle_migrations for SQLite.
+func LoadHistorySQLite(ctx context.Context, db *sql.DB) ([]MigrationRecord, error) {
+	if err := ensureMigrationsTableSQLite(ctx, db, false); err != nil {
+		return nil, err
+	}
+	return loadHistorySQLite(ctx, db)
 }
 
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-func ensureMigrationsTableSQLite(ctx context.Context, db *sql.DB) error {
+func ensureMigrationsTableSQLite(ctx context.Context, db *sql.DB, skipUpgrade bool) error {
 	if _, err := db.ExecContext(ctx, createMigrationsTableSQLite); err != nil {
 		return fmt.Errorf("ensure migrations table: %w", err)
+	}
+
+	if skipUpgrade {
+		return verifyColumnsSQLite(ctx, db)
+	}
+	return upgradeSchemaSQLite(ctx, db)
+}
+
+// upgradeSchemaSQLite adds tag and is_baseline columns if absent.
+// SQLite does not support ADD COLUMN IF NOT EXISTS, so we check via PRAGMA.
+func upgradeSchemaSQLite(ctx context.Context, db *sql.DB) error {
+	existing, err := columnExistenceSQLite(ctx, db)
+	if err != nil {
+		return err
+	}
+
+	if !existing["tag"] {
+		const q = `ALTER TABLE ` + MigrationsTable + ` ADD COLUMN tag TEXT NOT NULL DEFAULT ''`
+		if _, err := db.ExecContext(ctx, q); err != nil {
+			return fmt.Errorf("add tag column: %w", err)
+		}
+	}
+	if !existing["is_baseline"] {
+		const q = `ALTER TABLE ` + MigrationsTable + ` ADD COLUMN is_baseline INTEGER NOT NULL DEFAULT 0`
+		if _, err := db.ExecContext(ctx, q); err != nil {
+			return fmt.Errorf("add is_baseline column: %w", err)
+		}
 	}
 	return nil
 }
 
-func applyWithHistorySQLite(ctx context.Context, db *sql.DB, stmts []string, checksum, desc string) error {
+func verifyColumnsSQLite(ctx context.Context, db *sql.DB) error {
+	existing, err := columnExistenceSQLite(ctx, db)
+	if err != nil {
+		return err
+	}
+	if !existing["tag"] || !existing["is_baseline"] {
+		return fmt.Errorf("_grizzle_migrations is missing required columns (tag, is_baseline); run without --skip-schema-upgrade to upgrade automatically")
+	}
+	return nil
+}
+
+// columnExistenceSQLite checks which columns exist in _grizzle_migrations
+// using PRAGMA table_info.
+func columnExistenceSQLite(ctx context.Context, db *sql.DB) (map[string]bool, error) {
+	rows, err := db.QueryContext(ctx, `PRAGMA table_info("`+MigrationsTable+`")`)
+	if err != nil {
+		return nil, fmt.Errorf("pragma table_info: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	result := make(map[string]bool)
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull int
+		var dflt sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &dflt, &pk); err != nil {
+			return nil, err
+		}
+		result[name] = true
+	}
+	return result, rows.Err()
+}
+
+// applyMigrationFileSQLite executes a migration file and records it in SQLite.
+func applyMigrationFileSQLite(ctx context.Context, db *sql.DB, tag, sqlText, checksum string) error {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
 	}
 
+	stmts := splitSQLStatements(sqlText)
 	for _, stmt := range stmts {
+		stmt = strings.TrimSpace(stmt)
+		if stmt == "" {
+			continue
+		}
 		// Skip comment-only statements (ALTER COLUMN stubs).
-		if strings.HasPrefix(strings.TrimSpace(stmt), "--") {
+		if strings.HasPrefix(stmt, "--") {
 			continue
 		}
 		if _, err := tx.ExecContext(ctx, stmt); err != nil {
 			_ = tx.Rollback()
-			return fmt.Errorf("exec %q: %w", stmt, err)
+			return fmt.Errorf("exec statement: %w", err)
 		}
 	}
 
 	const insertSQL = `INSERT INTO ` + MigrationsTable +
-		` (checksum, sql_batch, description) VALUES (?, ?, ?)`
-	if _, err := tx.ExecContext(ctx, insertSQL, checksum, strings.Join(stmts, "\n"), desc); err != nil {
+		` (tag, checksum, sql_batch, is_baseline) VALUES (?, ?, ?, 0)`
+	if _, err := tx.ExecContext(ctx, insertSQL, tag, checksum, sqlText); err != nil {
 		_ = tx.Rollback()
 		return fmt.Errorf("record migration: %w", err)
 	}
@@ -165,8 +335,52 @@ func applyWithHistorySQLite(ctx context.Context, db *sql.DB, stmts []string, che
 	return tx.Commit()
 }
 
+// insertBaselineSQLite inserts baseline records in a single transaction.
+func insertBaselineSQLite(ctx context.Context, db *sql.DB, files []MigrationFile) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+
+	const insertSQL = `INSERT INTO ` + MigrationsTable +
+		` (tag, checksum, sql_batch, is_baseline) VALUES (?, ?, '', 1)`
+
+	for _, f := range files {
+		cs, err := ChecksumFile(f.Path)
+		if err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, insertSQL, f.Tag, cs); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("insert baseline record for %s: %w", f.Tag, err)
+		}
+	}
+
+	return tx.Commit()
+}
+
+func loadAppliedTagsSQLite(ctx context.Context, db *sql.DB) (map[string]bool, error) {
+	const q = `SELECT tag FROM ` + MigrationsTable + ` WHERE tag != ''`
+	rows, err := db.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("load applied tags: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	tags := make(map[string]bool)
+	for rows.Next() {
+		var tag string
+		if err := rows.Scan(&tag); err != nil {
+			return nil, fmt.Errorf("scan tag: %w", err)
+		}
+		tags[tag] = true
+	}
+	return tags, rows.Err()
+}
+
 func loadHistorySQLite(ctx context.Context, db *sql.DB) ([]MigrationRecord, error) {
-	const q = `SELECT id, applied_at, checksum, sql_batch, description
+	const q = `SELECT id, applied_at, tag, checksum, sql_batch, description, is_baseline
 	           FROM ` + MigrationsTable + ` ORDER BY id ASC`
 
 	rows, err := db.QueryContext(ctx, q)
@@ -178,17 +392,17 @@ func loadHistorySQLite(ctx context.Context, db *sql.DB) ([]MigrationRecord, erro
 	var records []MigrationRecord
 	for rows.Next() {
 		var r MigrationRecord
-		// applied_at is stored as ISO8601 text; scan into string, parse manually.
 		var appliedAt string
-		if err := rows.Scan(&r.ID, &appliedAt, &r.Checksum, &r.SQLBatch, &r.Description); err != nil {
+		var isBaselineInt int
+		if err := rows.Scan(&r.ID, &appliedAt, &r.Tag, &r.Checksum, &r.SQLBatch, &r.Description, &isBaselineInt); err != nil {
 			return nil, fmt.Errorf("scan history row: %w", err)
 		}
-		// Parse flexible SQLite timestamp formats.
 		ts, err := parseSQLiteTime(appliedAt)
 		if err != nil {
 			return nil, fmt.Errorf("parse applied_at %q: %w", appliedAt, err)
 		}
 		r.AppliedAt = ts
+		r.IsBaseline = isBaselineInt != 0
 		records = append(records, r)
 	}
 	return records, rows.Err()

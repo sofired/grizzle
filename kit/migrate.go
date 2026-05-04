@@ -4,13 +4,12 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/sofired/grizzle/kit/introspect"
-	pg "github.com/sofired/grizzle/schema/pg"
 )
 
 // MigrationsTable is the name of the history table Grizzle creates to track
@@ -19,150 +18,306 @@ const MigrationsTable = "_grizzle_migrations"
 
 // MigrationRecord is a row in the history table.
 type MigrationRecord struct {
-	ID          int64     `db:"id"`
-	AppliedAt   time.Time `db:"applied_at"`
-	Checksum    string    `db:"checksum"`    // SHA-256 hex of the SQL batch
-	SQLBatch    string    `db:"sql_batch"`   // full SQL that was applied
-	Description string    `db:"description"` // human-readable summary of changes
+	ID         int64     `db:"id"`
+	AppliedAt  time.Time `db:"applied_at"`
+	Tag        string    `db:"tag"`        // migration filename stem (e.g. "0001_initial_schema"); empty for old checksum-based rows
+	Checksum   string    `db:"checksum"`   // SHA-256 hex of the file bytes (file-based) or SQL batch (legacy)
+	SQLBatch   string    `db:"sql_batch"`  // full SQL that was applied; empty for baseline rows
+	IsBaseline bool      `db:"is_baseline"` // true for rows inserted by --baseline (no SQL executed)
+	Description string   `db:"description"` // human-readable summary of changes
 }
 
 // MigrateResult contains the outcome of a Migrate call.
 type MigrateResult struct {
 	AlreadyCurrent bool // true when no changes were needed
-	Changes        []Change
-	SQL            []string
-	Checksum       string
+	Applied        []MigrationFile
+	Baselined      []MigrationFile
 }
 
 // StatusResult is returned by Status — it shows what is recorded vs. what
 // the live schema looks like.
 type StatusResult struct {
 	Applied []MigrationRecord // rows in _grizzle_migrations (oldest first)
-	Pending []Change          // changes not yet applied
-	SQL     []string          // SQL that would apply the pending changes
+	Pending []MigrationFile   // migration files not yet applied
 }
 
 // -------------------------------------------------------------------
 // Public API
 // -------------------------------------------------------------------
 
-// Migrate is like Push but records the applied SQL in the _grizzle_migrations
-// history table. Calling Migrate twice with an unchanged schema is a no-op.
-// It accepts tables from any dialect via the TableDefiner interface.
+// Migrate reads pending .sql files from opts.MigrationsDir and applies them
+// in sequence order, recording each in _grizzle_migrations. Calling Migrate
+// twice is idempotent — files already recorded by tag are skipped.
 //
-// Note: if the diff includes enum value additions (ChangeAlterEnum), the generated
-// ALTER TYPE ... ADD VALUE statements cannot run inside a transaction on PostgreSQL < 12.
-// On PG 9.x–11.x, apply those statements outside a transaction or upgrade to PG 12+.
+// If opts.Baseline is non-empty, migration files up to and including the named
+// tag are inserted as baseline records (is_baseline = TRUE, sql_batch = '') in
+// a single transaction without executing their SQL.
 //
-//	result, err := kit.Migrate(ctx, pool, schema.Users, schema.Realms)
-func Migrate(ctx context.Context, pool *pgxpool.Pool, tables ...pg.TableDefiner) (MigrateResult, error) {
-	if err := ensureMigrationsTable(ctx, pool); err != nil {
+// Example:
+//
+//	result, err := kit.Migrate(ctx, pool, kit.MigrateOptions{
+//	    MigrationsDir: "./migrations",
+//	})
+func Migrate(ctx context.Context, pool *pgxpool.Pool, opts MigrateOptions) (MigrateResult, error) {
+	if opts.MigrationsDir == "" {
+		return MigrateResult{}, fmt.Errorf("MigrateOptions.MigrationsDir must be set")
+	}
+
+	// Validate baseline tag format before any DB operation.
+	if opts.Baseline != "" {
+		if err := ValidateTag(opts.Baseline); err != nil {
+			return MigrateResult{}, fmt.Errorf("--baseline: %w", err)
+		}
+	}
+
+	// Ensure the migrations table exists and is upgraded.
+	if err := ensureMigrationsTable(ctx, pool, opts.SkipSchemaUpgrade); err != nil {
 		return MigrateResult{}, err
 	}
 
-	live, err := introspect.IntrospectPostgres(ctx, pool)
+	// Load migration files.
+	files, err := LoadMigrationFiles(opts.MigrationsDir)
 	if err != nil {
-		return MigrateResult{}, fmt.Errorf("introspect: %w", err)
+		return MigrateResult{}, err
 	}
-	current := liveToSnapshot(live)
-	target := FromDefs(tables...)
-	changes := Diff(current, target)
 
-	if len(changes) == 0 {
+	if len(files) == 0 {
 		return MigrateResult{AlreadyCurrent: true}, nil
 	}
 
-	stmts := AllChangeSQL(target, changes)
-	checksum := ChecksumSQL(stmts)
-	desc := DescribeChanges(changes)
-
-	if err := applyWithHistory(ctx, pool, stmts, checksum, desc); err != nil {
-		return MigrateResult{Changes: changes, SQL: stmts, Checksum: checksum},
-			fmt.Errorf("apply: %w", err)
+	// Load already-applied tags.
+	applied, err := loadAppliedTags(ctx, pool)
+	if err != nil {
+		return MigrateResult{}, err
 	}
-	return MigrateResult{Changes: changes, SQL: stmts, Checksum: checksum}, nil
+
+	var result MigrateResult
+
+	// Handle baseline mode.
+	if opts.Baseline != "" {
+		baselineSeq, err := parseSequenceNumber(opts.Baseline)
+		if err != nil {
+			return MigrateResult{}, fmt.Errorf("--baseline %q: %w", opts.Baseline, err)
+		}
+		// Check the baseline tag corresponds to an actual file.
+		found := false
+		for _, f := range files {
+			if f.Tag == opts.Baseline {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return MigrateResult{}, fmt.Errorf("--baseline %q does not correspond to any file in %s", opts.Baseline, opts.MigrationsDir)
+		}
+
+		// Collect files to baseline: all files with seqNum <= baselineSeq that
+		// are not already applied.
+		var toBaseline []MigrationFile
+		for _, f := range files {
+			if f.SeqNum <= baselineSeq && !applied[f.Tag] {
+				toBaseline = append(toBaseline, f)
+			}
+		}
+
+		if len(toBaseline) > 0 {
+			if err := insertBaselinePostgres(ctx, pool, toBaseline); err != nil {
+				return MigrateResult{}, fmt.Errorf("baseline: %w", err)
+			}
+			result.Baselined = toBaseline
+			// Log to stderr per spec.
+			for _, f := range toBaseline {
+				cs, _ := ChecksumFile(f.Path)
+				fmt.Fprintf(os.Stderr, "grizzle: baseline %s  sha256:%s\n", f.FileName, cs)
+			}
+			// Mark them as applied for the next step.
+			for _, f := range toBaseline {
+				applied[f.Tag] = true
+			}
+		}
+	}
+
+	// Apply pending files (seqNum > baselineSeq, or all if no baseline).
+	var toApply []MigrationFile
+	for _, f := range files {
+		if !applied[f.Tag] {
+			if opts.Baseline != "" {
+				// Only apply files beyond the baseline.
+				baselineSeq, _ := parseSequenceNumber(opts.Baseline)
+				if f.SeqNum <= baselineSeq {
+					continue
+				}
+			}
+			toApply = append(toApply, f)
+		}
+	}
+
+	if len(toApply) == 0 {
+		if len(result.Baselined) == 0 {
+			result.AlreadyCurrent = true
+		}
+		return result, nil
+	}
+
+	// Apply each file in order.
+	for _, f := range toApply {
+		data, err := os.ReadFile(f.Path)
+		if err != nil {
+			return result, fmt.Errorf("read %s: %w", f.FileName, err)
+		}
+		cs := checksumBytes(data)
+		sql := string(data)
+
+		if err := applyMigrationFilePostgres(ctx, pool, f.Tag, sql, cs); err != nil {
+			return result, fmt.Errorf("apply %s: %w", f.FileName, err)
+		}
+		result.Applied = append(result.Applied, f)
+	}
+
+	return result, nil
 }
 
-// Status reports the applied migration history and any pending changes without
-// modifying the database.
-// It accepts tables from any dialect via the TableDefiner interface.
+// Status reports the applied migration history and any pending migration files
+// without modifying the database.
 //
-//	status, err := kit.Status(ctx, pool, schema.Users, schema.Realms)
-//	for _, r := range status.Applied {
-//	    fmt.Printf("[%s] %s\n", r.AppliedAt.Format(time.RFC3339), r.Description)
-//	}
-//	if len(status.Pending) > 0 {
-//	    fmt.Println("Pending changes:", len(status.Pending))
-//	}
-func Status(ctx context.Context, pool *pgxpool.Pool, tables ...pg.TableDefiner) (StatusResult, error) {
-	if err := ensureMigrationsTable(ctx, pool); err != nil {
+//	status, err := kit.Status(ctx, pool, kit.MigrateOptions{MigrationsDir: "./migrations"})
+func Status(ctx context.Context, pool *pgxpool.Pool, opts MigrateOptions) (StatusResult, error) {
+	if opts.MigrationsDir == "" {
+		return StatusResult{}, fmt.Errorf("MigrateOptions.MigrationsDir must be set")
+	}
+
+	if err := ensureMigrationsTable(ctx, pool, opts.SkipSchemaUpgrade); err != nil {
 		return StatusResult{}, err
 	}
 
-	applied, err := loadHistory(ctx, pool)
+	history, err := LoadHistory(ctx, pool)
 	if err != nil {
 		return StatusResult{}, err
 	}
 
-	live, err := introspect.IntrospectPostgres(ctx, pool)
+	files, err := LoadMigrationFiles(opts.MigrationsDir)
 	if err != nil {
-		return StatusResult{}, fmt.Errorf("introspect: %w", err)
+		return StatusResult{}, err
 	}
-	current := liveToSnapshot(live)
-	target := FromDefs(tables...)
-	changes := Diff(current, target)
-	stmts := AllChangeSQL(target, changes)
 
-	return StatusResult{Applied: applied, Pending: changes, SQL: stmts}, nil
+	applied := make(map[string]bool, len(history))
+	for _, r := range history {
+		if r.Tag != "" {
+			applied[r.Tag] = true
+		}
+	}
+
+	var pending []MigrationFile
+	for _, f := range files {
+		if !applied[f.Tag] {
+			pending = append(pending, f)
+		}
+	}
+
+	return StatusResult{Applied: history, Pending: pending}, nil
 }
 
 // LoadHistory returns all rows from _grizzle_migrations in chronological order.
 // Returns an empty slice (not an error) if the table does not exist yet.
 func LoadHistory(ctx context.Context, pool *pgxpool.Pool) ([]MigrationRecord, error) {
-	if err := ensureMigrationsTable(ctx, pool); err != nil {
+	if err := ensureMigrationsTable(ctx, pool, false); err != nil {
 		return nil, err
 	}
 	return loadHistory(ctx, pool)
 }
 
 // -------------------------------------------------------------------
-// Internal helpers
+// Internal helpers — PostgreSQL
 // -------------------------------------------------------------------
 
+// createMigrationsTableSQL creates the history table with the target schema
+// (tag + is_baseline columns included from the start).
 const createMigrationsTableSQL = `
 CREATE TABLE IF NOT EXISTS ` + MigrationsTable + ` (
-    id          BIGSERIAL    PRIMARY KEY,
-    applied_at  TIMESTAMPTZ  NOT NULL DEFAULT now(),
-    checksum    TEXT         NOT NULL,
-    sql_batch   TEXT         NOT NULL,
-    description TEXT         NOT NULL DEFAULT ''
+    id           BIGSERIAL    PRIMARY KEY,
+    applied_at   TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    tag          TEXT         NOT NULL DEFAULT '',
+    checksum     TEXT         NOT NULL DEFAULT '',
+    sql_batch    TEXT         NOT NULL DEFAULT '',
+    description  TEXT         NOT NULL DEFAULT '',
+    is_baseline  BOOLEAN      NOT NULL DEFAULT FALSE
 )`
 
-func ensureMigrationsTable(ctx context.Context, pool *pgxpool.Pool) error {
+func ensureMigrationsTable(ctx context.Context, pool *pgxpool.Pool, skipUpgrade bool) error {
+	// Create table if it doesn't exist (uses target schema).
 	if _, err := pool.Exec(ctx, createMigrationsTableSQL); err != nil {
 		return fmt.Errorf("ensure migrations table: %w", err)
+	}
+
+	if skipUpgrade {
+		// Verify required columns exist; error if absent.
+		if err := verifyColumnsPostgres(ctx, pool); err != nil {
+			return fmt.Errorf("--skip-schema-upgrade: %w", err)
+		}
+		return nil
+	}
+
+	// Upgrade: add tag and is_baseline if missing.
+	return upgradeSchemaPostgres(ctx, pool)
+}
+
+// upgradeSchemaPostgres adds tag and is_baseline columns if absent, and ensures
+// checksum and sql_batch have DEFAULT '' (idempotent).
+func upgradeSchemaPostgres(ctx context.Context, pool *pgxpool.Pool) error {
+	const q = `
+ALTER TABLE ` + MigrationsTable + ` ADD COLUMN IF NOT EXISTS tag TEXT NOT NULL DEFAULT '';
+ALTER TABLE ` + MigrationsTable + ` ADD COLUMN IF NOT EXISTS is_baseline BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE ` + MigrationsTable + ` ALTER COLUMN checksum SET DEFAULT '';
+ALTER TABLE ` + MigrationsTable + ` ALTER COLUMN sql_batch SET DEFAULT '';`
+
+	if _, err := pool.Exec(ctx, q); err != nil {
+		return fmt.Errorf("upgrade migrations table schema: %w", err)
 	}
 	return nil
 }
 
-// applyWithHistory runs the DDL statements and inserts a history record, all
-// in a single transaction so they succeed or fail together.
-func applyWithHistory(ctx context.Context, pool *pgxpool.Pool, stmts []string, checksum, desc string) error {
+// verifyColumnsPostgres checks that tag and is_baseline columns exist.
+func verifyColumnsPostgres(ctx context.Context, pool *pgxpool.Pool) error {
+	const q = `
+SELECT COUNT(*) FROM information_schema.columns
+WHERE table_name = $1
+  AND column_name = ANY($2)`
+
+	var count int
+	err := pool.QueryRow(ctx, q, MigrationsTable, []string{"tag", "is_baseline"}).Scan(&count)
+	if err != nil {
+		return fmt.Errorf("check column existence: %w", err)
+	}
+	if count < 2 {
+		return fmt.Errorf("_grizzle_migrations is missing required columns (tag, is_baseline); run without --skip-schema-upgrade to upgrade automatically")
+	}
+	return nil
+}
+
+// applyMigrationFilePostgres executes the SQL from a single migration file and
+// records it in the history table, all in one transaction.
+func applyMigrationFilePostgres(ctx context.Context, pool *pgxpool.Pool, tag, sql, checksum string) error {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
 	}
 
+	// Execute the migration SQL. We split on ";" to handle multi-statement files.
+	stmts := splitSQLStatements(sql)
 	for _, stmt := range stmts {
+		stmt = strings.TrimSpace(stmt)
+		if stmt == "" {
+			continue
+		}
 		if _, err := tx.Exec(ctx, stmt); err != nil {
 			_ = tx.Rollback(ctx)
-			return fmt.Errorf("exec %q: %w", stmt, err)
+			return fmt.Errorf("exec statement: %w", err)
 		}
 	}
 
 	const insertSQL = `INSERT INTO ` + MigrationsTable +
-		` (checksum, sql_batch, description) VALUES ($1, $2, $3)`
-	if _, err := tx.Exec(ctx, insertSQL, checksum, strings.Join(stmts, "\n"), desc); err != nil {
+		` (tag, checksum, sql_batch, is_baseline) VALUES ($1, $2, $3, FALSE)`
+	if _, err := tx.Exec(ctx, insertSQL, tag, checksum, sql); err != nil {
 		_ = tx.Rollback(ctx)
 		return fmt.Errorf("record migration: %w", err)
 	}
@@ -170,8 +325,55 @@ func applyWithHistory(ctx context.Context, pool *pgxpool.Pool, stmts []string, c
 	return tx.Commit(ctx)
 }
 
+// insertBaselinePostgres inserts baseline records for all files in a single
+// transaction. Each record has is_baseline = TRUE and sql_batch = ''.
+func insertBaselinePostgres(ctx context.Context, pool *pgxpool.Pool, files []MigrationFile) error {
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+
+	const insertSQL = `INSERT INTO ` + MigrationsTable +
+		` (tag, checksum, sql_batch, is_baseline) VALUES ($1, $2, '', TRUE)`
+
+	for _, f := range files {
+		cs, err := ChecksumFile(f.Path)
+		if err != nil {
+			_ = tx.Rollback(ctx)
+			return err
+		}
+		if _, err := tx.Exec(ctx, insertSQL, f.Tag, cs); err != nil {
+			_ = tx.Rollback(ctx)
+			return fmt.Errorf("insert baseline record for %s: %w", f.Tag, err)
+		}
+	}
+
+	return tx.Commit(ctx)
+}
+
+// loadAppliedTags returns a set of tag values already recorded in the history table.
+// Empty-string tags (legacy checksum-based rows) are excluded.
+func loadAppliedTags(ctx context.Context, pool *pgxpool.Pool) (map[string]bool, error) {
+	const q = `SELECT tag FROM ` + MigrationsTable + ` WHERE tag != ''`
+	rows, err := pool.Query(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("load applied tags: %w", err)
+	}
+	defer rows.Close()
+
+	tags := make(map[string]bool)
+	for rows.Next() {
+		var tag string
+		if err := rows.Scan(&tag); err != nil {
+			return nil, fmt.Errorf("scan tag: %w", err)
+		}
+		tags[tag] = true
+	}
+	return tags, rows.Err()
+}
+
 func loadHistory(ctx context.Context, pool *pgxpool.Pool) ([]MigrationRecord, error) {
-	const q = `SELECT id, applied_at, checksum, sql_batch, description
+	const q = `SELECT id, applied_at, tag, checksum, sql_batch, description, is_baseline
 	           FROM ` + MigrationsTable + ` ORDER BY id ASC`
 
 	rows, err := pool.Query(ctx, q)
@@ -183,13 +385,17 @@ func loadHistory(ctx context.Context, pool *pgxpool.Pool) ([]MigrationRecord, er
 	var records []MigrationRecord
 	for rows.Next() {
 		var r MigrationRecord
-		if err := rows.Scan(&r.ID, &r.AppliedAt, &r.Checksum, &r.SQLBatch, &r.Description); err != nil {
+		if err := rows.Scan(&r.ID, &r.AppliedAt, &r.Tag, &r.Checksum, &r.SQLBatch, &r.Description, &r.IsBaseline); err != nil {
 			return nil, fmt.Errorf("scan history row: %w", err)
 		}
 		records = append(records, r)
 	}
 	return records, rows.Err()
 }
+
+// -------------------------------------------------------------------
+// Utility helpers
+// -------------------------------------------------------------------
 
 // ChecksumSQL returns the SHA-256 hex digest of the concatenated SQL statements.
 // The checksum is order-sensitive and is stored in the migrations history table.
@@ -249,3 +455,19 @@ func DescribeChanges(changes []Change) string {
 	}
 	return strings.Join(parts, "; ")
 }
+
+// splitSQLStatements naively splits a SQL text on ";" to produce individual
+// runnable statements. Empty statements (from trailing semicolons) are omitted.
+// This is intentionally simple: migration files are expected to contain
+// well-formed DDL, not PL/pgSQL dollar-quoted blocks.
+func splitSQLStatements(sql string) []string {
+	parts := strings.Split(sql, ";")
+	result := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if s := strings.TrimSpace(p); s != "" {
+			result = append(result, s)
+		}
+	}
+	return result
+}
+

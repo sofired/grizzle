@@ -2,6 +2,7 @@ package kit_test
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -2129,5 +2130,139 @@ func TestDiff_DefaultExpr_TrulyChanged_EmitsChange(t *testing.T) {
 	alters := countKind(changes, kit.ChangeAlterColumnDefault)
 	if alters != 1 {
 		t.Errorf("expected 1 AlterColumnDefault for genuinely different defaults, got %d: %v", alters, changes)
+	}
+}
+
+// -------------------------------------------------------------------
+// Migration file utilities (LoadMigrationFiles, ValidateTag, etc.)
+// -------------------------------------------------------------------
+
+func TestValidateTag_Valid(t *testing.T) {
+	valid := []string{
+		"0001_initial_schema",
+		"0002_add-users",
+		"abc123",
+		"A-B_C",
+		"0001",
+	}
+	for _, tag := range valid {
+		if err := kit.ValidateTag(tag); err != nil {
+			t.Errorf("ValidateTag(%q) unexpected error: %v", tag, err)
+		}
+	}
+}
+
+func TestValidateTag_Invalid(t *testing.T) {
+	invalid := []string{
+		"",
+		"0001 bad",
+		"tag!",
+		"foo/bar",
+		"tag.sql",
+	}
+	for _, tag := range invalid {
+		if err := kit.ValidateTag(tag); err == nil {
+			t.Errorf("ValidateTag(%q) expected error, got nil", tag)
+		}
+	}
+}
+
+func TestLoadMigrationFiles_Order(t *testing.T) {
+	dir := t.TempDir()
+	// Write files out of order.
+	for _, name := range []string{"0003_c.sql", "0001_a.sql", "0002_b.sql"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("SELECT 1"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	files, err := kit.LoadMigrationFiles(dir)
+	if err != nil {
+		t.Fatalf("LoadMigrationFiles: %v", err)
+	}
+	if len(files) != 3 {
+		t.Fatalf("expected 3 files, got %d", len(files))
+	}
+	wantTags := []string{"0001_a", "0002_b", "0003_c"}
+	for i, f := range files {
+		if f.Tag != wantTags[i] {
+			t.Errorf("files[%d].Tag = %q, want %q", i, f.Tag, wantTags[i])
+		}
+	}
+}
+
+func TestLoadMigrationFiles_IgnoresNonSQL(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "0001_a.sql"), []byte("SELECT 1"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Non-.sql files should be ignored.
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("docs"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "0002_b.txt"), []byte("ignored"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	files, err := kit.LoadMigrationFiles(dir)
+	if err != nil {
+		t.Fatalf("LoadMigrationFiles: %v", err)
+	}
+	if len(files) != 1 {
+		t.Errorf("expected 1 file (only .sql), got %d", len(files))
+	}
+}
+
+func TestLoadMigrationFiles_DuplicatePrefix_Error(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"0001_a.sql", "0001_b.sql"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("SELECT 1"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	_, err := kit.LoadMigrationFiles(dir)
+	if err == nil {
+		t.Fatal("expected error for duplicate sequence prefix, got nil")
+	}
+	if !strings.Contains(err.Error(), "duplicate") {
+		t.Errorf("error should mention duplicate: %v", err)
+	}
+}
+
+func TestLoadMigrationFiles_InvalidTag_Error(t *testing.T) {
+	dir := t.TempDir()
+	// File with a space in the name is an invalid tag.
+	if err := os.WriteFile(filepath.Join(dir, "0001_bad tag.sql"), []byte("SELECT 1"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := kit.LoadMigrationFiles(dir)
+	if err == nil {
+		t.Fatal("expected error for invalid tag in filename, got nil")
+	}
+}
+
+func TestLoadMigrationFiles_NoUnderscore_Error(t *testing.T) {
+	dir := t.TempDir()
+	// File without an underscore has no extractable sequence number.
+	if err := os.WriteFile(filepath.Join(dir, "0001.sql"), []byte("SELECT 1"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := kit.LoadMigrationFiles(dir)
+	if err == nil {
+		t.Fatal("expected error for filename with no underscore, got nil")
+	}
+}
+
+func TestLoadMigrationFiles_EmptyDir(t *testing.T) {
+	dir := t.TempDir()
+	files, err := kit.LoadMigrationFiles(dir)
+	if err != nil {
+		t.Fatalf("unexpected error for empty dir: %v", err)
+	}
+	if len(files) != 0 {
+		t.Errorf("expected 0 files, got %d", len(files))
 	}
 }
