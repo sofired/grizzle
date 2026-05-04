@@ -526,12 +526,26 @@ func TestSQLite_DuplicateSequencePrefix_Error(t *testing.T) {
 }
 
 func TestSQLite_InvalidTagFormat_Error(t *testing.T) {
+	// Verify ValidateTag itself.
 	err := kit.ValidateTag("0001 bad tag!")
 	if err == nil {
 		t.Fatal("expected validation error for invalid tag")
 	}
 	if !strings.Contains(err.Error(), "^[a-zA-Z0-9_-]+$") {
 		t.Errorf("error should show pattern: %v", err)
+	}
+
+	// Verify that MigrateSQLite also rejects a file with an invalid stem.
+	db := openSQLiteMemory(t)
+	ctx := context.Background()
+	dir := t.TempDir()
+	// Write a file whose stem contains a space (invalid tag char).
+	if err := os.WriteFile(filepath.Join(dir, "0001_bad tag.sql"), []byte("SELECT 1"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	opts := kit.MigrateOptions{MigrationsDir: dir}
+	if _, err := kit.MigrateSQLite(ctx, db, opts); err == nil {
+		t.Fatal("expected error for invalid filename tag through MigrateSQLite, got nil")
 	}
 }
 
@@ -568,6 +582,183 @@ func TestSQLite_EmptyMigrationsDir(t *testing.T) {
 	if !result.AlreadyCurrent {
 		t.Error("expected AlreadyCurrent for empty migrations dir")
 	}
+}
+
+func TestSQLite_StatusPending_ShowsNewFile(t *testing.T) {
+	db := openSQLiteMemory(t)
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	writeMigrationFile(t, dir, "0001_create_things.sql",
+		`CREATE TABLE "things" ("id" TEXT PRIMARY KEY)`)
+
+	opts := kit.MigrateOptions{MigrationsDir: dir}
+
+	// Apply first migration.
+	if _, err := kit.MigrateSQLite(ctx, db, opts); err != nil {
+		t.Fatalf("initial migrate: %v", err)
+	}
+
+	// Add a second file without applying it.
+	writeMigrationFile(t, dir, "0002_add_col.sql",
+		`ALTER TABLE "things" ADD COLUMN "name" TEXT`)
+
+	// Status should show the second file as pending.
+	status, err := kit.StatusSQLite(ctx, db, opts)
+	if err != nil {
+		t.Fatalf("StatusSQLite: %v", err)
+	}
+	if len(status.Pending) != 1 {
+		t.Fatalf("expected 1 pending migration, got %d", len(status.Pending))
+	}
+	if status.Pending[0].Tag != "0002_add_col" {
+		t.Errorf("expected pending tag 0002_add_col, got %s", status.Pending[0].Tag)
+	}
+}
+
+func TestSQLite_MigrateAndStatus_AssertTags(t *testing.T) {
+	db := openSQLiteMemory(t)
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	writeMigrationFile(t, dir, "0001_create_a.sql", `CREATE TABLE "a" ("id" TEXT PRIMARY KEY)`)
+	writeMigrationFile(t, dir, "0002_create_b.sql", `CREATE TABLE "b" ("id" TEXT PRIMARY KEY)`)
+
+	opts := kit.MigrateOptions{MigrationsDir: dir}
+
+	result, err := kit.MigrateSQLite(ctx, db, opts)
+	if err != nil {
+		t.Fatalf("MigrateSQLite: %v", err)
+	}
+	if len(result.Applied) != 2 {
+		t.Fatalf("expected 2 applied, got %d", len(result.Applied))
+	}
+	if result.Applied[0].Tag != "0001_create_a" {
+		t.Errorf("Applied[0].Tag = %q, want 0001_create_a", result.Applied[0].Tag)
+	}
+	if result.Applied[1].Tag != "0002_create_b" {
+		t.Errorf("Applied[1].Tag = %q, want 0002_create_b", result.Applied[1].Tag)
+	}
+}
+
+func TestSQLite_SkipSchemaUpgrade_ColumnsPresent_Succeeds(t *testing.T) {
+	db := openSQLiteMemory(t)
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	writeMigrationFile(t, dir, "0001_init.sql", `CREATE TABLE "t" ("id" TEXT PRIMARY KEY)`)
+
+	// First run creates the table with all columns.
+	opts := kit.MigrateOptions{MigrationsDir: dir}
+	if _, err := kit.MigrateSQLite(ctx, db, opts); err != nil {
+		t.Fatalf("initial migrate: %v", err)
+	}
+
+	// Second run with SkipSchemaUpgrade: columns are present, should succeed.
+	opts2 := kit.MigrateOptions{MigrationsDir: dir, SkipSchemaUpgrade: true}
+	result, err := kit.MigrateSQLite(ctx, db, opts2)
+	if err != nil {
+		t.Fatalf("SkipSchemaUpgrade with present columns: %v", err)
+	}
+	if !result.AlreadyCurrent {
+		t.Error("expected AlreadyCurrent")
+	}
+}
+
+func TestSQLite_MultiStatement_Migration(t *testing.T) {
+	db := openSQLiteMemory(t)
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	writeMigrationFile(t, dir, "0001_multi.sql",
+		`CREATE TABLE "a" ("id" TEXT PRIMARY KEY);`+
+			`CREATE TABLE "b" ("id" TEXT PRIMARY KEY)`)
+
+	opts := kit.MigrateOptions{MigrationsDir: dir}
+	result, err := kit.MigrateSQLite(ctx, db, opts)
+	if err != nil {
+		t.Fatalf("multi-statement migration: %v", err)
+	}
+	if len(result.Applied) != 1 {
+		t.Errorf("expected 1 applied migration, got %d", len(result.Applied))
+	}
+
+	// Verify both tables were created.
+	for _, tbl := range []string{"a", "b"} {
+		var count int
+		if err := db.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?`, tbl,
+		).Scan(&count); err != nil {
+			t.Fatalf("check table %q: %v", tbl, err)
+		}
+		if count != 1 {
+			t.Errorf("table %q not created after multi-statement migration", tbl)
+		}
+	}
+}
+
+func TestSQLite_Baseline_IsNormalRow_False(t *testing.T) {
+	db := openSQLiteMemory(t)
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	writeMigrationFile(t, dir, "0001_init.sql", `CREATE TABLE "t" ("id" TEXT PRIMARY KEY)`)
+
+	if _, err := db.ExecContext(ctx, `CREATE TABLE "t" ("id" TEXT PRIMARY KEY)`); err != nil {
+		t.Fatalf("pre-create table: %v", err)
+	}
+
+	opts := kit.MigrateOptions{MigrationsDir: dir, Baseline: "0001_init"}
+	if _, err := kit.MigrateSQLite(ctx, db, opts); err != nil {
+		t.Fatalf("baseline migrate: %v", err)
+	}
+
+	history, err := kit.LoadHistorySQLite(ctx, db)
+	if err != nil {
+		t.Fatalf("LoadHistorySQLite: %v", err)
+	}
+	for _, r := range history {
+		if r.Tag == "0001_init" {
+			if !r.IsBaseline {
+				t.Error("baseline row should have IsBaseline = true")
+			}
+			if r.SQLBatch != "" {
+				t.Error("baseline row should have empty SQLBatch")
+			}
+			return
+		}
+	}
+	t.Error("baseline row for 0001_init not found in history")
+}
+
+func TestSQLite_NormalRow_IsBaselineFalse(t *testing.T) {
+	db := openSQLiteMemory(t)
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	writeMigrationFile(t, dir, "0001_init.sql", `CREATE TABLE "t" ("id" TEXT PRIMARY KEY)`)
+
+	opts := kit.MigrateOptions{MigrationsDir: dir}
+	if _, err := kit.MigrateSQLite(ctx, db, opts); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	history, err := kit.LoadHistorySQLite(ctx, db)
+	if err != nil {
+		t.Fatalf("LoadHistorySQLite: %v", err)
+	}
+	for _, r := range history {
+		if r.Tag == "0001_init" {
+			if r.IsBaseline {
+				t.Error("normal row should have IsBaseline = false")
+			}
+			if r.SQLBatch == "" {
+				t.Error("normal row should have non-empty SQLBatch")
+			}
+			return
+		}
+	}
+	t.Error("row for 0001_init not found in history")
 }
 
 func TestSQLite_PushSQLite_StillWorks(t *testing.T) {

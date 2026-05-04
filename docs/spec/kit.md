@@ -34,10 +34,8 @@ These commands exist today (`grizzle help` shows them all):
 | `grizzle sql` | Schema definitions → `CREATE TABLE` SQL on stdout | Fresh DB init; no DB connection |
 | `grizzle snapshot` | Schema definitions → JSON snapshot file on disk | Saves current schema state |
 | `grizzle diff` | Schema vs snapshot → migration SQL on stdout | No DB connection; no file written |
-| `grizzle migrate` | Schema vs live DB → applies DDL + records history | Introspects live DB; see note below |
-| `grizzle status` | Shows applied migration history + pending changes | Read-only |
-
-**Important:** `grizzle migrate` (and `kit.Migrate`) currently does **not** read `.sql` migration files. It introspects the live database, computes a diff against the schema definitions, and applies immediately — recording the result in `_grizzle_migrations`. This is **DEVIATION:BROKEN** relative to the Drizzle-parity target described below.
+| `grizzle migrate` | Applies pending `.sql` migration files in order + records history | Reads `--migrations` dir; see below |
+| `grizzle status` | Shows applied migration history + pending migration files | Read-only |
 
 `grizzle diff` is the closest current equivalent to Drizzle's `generate` — it computes SQL and prints it — but it does not write a file, does not maintain a migrations directory, and does not track what has been applied.
 
@@ -73,7 +71,7 @@ result, err := kit.Generate(defs, kit.GenerateOptions{
 // result.FilePath — path of the written .sql file
 ```
 
-### `migrate` — DEVIATION:BROKEN (current) → target below
+### `migrate` — PARITY (implemented in #154)
 
 **Drizzle:** `drizzle-kit migrate` reads `.sql` files from the migrations directory that have not yet been applied (checked against the journal) and applies them in order.
 
@@ -301,10 +299,11 @@ This section covers how an existing deployment running the old checksum-based `k
 
 ### Schema upgrade
 
-**Automatic, on first run.** When the new `kit.Migrate` connects to a database that has an existing `_grizzle_migrations` table missing the `tag` or `is_baseline` columns, it detects which columns are absent and adds only those:
+**Automatic, on first run.** When the new `kit.Migrate` connects to a database that has an existing `_grizzle_migrations` table missing the `tag` or `is_baseline` columns, it adds those columns automatically. The mechanism varies by dialect:
 
 ```sql
--- PostgreSQL (ADD COLUMN IF NOT EXISTS — no table rewrite in PostgreSQL 11+)
+-- PostgreSQL: all four statements run unconditionally; ADD COLUMN IF NOT EXISTS and
+-- SET DEFAULT are safe to repeat (no table rewrite in PostgreSQL 11+).
 ALTER TABLE _grizzle_migrations ADD COLUMN IF NOT EXISTS tag TEXT NOT NULL DEFAULT '';
 ALTER TABLE _grizzle_migrations ADD COLUMN IF NOT EXISTS is_baseline BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE _grizzle_migrations ALTER COLUMN checksum SET DEFAULT '';
@@ -312,20 +311,23 @@ ALTER TABLE _grizzle_migrations ALTER COLUMN sql_batch SET DEFAULT '';
 ```
 
 ```sql
--- MySQL (check column existence via INFORMATION_SCHEMA before running)
+-- MySQL: column existence is checked first via INFORMATION_SCHEMA.COLUMNS
+-- (WHERE table_schema = DATABASE() AND table_name = ?), then ADD COLUMN is
+-- issued only if absent. No equivalent of IF NOT EXISTS in older MySQL versions.
 ALTER TABLE _grizzle_migrations ADD COLUMN tag VARCHAR(255) NOT NULL DEFAULT '';
 ALTER TABLE _grizzle_migrations ADD COLUMN is_baseline TINYINT(1) NOT NULL DEFAULT 0;
 ```
 
 ```sql
--- SQLite (check column existence via PRAGMA table_info before running)
+-- SQLite: column existence is checked first via PRAGMA table_info, then ADD
+-- COLUMN is issued only if absent (SQLite has no ADD COLUMN IF NOT EXISTS).
 ALTER TABLE _grizzle_migrations ADD COLUMN tag TEXT NOT NULL DEFAULT '';
 ALTER TABLE _grizzle_migrations ADD COLUMN is_baseline INTEGER NOT NULL DEFAULT 0;
 ```
 
-The upgrade is idempotent: each column addition is guarded by an existence check. No downtime is required.
+The upgrade is idempotent: all three dialects guard each column addition before issuing `ALTER TABLE`. No downtime is required. Column-presence verification for `--skip-schema-upgrade` uses `information_schema.columns` (PostgreSQL, MySQL) or `PRAGMA table_info` (SQLite).
 
-**Privilege requirement:** The schema upgrade requires `ALTER TABLE` privilege on `_grizzle_migrations`. Use `--skip-schema-upgrade` to suppress the automatic upgrade. If `--skip-schema-upgrade` is passed and the `tag` or `is_baseline` columns are absent, `kit.Migrate` returns an error immediately — no silent fallback.
+**Privilege requirement:** The schema upgrade requires `ALTER TABLE` privilege on `_grizzle_migrations`. Use `MigrateOptions.SkipSchemaUpgrade` (CLI: `--skip-schema-upgrade`) to suppress the automatic upgrade and manage it out-of-band. If `--skip-schema-upgrade` is passed and the `tag` or `is_baseline` columns are absent, `kit.Migrate` returns an error immediately — no silent fallback.
 
 **SQLite concurrency:** The column-existence check and `ADD COLUMN` are not atomic on SQLite. Ensure exclusive startup locking when multiple processes may race at startup.
 
@@ -375,7 +377,7 @@ When `Baseline` is set:
 For a deployment currently using the old `kit.Migrate`:
 
 1. **Upgrade Grizzle.**
-2. **Run `grizzle generate`** — reads Go schema definitions and produces a migration file (e.g. `migrations/0001_initial_schema.sql`). Does not connect to a database.
+2. **Produce the initial migration file.** Once `grizzle generate` is implemented (DEVIATION:GAP), it will produce this file automatically. Until then, write the file manually using `grizzle diff > migrations/0001_initial_schema.sql` and create `migrations/meta/snapshot.json` with `grizzle snapshot`.
 3. **Run `grizzle migrate --baseline 0001_initial_schema --db <dsn>`** — automatically upgrades the history table schema, then marks `0001_initial_schema` as baselined without executing it.
 4. **Resume normal workflow** — all future `grizzle generate` + `grizzle migrate` calls follow the file-based path.
 

@@ -50,13 +50,22 @@ type StatusResult struct {
 // twice is idempotent — files already recorded by tag are skipped.
 //
 // If opts.Baseline is non-empty, migration files up to and including the named
-// tag are inserted as baseline records (is_baseline = TRUE, sql_batch = ”) in
-// a single transaction without executing their SQL.
+// tag are inserted as baseline records (is_baseline = TRUE, sql_batch = '') in
+// a single transaction without executing their SQL. Use this only on existing
+// deployments switching to the file-based workflow; on a fresh database, omit
+// Baseline and let Migrate apply all files normally.
 //
 // Example:
 //
 //	result, err := kit.Migrate(ctx, pool, kit.MigrateOptions{
 //	    MigrationsDir: "./migrations",
+//	})
+//
+// To mark existing migrations as applied without executing them:
+//
+//	result, err := kit.Migrate(ctx, pool, kit.MigrateOptions{
+//	    MigrationsDir: "./migrations",
+//	    Baseline:      "0001_initial_schema",
 //	})
 func Migrate(ctx context.Context, pool *pgxpool.Pool, opts MigrateOptions) (MigrateResult, error) {
 	if opts.MigrationsDir == "" {
@@ -93,12 +102,18 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool, opts MigrateOptions) (Migr
 
 	var result MigrateResult
 
-	// Handle baseline mode.
+	// Hoist baselineSeq so it is computed once and reused.
+	var baselineSeq int
 	if opts.Baseline != "" {
-		baselineSeq, err := parseSequenceNumber(opts.Baseline)
+		var err error
+		baselineSeq, err = parseSequenceNumber(opts.Baseline)
 		if err != nil {
 			return MigrateResult{}, fmt.Errorf("--baseline %q: %w", opts.Baseline, err)
 		}
+	}
+
+	// Handle baseline mode.
+	if opts.Baseline != "" {
 		// Check the baseline tag corresponds to an actual file.
 		found := false
 		for _, f := range files {
@@ -111,12 +126,16 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool, opts MigrateOptions) (Migr
 			return MigrateResult{}, fmt.Errorf("--baseline %q does not correspond to any file in %s", opts.Baseline, opts.MigrationsDir)
 		}
 
-		// Collect files to baseline: all files with seqNum <= baselineSeq that
-		// are not already applied.
-		var toBaseline []MigrationFile
+		// Compute checksums before inserting so we fail early and avoid re-reading
+		// files after the transaction commits.
+		var toBaseline []baselineRecord
 		for _, f := range files {
 			if f.SeqNum <= baselineSeq && !applied[f.Tag] {
-				toBaseline = append(toBaseline, f)
+				cs, err := ChecksumFile(f.Path)
+				if err != nil {
+					return MigrateResult{}, fmt.Errorf("checksum %s: %w", f.FileName, err)
+				}
+				toBaseline = append(toBaseline, baselineRecord{File: f, Checksum: cs})
 			}
 		}
 
@@ -124,15 +143,10 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool, opts MigrateOptions) (Migr
 			if err := insertBaselinePostgres(ctx, pool, toBaseline); err != nil {
 				return MigrateResult{}, fmt.Errorf("baseline: %w", err)
 			}
-			result.Baselined = toBaseline
-			// Log to stderr per spec.
-			for _, f := range toBaseline {
-				cs, _ := ChecksumFile(f.Path)
-				fmt.Fprintf(os.Stderr, "grizzle: baseline %s  sha256:%s\n", f.FileName, cs)
-			}
-			// Mark them as applied for the next step.
-			for _, f := range toBaseline {
-				applied[f.Tag] = true
+			for _, rec := range toBaseline {
+				result.Baselined = append(result.Baselined, rec.File)
+				applied[rec.File.Tag] = true
+				fmt.Fprintf(os.Stderr, "grizzle: baseline %s  sha256:%s\n", rec.File.FileName, rec.Checksum)
 			}
 		}
 	}
@@ -141,12 +155,8 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool, opts MigrateOptions) (Migr
 	var toApply []MigrationFile
 	for _, f := range files {
 		if !applied[f.Tag] {
-			if opts.Baseline != "" {
-				// Only apply files beyond the baseline.
-				baselineSeq, _ := parseSequenceNumber(opts.Baseline)
-				if f.SeqNum <= baselineSeq {
-					continue
-				}
+			if opts.Baseline != "" && f.SeqNum <= baselineSeq {
+				continue
 			}
 			toApply = append(toApply, f)
 		}
@@ -190,7 +200,7 @@ func Status(ctx context.Context, pool *pgxpool.Pool, opts MigrateOptions) (Statu
 		return StatusResult{}, err
 	}
 
-	history, err := LoadHistory(ctx, pool)
+	history, err := loadHistory(ctx, pool)
 	if err != nil {
 		return StatusResult{}, err
 	}
@@ -218,7 +228,7 @@ func Status(ctx context.Context, pool *pgxpool.Pool, opts MigrateOptions) (Statu
 }
 
 // LoadHistory returns all rows from _grizzle_migrations in chronological order.
-// Returns an empty slice (not an error) if the table does not exist yet.
+// It creates the table (and upgrades its schema) if it does not yet exist.
 func LoadHistory(ctx context.Context, pool *pgxpool.Pool) ([]MigrationRecord, error) {
 	if err := ensureMigrationsTable(ctx, pool, false); err != nil {
 		return nil, err
@@ -262,7 +272,7 @@ func ensureMigrationsTable(ctx context.Context, pool *pgxpool.Pool, skipUpgrade 
 }
 
 // upgradeSchemaPostgres adds tag and is_baseline columns if absent, and ensures
-// checksum and sql_batch have DEFAULT ” (idempotent).
+// checksum and sql_batch have DEFAULT " (idempotent).
 func upgradeSchemaPostgres(ctx context.Context, pool *pgxpool.Pool) error {
 	const q = `
 ALTER TABLE ` + MigrationsTable + ` ADD COLUMN IF NOT EXISTS tag TEXT NOT NULL DEFAULT '';
@@ -276,11 +286,14 @@ ALTER TABLE ` + MigrationsTable + ` ALTER COLUMN sql_batch SET DEFAULT '';`
 	return nil
 }
 
-// verifyColumnsPostgres checks that tag and is_baseline columns exist.
+// verifyColumnsPostgres checks that tag and is_baseline columns exist in the
+// current schema. Scoped to current_schema() to avoid false positives on
+// shared servers where another schema has a table with the same name.
 func verifyColumnsPostgres(ctx context.Context, pool *pgxpool.Pool) error {
 	const q = `
 SELECT COUNT(*) FROM information_schema.columns
-WHERE table_name = $1
+WHERE table_schema = current_schema()
+  AND table_name = $1
   AND column_name = ANY($2)`
 
 	var count int
@@ -325,9 +338,15 @@ func applyMigrationFilePostgres(ctx context.Context, pool *pgxpool.Pool, tag, sq
 	return tx.Commit(ctx)
 }
 
-// insertBaselinePostgres inserts baseline records for all files in a single
-// transaction. Each record has is_baseline = TRUE and sql_batch = ”.
-func insertBaselinePostgres(ctx context.Context, pool *pgxpool.Pool, files []MigrationFile) error {
+// baselineRecord pairs a MigrationFile with its pre-computed file checksum.
+type baselineRecord struct {
+	File     MigrationFile
+	Checksum string
+}
+
+// insertBaselinePostgres inserts baseline records in a single transaction.
+// Checksums must be pre-computed by the caller to avoid TOCTOU file re-reads.
+func insertBaselinePostgres(ctx context.Context, pool *pgxpool.Pool, records []baselineRecord) error {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
@@ -336,15 +355,10 @@ func insertBaselinePostgres(ctx context.Context, pool *pgxpool.Pool, files []Mig
 	const insertSQL = `INSERT INTO ` + MigrationsTable +
 		` (tag, checksum, sql_batch, is_baseline) VALUES ($1, $2, '', TRUE)`
 
-	for _, f := range files {
-		cs, err := ChecksumFile(f.Path)
-		if err != nil {
+	for _, rec := range records {
+		if _, err := tx.Exec(ctx, insertSQL, rec.File.Tag, rec.Checksum); err != nil {
 			_ = tx.Rollback(ctx)
-			return err
-		}
-		if _, err := tx.Exec(ctx, insertSQL, f.Tag, cs); err != nil {
-			_ = tx.Rollback(ctx)
-			return fmt.Errorf("insert baseline record for %s: %w", f.Tag, err)
+			return fmt.Errorf("insert baseline record for %s: %w", rec.File.Tag, err)
 		}
 	}
 

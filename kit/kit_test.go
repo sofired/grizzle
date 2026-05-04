@@ -2184,9 +2184,13 @@ func TestLoadMigrationFiles_Order(t *testing.T) {
 		t.Fatalf("expected 3 files, got %d", len(files))
 	}
 	wantTags := []string{"0001_a", "0002_b", "0003_c"}
+	wantSeqs := []int{1, 2, 3}
 	for i, f := range files {
 		if f.Tag != wantTags[i] {
 			t.Errorf("files[%d].Tag = %q, want %q", i, f.Tag, wantTags[i])
+		}
+		if f.SeqNum != wantSeqs[i] {
+			t.Errorf("files[%d].SeqNum = %d, want %d", i, f.SeqNum, wantSeqs[i])
 		}
 	}
 }
@@ -2264,5 +2268,29 @@ func TestLoadMigrationFiles_EmptyDir(t *testing.T) {
 	}
 	if len(files) != 0 {
 		t.Errorf("expected 0 files, got %d", len(files))
+	}
+}
+
+func TestLoadMigrationFiles_DirNotExist_Error(t *testing.T) {
+	_, err := kit.LoadMigrationFiles("/tmp/grizzle-nonexistent-dir-xqzw9")
+	if err == nil {
+		t.Fatal("expected error for non-existent directory, got nil")
+	}
+}
+
+func TestLoadMigrationFiles_ZeroPrefix_Error(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "0000_bad.sql"), []byte("SELECT 1"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := kit.LoadMigrationFiles(dir)
+	if err == nil {
+		t.Fatal("expected error for zero sequence prefix, got nil")
+	}
+}
+
+func TestValidateTag_EmptyIsInvalid(t *testing.T) {
+	if err := kit.ValidateTag(""); err == nil {
+		t.Fatal("expected error for empty tag, got nil")
 	}
 }

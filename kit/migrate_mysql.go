@@ -110,11 +110,16 @@ func MigrateMySQL(ctx context.Context, db *sql.DB, opts MigrateOptions) (Migrate
 
 	var result MigrateResult
 
+	var baselineSeq int
 	if opts.Baseline != "" {
-		baselineSeq, err := parseSequenceNumber(opts.Baseline)
+		var err error
+		baselineSeq, err = parseSequenceNumber(opts.Baseline)
 		if err != nil {
 			return MigrateResult{}, fmt.Errorf("--baseline %q: %w", opts.Baseline, err)
 		}
+	}
+
+	if opts.Baseline != "" {
 		found := false
 		for _, f := range files {
 			if f.Tag == opts.Baseline {
@@ -126,10 +131,14 @@ func MigrateMySQL(ctx context.Context, db *sql.DB, opts MigrateOptions) (Migrate
 			return MigrateResult{}, fmt.Errorf("--baseline %q does not correspond to any file in %s", opts.Baseline, opts.MigrationsDir)
 		}
 
-		var toBaseline []MigrationFile
+		var toBaseline []baselineRecord
 		for _, f := range files {
 			if f.SeqNum <= baselineSeq && !applied[f.Tag] {
-				toBaseline = append(toBaseline, f)
+				cs, err := ChecksumFile(f.Path)
+				if err != nil {
+					return MigrateResult{}, fmt.Errorf("checksum %s: %w", f.FileName, err)
+				}
+				toBaseline = append(toBaseline, baselineRecord{File: f, Checksum: cs})
 			}
 		}
 
@@ -137,13 +146,10 @@ func MigrateMySQL(ctx context.Context, db *sql.DB, opts MigrateOptions) (Migrate
 			if err := insertBaselineMySQL(ctx, db, toBaseline); err != nil {
 				return MigrateResult{}, fmt.Errorf("baseline: %w", err)
 			}
-			result.Baselined = toBaseline
-			for _, f := range toBaseline {
-				cs, _ := ChecksumFile(f.Path)
-				fmt.Fprintf(os.Stderr, "grizzle: baseline %s  sha256:%s\n", f.FileName, cs)
-			}
-			for _, f := range toBaseline {
-				applied[f.Tag] = true
+			for _, rec := range toBaseline {
+				result.Baselined = append(result.Baselined, rec.File)
+				applied[rec.File.Tag] = true
+				fmt.Fprintf(os.Stderr, "grizzle: baseline %s  sha256:%s\n", rec.File.FileName, rec.Checksum)
 			}
 		}
 	}
@@ -151,11 +157,8 @@ func MigrateMySQL(ctx context.Context, db *sql.DB, opts MigrateOptions) (Migrate
 	var toApply []MigrationFile
 	for _, f := range files {
 		if !applied[f.Tag] {
-			if opts.Baseline != "" {
-				baselineSeq, _ := parseSequenceNumber(opts.Baseline)
-				if f.SeqNum <= baselineSeq {
-					continue
-				}
+			if opts.Baseline != "" && f.SeqNum <= baselineSeq {
+				continue
 			}
 			toApply = append(toApply, f)
 		}
@@ -196,7 +199,7 @@ func StatusMySQL(ctx context.Context, db *sql.DB, opts MigrateOptions) (StatusRe
 		return StatusResult{}, err
 	}
 
-	history, err := LoadHistoryMySQL(ctx, db)
+	history, err := loadHistoryMySQL(ctx, db)
 	if err != nil {
 		return StatusResult{}, err
 	}
@@ -292,7 +295,8 @@ func columnExistenceMySQL(ctx context.Context, db *sql.DB, cols []string) (map[s
 		args[i+1] = c
 	}
 	q := `SELECT column_name FROM information_schema.columns
-	      WHERE table_name = ?
+	      WHERE table_schema = DATABASE()
+	        AND table_name = ?
 	        AND column_name IN (` + strings.Join(placeholders, ", ") + `)`
 
 	rows, err := db.QueryContext(ctx, q, args...)
@@ -342,7 +346,7 @@ func applyMigrationFileMySQL(ctx context.Context, db *sql.DB, tag, sqlText, chec
 }
 
 // insertBaselineMySQL inserts baseline records in a single transaction.
-func insertBaselineMySQL(ctx context.Context, db *sql.DB, files []MigrationFile) error {
+func insertBaselineMySQL(ctx context.Context, db *sql.DB, records []baselineRecord) error {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
@@ -351,15 +355,10 @@ func insertBaselineMySQL(ctx context.Context, db *sql.DB, files []MigrationFile)
 	const insertSQL = `INSERT INTO ` + MigrationsTable +
 		` (tag, checksum, sql_batch, is_baseline) VALUES (?, ?, '', 1)`
 
-	for _, f := range files {
-		cs, err := ChecksumFile(f.Path)
-		if err != nil {
+	for _, rec := range records {
+		if _, err := tx.ExecContext(ctx, insertSQL, rec.File.Tag, rec.Checksum); err != nil {
 			_ = tx.Rollback()
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, insertSQL, f.Tag, cs); err != nil {
-			_ = tx.Rollback()
-			return fmt.Errorf("insert baseline record for %s: %w", f.Tag, err)
+			return fmt.Errorf("insert baseline record for %s: %w", rec.File.Tag, err)
 		}
 	}
 

@@ -108,13 +108,7 @@ func LoadMigrationFiles(dir string) ([]MigrationFile, error) {
 		})
 	}
 
-	// Sort by sequence number, then by filename for determinism.
-	sort.Slice(files, func(i, j int) bool {
-		if files[i].SeqNum != files[j].SeqNum {
-			return files[i].SeqNum < files[j].SeqNum
-		}
-		return files[i].FileName < files[j].FileName
-	})
+	sort.Slice(files, func(i, j int) bool { return files[i].SeqNum < files[j].SeqNum })
 
 	return files, nil
 }
@@ -148,7 +142,10 @@ type MigrateOptions struct {
 
 	// Baseline, when non-empty, marks migration files up to and including the
 	// named tag as applied without executing their SQL. All baseline inserts are
-	// committed in a single transaction. Must not be used on a fresh database.
+	// committed in a single transaction. Intended for existing deployments
+	// switching to the file-based workflow. On a fresh database, omit Baseline
+	// and let Migrate apply all files normally — using Baseline on a fresh
+	// database will mark initial migrations as applied without running them.
 	// Subsequent migration files (higher sequence numbers) are applied normally.
 	Baseline string
 
