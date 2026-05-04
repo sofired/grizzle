@@ -12,6 +12,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
@@ -19,19 +20,22 @@ import (
 	"github.com/sofired/grizzle/query"
 )
 
-// stubQuerier is a poolQuerier stub that records the SQL string passed to
-// Query and returns pgx.ErrNoRows. These tests only verify which SQL string
-// reaches the stub; they intentionally ignore scan/query errors.
+// stubQuerier is a poolQuerier stub that records the SQL string and args
+// passed to Query and returns pgx.ErrNoRows. Tests verify both the SQL string
+// and that args pass through unchanged.
 type stubQuerier struct {
-	gotSQL string
+	gotSQL  string
+	gotArgs []any
 }
 
-func (s *stubQuerier) Query(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+func (s *stubQuerier) Query(_ context.Context, sql string, args ...any) (pgx.Rows, error) {
 	s.gotSQL = sql
+	s.gotArgs = args
 	return nil, pgx.ErrNoRows
 }
 
-// stubExecer is a poolExecer stub that records the SQL string and args passed to Exec.
+// stubExecer is a poolExecer stub that records the SQL string and args passed to Exec
+// and returns a successful CommandTag. Tests verify both the SQL string and that args pass through unchanged.
 type stubExecer struct {
 	gotSQL  string
 	gotArgs []any
@@ -44,9 +48,13 @@ func (s *stubExecer) Exec(_ context.Context, sql string, args ...any) (pgconn.Co
 }
 
 // TestPreparedSelect_QueryAllUsesSQLNotName calls queryAllWith with a stub
-// and asserts that the SQL string — not the statement name — is submitted.
+// and asserts that the SQL string — not the statement name — is submitted,
+// and that query args pass through unchanged.
 func TestPreparedSelect_QueryAllUsesSQLNotName(t *testing.T) {
-	b := query.Select(testschema.UsersT.ID).From(testschema.UsersT)
+	realmID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	b := query.Select(testschema.UsersT.ID).
+		From(testschema.UsersT).
+		Where(testschema.UsersT.RealmID.EQ(realmID))
 	reg := NewRegistry(nil)
 	stmt := RegisterSelect[testschema.UserSelect](reg, "active_users", b)
 
@@ -60,11 +68,18 @@ func TestPreparedSelect_QueryAllUsesSQLNotName(t *testing.T) {
 	if stub.gotSQL == stmt.name {
 		t.Errorf("QueryAll submitted the statement name %q instead of the SQL string", stub.gotSQL)
 	}
+	if !reflect.DeepEqual(stub.gotArgs, stmt.args) {
+		t.Errorf("QueryAll submitted args %v, want %v", stub.gotArgs, stmt.args)
+	}
 }
 
-// TestPreparedSelect_QueryOneUsesSQLNotName is the same guard for queryOneWith.
+// TestPreparedSelect_QueryOneUsesSQLNotName is the same guard for queryOneWith:
+// asserts the SQL string — not the statement name — is submitted, and that args pass through unchanged.
 func TestPreparedSelect_QueryOneUsesSQLNotName(t *testing.T) {
-	b := query.Select(testschema.UsersT.ID).From(testschema.UsersT)
+	realmID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	b := query.Select(testschema.UsersT.ID).
+		From(testschema.UsersT).
+		Where(testschema.UsersT.RealmID.EQ(realmID))
 	reg := NewRegistry(nil)
 	stmt := RegisterSelect[testschema.UserSelect](reg, "active_users", b)
 
@@ -77,11 +92,18 @@ func TestPreparedSelect_QueryOneUsesSQLNotName(t *testing.T) {
 	if stub.gotSQL == stmt.name {
 		t.Errorf("QueryOne submitted the statement name %q instead of the SQL string", stub.gotSQL)
 	}
+	if !reflect.DeepEqual(stub.gotArgs, stmt.args) {
+		t.Errorf("QueryOne submitted args %v, want %v", stub.gotArgs, stmt.args)
+	}
 }
 
-// TestPreparedSelect_QueryOptUsesSQLNotName is the same guard for queryOptWith.
+// TestPreparedSelect_QueryOptUsesSQLNotName is the same guard for queryOptWith:
+// asserts the SQL string — not the statement name — is submitted, and that args pass through unchanged.
 func TestPreparedSelect_QueryOptUsesSQLNotName(t *testing.T) {
-	b := query.Select(testschema.UsersT.ID).From(testschema.UsersT)
+	realmID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	b := query.Select(testschema.UsersT.ID).
+		From(testschema.UsersT).
+		Where(testschema.UsersT.RealmID.EQ(realmID))
 	reg := NewRegistry(nil)
 	stmt := RegisterSelect[testschema.UserSelect](reg, "active_users", b)
 
@@ -94,15 +116,19 @@ func TestPreparedSelect_QueryOptUsesSQLNotName(t *testing.T) {
 	if stub.gotSQL == stmt.name {
 		t.Errorf("QueryOpt submitted the statement name %q instead of the SQL string", stub.gotSQL)
 	}
+	if !reflect.DeepEqual(stub.gotArgs, stmt.args) {
+		t.Errorf("QueryOpt submitted args %v, want %v", stub.gotArgs, stmt.args)
+	}
 }
 
 // TestPreparedExec_ExecUsesSQLNotName calls execWith with a stub and asserts
 // that the SQL string — not the statement name — is submitted, and that args
 // pass through unchanged.
 func TestPreparedExec_ExecUsesSQLNotName(t *testing.T) {
+	realmID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 	b := query.Update(testschema.UsersT).
 		Set("enabled", false).
-		Where(testschema.UsersT.DeletedAt.IsNull())
+		Where(testschema.UsersT.RealmID.EQ(realmID))
 
 	reg := NewRegistry(nil)
 	stmt := RegisterExec(reg, "disable_users", b)
@@ -157,9 +183,10 @@ func (f *fakePgxTx) Conn() *pgx.Conn                                        { pa
 // ExecTx calls execWith(ctx, tx.tx) — this test constructs a Tx with a fake
 // pgx.Tx to confirm the delegation cannot accidentally be reverted to pass p.name.
 func TestPreparedExec_ExecTxUsesSQLNotName(t *testing.T) {
+	realmID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 	b := query.Update(testschema.UsersT).
 		Set("enabled", false).
-		Where(testschema.UsersT.DeletedAt.IsNull())
+		Where(testschema.UsersT.RealmID.EQ(realmID))
 
 	reg := NewRegistry(nil)
 	stmt := RegisterExec(reg, "disable_users", b)
