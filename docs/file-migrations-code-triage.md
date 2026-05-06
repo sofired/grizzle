@@ -1,6 +1,8 @@
 # File Migrations Existing-Code Triage
 
-This document records the existing-code triage required before starting the RC.1-style file-migration implementation sequence.
+> Project-wide note: this is a focused migration-kit appendix. Use [project-code-triage.md](./project-code-triage.md) as the holistic code review entry point.
+
+This document records the migration-kit existing-code triage required before starting the RC.1-style file-migration implementation sequence.
 
 It classifies current repository code against the ratified file-migration specs and the buckets defined in [file-migrations-implementation-sequence.md](./spec/file-migrations-implementation-sequence.md):
 

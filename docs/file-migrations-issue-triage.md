@@ -1,6 +1,8 @@
 # File Migrations GitHub Issue Triage
 
-This document records GitHub issue triage before starting the RC.1-style file-migration implementation sequence.
+> Project-wide note: this is a focused migration-kit appendix. Use [project-issue-triage.md](./project-issue-triage.md) as the holistic issue review entry point.
+
+This document records migration-kit GitHub issue triage before starting the RC.1-style file-migration implementation sequence.
 
 Issue inventory was pulled from GitHub on 2026-05-06. At that time the repository had 75 open issues.
 

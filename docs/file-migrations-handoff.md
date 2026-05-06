@@ -1,5 +1,7 @@
 # File Migrations Documentation Handoff
 
+> Project-wide note: this is historical migration-kit handoff context. Use [project-handoff.md](./project-handoff.md) for the current holistic project handoff.
+
 This note summarizes the spec-first file-migration documentation work and the intended next steps for continuing in a new session.
 
 ## Branch
