@@ -23,8 +23,8 @@ Grizzle has three layers:
 | Layer | Package | What it does |
 |---|---|---|
 | Schema DSL | `schema/pg` | Declare tables and columns in Go |
-| Query builders | `query`, `expr` | Build type-safe SQL — returns `(string, []any)` |
-| Driver adapter | `driver/pgx` | Execute builders against a `pgxpool.Pool` |
+| Query builders | `query`, `expr` | Build type-safe SQL. Target API: `Build(dialect)` returns `(string, []any, error)`; current branch may still expose the older two-return shape. |
+| Driver adapter | `driver/pgx` | Target behavior: execute builders against a `pgxpool.Pool` and surface build errors before execution after the error-returning `Build` contract lands |
 
 Code generation bridges the first two layers: `grizzle gen` reads your `schema/pg` declarations and emits typed table handles (`UsersT`, `RealmsT`, …) that the query builders consume.
 
@@ -60,7 +60,6 @@ var Users = pg.Table("users",
     return []pg.Constraint{
         pg.UniqueIndex("users_realm_username_idx").
             On(t.Col("realm_id"), t.Col("username")).
-            Where(pg.IsNull(t.Col("deleted_at"))).
             Build(),
     }
 })
@@ -71,13 +70,13 @@ See [Schema DSL](/guide/schema) for the full column and constraint reference.
 ## 2. Generate table handles
 
 ```sh
-grizzle gen --schema db/schema.go --out db/gen.go --package db
+grizzle gen --schema ./db --out ./db --package db
 ```
 
-This produces typed table handles in `db/gen.go`:
+This produces typed table-handle files in `./db`, for example `users_gen.go`:
 
 ```go
-// db/gen.go (generated — do not edit)
+// db/users_gen.go (generated — do not edit)
 
 type UsersTable struct {
     ID        expr.UUIDColumn
@@ -89,12 +88,12 @@ type UsersTable struct {
     DeletedAt expr.TimestampColumn
 }
 
-func (UsersTable) GrizTableName() string  { return "users" }
-func (UsersTable) GrizTableAlias() string { return "users" }
+func (UsersTable) GrizTableRef() query.TableRef {
+    return query.TableRef{Name: "users"}
+}
 
 var UsersT = UsersTable{
-    ID:        expr.UUIDColumn{ColBase: expr.ColBase{TableAlias: "users", ColName: "id"}},
-    // ...
+    // Generated typed column handles initialized with sqlmeta.ColumnMeta.
 }
 
 // Also generated: UserSelect, UserInsert, UserUpdate structs
@@ -108,19 +107,27 @@ Re-run `grizzle gen` whenever you change your schema.
 package main
 
 import (
-    "context"
-    "os"
+	"context"
+	"log"
+	"os"
+	"time"
 
     "github.com/jackc/pgx/v5/pgxpool"
     pgxdb "github.com/sofired/grizzle/driver/pgx"
 )
 
 func main() {
-    pool, err := pgxpool.New(context.Background(), os.Getenv("DATABASE_URL"))
+    ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+    defer cancel()
+
+    pool, err := pgxpool.New(ctx, os.Getenv("DATABASE_URL"))
     if err != nil {
-        panic(err)
+        log.Fatal("connect database failed")
     }
     defer pool.Close()
+    if err := pool.Ping(ctx); err != nil {
+        log.Fatal("connect database failed")
+    }
 
     db := pgxdb.New(pool)
     _ = db
@@ -132,7 +139,6 @@ func main() {
 ```go
 import (
     "context"
-    "fmt"
 
     pgxdb "github.com/sofired/grizzle/driver/pgx"
     "github.com/sofired/grizzle/query"
@@ -141,7 +147,7 @@ import (
 
 func listActiveUsers(ctx context.Context, d *pgxdb.DB) ([]db.UserSelect, error) {
     return pgxdb.FromSelect[db.UserSelect](ctx, d,
-        query.Select(db.UsersT.ID, db.UsersT.Username, db.UsersT.Email).
+        query.Select().
             From(db.UsersT).
             Where(db.UsersT.DeletedAt.IsNull()).
             OrderBy(db.UsersT.Username.Asc()).

@@ -6,12 +6,12 @@ Grizzle's dialect system is the Go equivalent of [Drizzle's multi-dialect suppor
 
 | Dialect | Drizzle package | Grizzle package | Status |
 |---|---|---|---|
-| PostgreSQL | `drizzle-orm/pg-core` | `schema/pg`, `dialect.Postgres` | Core dialect; most complete |
-| MySQL / MariaDB | `drizzle-orm/mysql-core` | `schema/mysql`, `dialect.MySQL` | Partial — see column type gaps in [schema.md](./schema.md) |
-| SQLite | `drizzle-orm/sqlite-core` | `schema/sqlite`, `dialect.SQLite` | Partial — see column type gaps in [schema.md](./schema.md) |
-| CockroachDB | Uses `pg-core` | Use `dialect.Postgres` | PARITY — no additional changes needed |
-| Neon, Supabase | Use `pg-core` | Use `dialect.Postgres` | Not verified; assumed PARITY |
-| Turso (libSQL) | Uses `sqlite-core` | Use `dialect.SQLite` | Not verified |
+| PostgreSQL | `drizzle-orm/pg-core` | `schema/pg`, `dialect.Postgres` | PARITY target with listed gaps; required initial scope |
+| MySQL / MariaDB | `drizzle-orm/mysql-core` | `schema/mysql`, `dialect.MySQL` | DEVIATION:GAP (designed) for remaining column type gaps; see [schema.md](./schema.md) |
+| SQLite | `drizzle-orm/sqlite-core` | `schema/sqlite`, `dialect.SQLite` | DEVIATION:GAP (designed) for remaining column type gaps; see [schema.md](./schema.md) |
+| CockroachDB | `drizzle-orm/cockroach-core` | Use `dialect.Postgres` where compatible only after dedicated validation | DEVIATION:GAP (not designed); file-migration support is out of initial scope |
+| Neon, Supabase | Use `pg-core` | Use `dialect.Postgres` where driver-compatible | DEVIATION:GAP (not designed); file-migration support depends on driver capability |
+| Turso (libSQL) | Uses `sqlite-core` | Use `dialect.SQLite` where driver-compatible | DEVIATION:GAP (not designed); file-migration support depends on driver capability |
 
 ## Dialect feature matrix
 
@@ -19,58 +19,66 @@ Grizzle's dialect system is the Go equivalent of [Drizzle's multi-dialect suppor
 |---|---|---|---|
 | Placeholders | `$1`, `$2`, … | `?` | `?` |
 | Identifier quoting | `"name"` | `` `name` `` | `"name"` |
-| `RETURNING` | Yes | No (silently dropped) | Yes (3.35+) |
+| Normal `RETURNING` | Yes | No | Yes (3.35+) |
+| Insert ID return | normal `RETURNING` | Grizzle `.ReturningID()` as Drizzle `$returningId()` parity | normal `RETURNING` |
 | Upsert | `ON CONFLICT … DO UPDATE` | `ON DUPLICATE KEY UPDATE` | `ON CONFLICT … DO UPDATE` |
-| Insert ignore | `ON CONFLICT … DO NOTHING` | `INSERT IGNORE` | `INSERT OR IGNORE` |
+| Do-nothing insert conflict | `ON CONFLICT … DO NOTHING` | `INSERT IGNORE` via MySQL `.ignore()` | `ON CONFLICT … DO NOTHING` via SQLite `.onConflictDoNothing()` |
 | `WITH` (CTE) | Yes | Yes (8.0+) | Yes (3.8.3+) |
-| Window functions | Yes | Yes (8.0+) | Yes (3.25+) |
+| Window function SQL capability | Yes | Yes (8.0+) | Yes (3.25+) |
 | `DISTINCT ON` | Yes | No | No |
 | `FOR UPDATE` / `FOR SHARE` | Yes | Yes (limited) | No |
 | `FOR NO KEY UPDATE` / `FOR KEY SHARE` | Yes | **No** | No |
-| `FULL JOIN` | Yes | No | No |
-| `LIMIT` on `UPDATE`/`DELETE` | No (silently dropped) | Yes | Yes (requires `SQLITE_ENABLE_UPDATE_DELETE_LIMIT` compile flag) |
-| JSON operators | `->`, `->>`, `@>`, etc. | Limited | Limited |
-| Regex match (`~`, `~*`, `!~`, `!~*`) | Yes | **No** (emits `FALSE`) | **No** (emits `FALSE`) |
-| Full-text search (`@@`, `to_tsvector`, etc.) | Yes | **No** (emits `FALSE`/`NULL`) | **No** (emits `FALSE`/`NULL`) |
+| `RIGHT JOIN` builder API | Yes | Yes | RC.1 builder-surface parity and SQL rendering on capable engines; DEVIATION:INTENTIONAL fail-fast capability hardening requires SQLite 3.39+ |
+| `FULL JOIN` builder API | Yes | No | RC.1 builder-surface parity and SQL rendering on capable engines; DEVIATION:INTENTIONAL fail-fast capability hardening requires SQLite 3.39+ |
+| `LIMIT` on `UPDATE`/`DELETE` | No API in RC.1 builders | Yes | Yes only when the SQLite driver/engine exposes `SQLITE_ENABLE_UPDATE_DELETE_LIMIT`; otherwise fail fast |
+| JSON operators | extraction operators may be expressed through raw SQL/generic composition; JSONB containment/existence/delete-path operators (`@>`, `<@`, `?`, `?|`, `?&`, `#-`) require `jsonb` or an explicit cast; typed JSONB helpers are Grizzle-only | JSON column types only in initial typed helper surface; dialect-specific JSON functions require raw SQL or a future helper spec | JSON column types only in initial typed helper surface; dialect-specific JSON functions require raw SQL or a future helper spec |
+| Regex match (`~`, `~*`, `!~`, `!~*`) | Yes | No API or `unsupported_feature` | No API or `unsupported_feature` |
+| Full-text search (`@@`, `to_tsvector`, etc.) | Yes | No API or `unsupported_feature` | No API or `unsupported_feature` |
+
+Window-function SQL capability is a database feature row, not a claim that Drizzle RC.1 exposes public typed window helper functions. Grizzle typed window helpers are `GRIZZLE-ONLY` conveniences if retained; Drizzle users use raw `sql` fragments for window expressions.
 
 ## Dialect interface
 
 All query builder operations must route dialect-specific SQL through the `Dialect` interface — no dialect name checks (`if d.Name() == "postgres"`) inside query builder code.
 
-```go
-type Dialect interface {
-    Placeholder(n int) string       // "$1" (Postgres) or "?" (MySQL/SQLite)
-    QuoteIdent(name string) string  // `"name"` or `` `name` ``
-    Name() string                   // "postgres", "mysql", "sqlite"
-    SupportsReturning() bool
-    UpsertStyle() UpsertStyle
-    InsertIgnoreClause() string
-}
-```
+Target interface:
 
-**Dialect interface — IMPLEMENTED (PR #174 + #186).** All feature-detection methods are present and enforced at build time.
+The current branch still exposes older names such as `InsertIgnoreClause` and `SupportsForShareOf` in places. The interface below is the RC.1-parity target; implementation must either migrate the current interface to this shape or provide compatibility shims while preserving the target semantics.
 
 ```go
+type UpsertStyle string
+
+const (
+    UpsertOnConflict   UpsertStyle = "on_conflict"
+    UpsertDuplicateKey UpsertStyle = "duplicate_key"
+    UpsertNone         UpsertStyle = "none"
+)
+
 type Dialect interface {
     Placeholder(n int) string
-    QuoteIdent(name string) string
+    QuoteIdent(name string) (string, error)
     Name() string
     SupportsReturning() bool
     UpsertStyle() UpsertStyle
-    InsertIgnoreClause() string
+    MySQLInsertIgnoreKeyword() string
+    SQLiteOnConflictDoNothingClause() string
     SupportsCTE() bool
     SupportsWindowFunctions() bool
     SupportsDistinctOn() bool
     SupportsForUpdate() bool                // FOR UPDATE / FOR SHARE
-    SupportsForNoKeyUpdate() bool           // PostgreSQL-only; false for MySQL/SQLite
-    SupportsFullJoin() bool
-    ForShareClause() string                 // "FOR SHARE" (Postgres) / "LOCK IN SHARE MODE" (MySQL)
-    SupportsForShareOf() bool
+    SupportsForNoKeyUpdate() bool           // PostgreSQL-compatible; false for MySQL/SQLite
+    SupportsForKeyShare() bool              // PostgreSQL-compatible; false for MySQL/SQLite
+    SupportsRightJoin() bool                     // true for PostgreSQL/MySQL; SQLite version/driver gated: true only for 3.39+
+    SupportsFullJoin() bool                      // false for MySQL; SQLite version/driver gated: true only for 3.39+
+    ForShareClause() string                 // "FOR SHARE" for PostgreSQL and MySQL RC.1 parity
+    SupportsLockOf() bool                   // PostgreSQL-compatible; absent from MySQL/SQLite in RC.1
     SupportsRegexpMatch() bool              // PostgreSQL-only (~, ~*, !~, !~*); false for MySQL/SQLite
     SupportsFullTextSearch() bool           // PostgreSQL-only (@@, to_tsvector, etc.); false for MySQL/SQLite
-    SupportsLimitOnMutate() bool            // false for PostgreSQL; true for MySQL/SQLite
+    SupportsLimitOnMutate() bool            // false for PostgreSQL; true for MySQL; SQLite must be driver/compile-option gated
 }
 ```
+
+`SupportsReturning()` reports support for normal SQL `RETURNING` only. MySQL `.ReturningID()` / Drizzle `$returningId()` parity is an insert-execution helper capability and must not make `SupportsReturning()` return true.
 
 ## Driver parity
 
@@ -78,39 +86,43 @@ type Dialect interface {
 |---|---|---|
 | `drizzle-orm/node-postgres` | `driver/pgx` with `pgxpool.Pool` | PARITY |
 | `drizzle-orm/postgres-js` | No equivalent | DEVIATION:GAP (not designed) |
-| `drizzle-orm/mysql2` | `database/sql` + `go-sql-driver/mysql` | Partial |
-| `drizzle-orm/better-sqlite3` | `database/sql` + `mattn/go-sqlite3` | Partial |
+| `drizzle-orm/mysql2` | `database/sql` + `go-sql-driver/mysql` | DEVIATION:LANGUAGE for Go driver substitution; remaining adapter behavior is DEVIATION:GAP (designed) until migration/session conformance tests cover it |
+| `drizzle-orm/better-sqlite3` | `database/sql` + `mattn/go-sqlite3` | DEVIATION:LANGUAGE for Go driver substitution; remaining adapter behavior is DEVIATION:GAP (designed) until migration/session conformance tests cover it |
 | Connection pool config | Via pgx / `database/sql` pool config | PARITY |
 
-## Known bugs
+Initial `mysqldb` implementations using `database/sql` + `go-sql-driver/mysql` must leave MySQL `.ReturningID()` proof fields such as warning count, skipped rows, duplicate rows, inserted rows, and `AffectedRowsIsInsertedCount` invalid unless the adapter has a documented lower-level source for that exact value. Conformance tests must assert fail-fast `unsupported_feature` behavior for `.ReturningID()` plans with `INSERT IGNORE`, duplicate-key updates, or insert-select row-count synthesis when required proof fields are unavailable. Insert-select `.ReturningID()` succeeds only for reconstructable auto-increment keys with valid inserted-row-count proof.
 
-**#110 — FIXED (PR #174).** `FOR NO KEY UPDATE` and `FOR KEY SHARE` were PostgreSQL-only locking clauses that previously emitted for MySQL. Fixed by adding `SupportsForNoKeyUpdate()` to the `Dialect` interface; MySQL and SQLite return `false` and the clauses are now suppressed at build time.
+## Target Dialect Gating Rules
 
-**#230 — FIXED. GRIZZLE-ONLY (safe-fail on non-PG dialects).** PostgreSQL-only regex operators (`~`, `~*`, `!~`, `!~*`) and full-text search expressions (`@@`, `to_tsvector`, `to_tsquery`, etc.) emitted unconditionally regardless of dialect. Fixed by adding `SupportsRegexpMatch()` and `SupportsFullTextSearch()` to the `Dialect` interface. On non-PostgreSQL dialects, predicate expressions (regex match, FTS `@@` operators) emit `FALSE` and scalar expressions (standalone `to_tsquery`, `to_tsvector`) emit `NULL`; no args are bound. Note: the NOT-match operators (`!~`, `!~*`) also emit `FALSE` (not `TRUE`) on unsupported dialects. This is intentional safe-failure behaviour — the query remains syntactically valid but returns no rows, preventing silent data corruption. Callers should check `ctx.Dialect().SupportsRegexpMatch()` or `ctx.Dialect().SupportsFullTextSearch()` before using these operators against non-PG dialects.
+The rules below are the RC.1-parity target. Any current silent dropping or suppression of unsupported clauses/operators is non-conforming implementation debt until fail-fast dialect gating and conformance tests are implemented.
 
-**#231 — FIXED (PR #257).** `LIMIT` on `UPDATE`/`DELETE` was gated by a hard-coded `d.Name() != "postgres"` string check in the query builder, violating the rule against dialect-name checks inside builders. Fixed by adding `SupportsLimitOnMutate()` to the `Dialect` interface; PostgreSQL returns `false` and the clause is silently dropped at build time for any dialect that does not support it.
+`FOR NO KEY UPDATE`, `FOR KEY SHARE`, and `FOR ... OF <tables>` are PostgreSQL-compatible locking features in the reviewed RC.1 query builders, including PostgreSQL and Cockroach. Cockroach is outside the initial Grizzle dialect scope unless a dedicated dialect spec is added. MySQL RC.1 supports only lock strengths `update` and `share`, rendered as `FOR UPDATE` and `FOR SHARE`; it does not expose PostgreSQL's `of` lock config. Unsupported lock methods must either be absent from dialect-specific builders or fail fast with an unsupported-feature error. Grizzle must not silently drop a user-requested locking clause.
+
+**GRIZZLE-ONLY (PostgreSQL-only):** PostgreSQL-only regex operators (`~`, `~*`, `!~`, `!~*`) and full-text search expressions (`@@`, `to_tsvector`, `to_tsquery`, etc.) are gated through `SupportsRegexpMatch()` and `SupportsFullTextSearch()`. On non-PostgreSQL dialects, builders must omit these APIs or return `unsupported_feature`; they must not render boolean stand-ins such as `FALSE`/`NULL`, because those do not compose safely through `NOT`, `AND`, and `OR`.
+
+`LIMIT` on `UPDATE`/`DELETE` is gated by `SupportsLimitOnMutate()` rather than dialect-name checks inside query builders. PostgreSQL returns `false`. MySQL returns `true`. SQLite returns `true` only when the selected driver/engine exposes `SQLITE_ENABLE_UPDATE_DELETE_LIMIT`; otherwise SQLite builders must omit the method or fail fast. To stay in parity with Drizzle RC.1, PostgreSQL-specific builders should omit the method; if a shared Go builder exposes the method, it must fail fast instead of silently dropping the clause.
 
 ## PostgreSQL-specific features
 
-### JSONB operators — DEVIATION:GAP (not designed)
+### JSONB operators — GRIZZLE-ONLY (PostgreSQL-specific typed convenience)
 
-`->`, `->>`, `@>`, `<@`, `?`, `?|`, `?&`, `#>`, `#-`. Tracked as part of #140.
+`JSONBColumn[T]` and typed containment/existence/delete-path helpers (`@>`, `<@`, `?`, `?|`, `?&`, `#-`) are restricted to generated handles backed by `pg.JSONB()`. Drizzle RC.1 has distinct PostgreSQL `json()` and `jsonb()` builders, and PostgreSQL containment/existence/delete-path operators are JSONB-only. Plain `JSONColumn[T]` is the generated handle for plain JSON across supported dialects and must not expose JSONB-only helpers. Shared extraction helpers such as `->`, `->>`, `#>`, and `#>>` may be offered for PostgreSQL plain JSON if specified; otherwise plain JSON uses raw SQL or an explicit cast. Non-PostgreSQL builders should omit unsupported JSON helpers or return `unsupported_feature` rather than silently changing JSON semantics. Tracked as part of #140.
 
-### Full-text search — GRIZZLE-ONLY (safe-fail on non-PG dialects)
+### Full-text search — GRIZZLE-ONLY (PostgreSQL-only)
 
-`tsvector`, `tsquery`, `@@`, `to_tsvector()`, `to_tsquery()`, `plainto_tsquery()`. These are PostgreSQL-specific; Grizzle supports them but gates their emission behind `SupportsFullTextSearch()`. On MySQL and SQLite, FTS predicate expressions emit `FALSE` and scalar FTS expressions emit `NULL` (issue #230, fixed). Callers must check `SupportsFullTextSearch()` before building FTS queries for portability.
+`tsvector`, `tsquery`, `@@`, `to_tsvector()`, `to_tsquery()`, `plainto_tsquery()`. These are PostgreSQL-specific; Grizzle supports them but gates their emission behind `SupportsFullTextSearch()`. On MySQL and SQLite, builders must omit these helpers or return `unsupported_feature`.
 
-### Regex match operators — GRIZZLE-ONLY (safe-fail on non-PG dialects)
+### Regex match operators — GRIZZLE-ONLY (PostgreSQL-only)
 
-`~`, `~*`, `!~`, `!~*`. PostgreSQL POSIX regex match operators exposed via `StringColumn.RegexpMatch()`, `RegexpMatchI()`, `NotRegexpMatch()`, `NotRegexpMatchI()`. On non-PostgreSQL dialects, these emit `FALSE` (issue #230, fixed). Callers must check `SupportsRegexpMatch()` for portability.
+`~`, `~*`, `!~`, `!~*`. PostgreSQL POSIX regex match operators exposed via `StringColumn.RegexpMatch()`, `RegexpMatchI()`, `NotRegexpMatch()`, `NotRegexpMatchI()`. On non-PostgreSQL dialects, builders must omit these helpers or return `unsupported_feature`.
 
-### Array operators — DEVIATION:GAP (not designed)
+### Array operators — mixed DEVIATION:GAP status
 
-`ANY`, `ALL`, `@>`, `<@`, `&&`, array subscripting. Tracked as #144.
+Broad array SQL features such as `ANY`, `ALL`, array subscripting, and typed array scan/generation are **DEVIATION:GAP (not designed)**. Public RC.1 condition helpers `arrayContains`, `arrayContained`, and `arrayOverlaps` are **DEVIATION:GAP (designed)**: when implemented, empty-array helper inputs must fail with `build_validation`, matching RC.1's throw behavior. Tracked as #144.
 
-## `*pg.TableDef` leak across dialects — FIXED (issue #156)
+## Current Implementation Status: `*pg.TableDef` Leak Across Dialects
 
-**Previously DEVIATION:BROKEN — resolved in PR #156.**
+**Status:** Resolved current-state issue. This section is non-normative implementation history; the target file-migration contract is the dialect-agnostic schema/input model described in the file-migration specs.
 
 ### Problem
 
@@ -118,9 +130,9 @@ The CLI parser (`cmd/grizzle/main.go: parseSchemaDir`) was returning `[]*pg.Tabl
 dialects, including MySQL and SQLite. `kit/migrate_mysql.go` and `kit/migrate_sqlite.go` received
 `*pg.TableDef` values even for non-PostgreSQL schemas, losing dialect identity at the type level.
 
-### Resolution — Option 1: `pg.TableDefiner` interface
+### Resolution
 
-The fix introduces a `pg.TableDefiner` interface in `schema/pg/tabledef_iface.go`:
+The implementation uses a `pg.TableDefiner` interface in `schema/pg/tabledef_iface.go`:
 
 ```go
 // TableDefiner is the dialect-agnostic table descriptor interface.
@@ -144,10 +156,14 @@ Dialect identity is preserved through distinct concrete types:
 
 ### Propagation
 
-All kit entry points (`Push`, `DryRun`, `Migrate`, `Status` and their MySQL/SQLite variants)
+Schema-definition-taking entry points (`Push`, `DryRun`, SQL generation, schema parsing, and their MySQL/SQLite variants)
 now accept `...pg.TableDefiner` instead of `...*pg.TableDef`. The CLI `parseSchemaDir`
 returns `[]pg.TableDefiner`, and `gen/parser.EvalTable` returns `pg.TableDefiner` (dispatching
 to `*mysql.TableDef` or `*sqlite.TableDef` based on the `ParsedTable.Dialect` field).
+
+`kit.Push` examples in this section document type compatibility only. `Push` remains a direct-sync development/control-plane shortcut and is not a production deployment default until a dedicated push spec defines destructive-change handling, locking, non-interactive behavior, and CI safety. Production-style schema changes should use generated, reviewed, committed migration artifacts with `check` and `migrate`.
+
+`Migrate` and `Status` are not table-definition-taking APIs in the current branch; they take DB handles plus migration/status options. File-migration target behavior is defined in the dedicated file-migration specs.
 
 Backward compatibility is preserved for the common case: any code that already passes
 individual `*pg.TableDef` values continues to work without change because `*pg.TableDef`

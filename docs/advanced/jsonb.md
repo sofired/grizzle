@@ -1,14 +1,18 @@
 # JSONB (PostgreSQL)
 
-`JSONBColumn[T]` is the column handle for PostgreSQL `JSONB` / `JSON` columns. The type parameter `T` is the Go type the value will be scanned into — it doesn't affect SQL generation, but it makes generated code self-documenting.
+`JSONBColumn[T]` is the column handle for PostgreSQL `JSONB` columns. Plain `JSONColumn[T]` handles across supported dialects must not receive JSONB-only containment/existence/delete-path helpers by default. The type parameter `T` is the Go type the value will be scanned into — it doesn't affect SQL generation, but it makes generated code self-documenting.
+
+**Status:** GRIZZLE-ONLY PostgreSQL typed convenience over JSONB SQL operators. Drizzle RC.1 exposes distinct JSON and JSONB column types plus generic `sql` composition, but not this exact Go helper surface. Builders must omit these helpers on non-PostgreSQL dialects or fail fast rather than silently changing JSON semantics.
+
+JSON key and path helper arguments are bound data values, not SQL identifiers or raw trusted literals. `Arrow("role")`, `HasKey("role")`, and path helpers must call the build context's parameter binding path so user-provided keys cannot alter SQL structure.
 
 ## Defining a JSONB column
 
 ```go
 // In your schema file
-var UsersT = pg.Table("users",
+var Users = pg.Table("users",
     // ...
-    pg.JSONB("attributes"),  // → JSONBColumn[map[string]any]
+    pg.C("attributes", pg.JSONB()), // generated handle: JSONBColumn[map[string]any]
 )
 ```
 
@@ -32,14 +36,14 @@ db.UsersT.Attributes.ArrowText("role")
 
 ```go
 db.UsersT.Attributes.Path("address", "city")
-// "users"."attributes" #> ARRAY['address', 'city']
+// "users"."attributes" #> $1
 ```
 
 ### PathText (`#>>`) — nested value as text
 
 ```go
 db.UsersT.Attributes.PathText("address", "city")
-// "users"."attributes" #>> ARRAY['address', 'city']
+// "users"."attributes" #>> $1
 ```
 
 ## Containment operators
@@ -59,7 +63,7 @@ True when the column value is contained within the given JSON fragment:
 
 ```go
 db.UsersT.Attributes.ContainedBy(map[string]any{"role": "admin", "active": true})
-// $1 @> "users"."attributes"
+// "users"."attributes" <@ $1
 ```
 
 ## Key existence operators
@@ -75,7 +79,7 @@ db.UsersT.Attributes.HasKey("role")
 
 ```go
 db.UsersT.Attributes.HasKeyNot("suspended_until")
-// NOT "users"."attributes" ? $1
+// NOT ("users"."attributes" ? $1)
 ```
 
 ### HasAnyKey (`?|`)
@@ -96,9 +100,16 @@ db.UsersT.Attributes.HasAllKeys("role", "email_verified")
 // "users"."attributes" ?& $1
 ```
 
+## Delete-path operator
+
+```go
+db.UsersT.Attributes.DeletePath("private", "token")
+// "users"."attributes" #- $1
+```
+
 ## Using JSONB in SELECT
 
-Navigation expressions return `expr.Expression`, which can be used in SELECT via `expr.Raw` or aliased for scanning:
+Navigation helpers return selectable expressions. Containment and existence helpers return predicates. Raw fragments must be compile-time trusted strings; use `RawArgs` or normal builder predicates for dynamic values.
 
 ```go
 type UserAttrs struct {
@@ -110,12 +121,10 @@ rows, err := d.Query(ctx,
     query.Select(
         db.UsersT.ID,
         // Extract a text field and alias it for scanning
-        expr.RawSelectAs(
-            `"users"."attributes" ->> 'role'`,
-            "role",
-        ),
+        db.UsersT.Attributes.ArrowText("role").As("role"),
     ).From(db.UsersT),
 )
+attrs, err := pgxdb.ScanAll[UserAttrs](rows, err)
 ```
 
 ::: tip

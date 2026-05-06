@@ -27,9 +27,9 @@ var UserProfile = query.HasOne("profile", db.ProfilesT, db.ProfilesT.UserID.EQCo
 
 | Drizzle | Grizzle | Status |
 |---|---|---|
-| `one(tbl, {fields, references})` | `query.BelongsTo(name, tbl, onExpr)` | PARITY |
-| `many(tbl)` | `query.HasMany(name, tbl, onExpr)` | PARITY |
-| `one` (HasOne direction) | `query.HasOne(name, tbl, onExpr)` | PARITY |
+| `one(tbl, {fields, references})` | `query.BelongsTo(name, tbl, onExpr)` | Semantic parity; API is DEVIATION:LANGUAGE because Go carries the ON expression explicitly |
+| `many(tbl)` | `query.HasMany(name, tbl, onExpr)` | Semantic parity; API is DEVIATION:LANGUAGE because Go carries the ON expression explicitly |
+| `one` (HasOne direction) | `query.HasOne(name, tbl, onExpr)` | Semantic parity; API is DEVIATION:LANGUAGE because Go carries the ON expression explicitly |
 | Self-referential relations | DEVIATION:GAP (not designed) | — |
 | Many-to-many via junction table | DEVIATION:GAP (not designed) | — |
 
@@ -44,11 +44,13 @@ db.select().from(users).leftJoin(realms, eq(users.realmId, realms.id))
 
 **Grizzle:**
 ```go
-query.Select().From(db.UsersT).JoinRel(db.UserRealm)        // LEFT JOIN
-query.Select().From(db.UsersT).InnerJoinRel(db.UserRealm)   // INNER JOIN
+query.Select(db.UsersT.ID, db.RealmsT.Name).From(db.UsersT).JoinRel(db.UserRealm)        // LEFT JOIN
+query.Select(db.UsersT.ID, db.RealmsT.Name).From(db.UsersT).InnerJoinRel(db.UserRealm)   // INNER JOIN
 ```
 
-**Status:** PARITY
+**Status:** GRIZZLE-ONLY convenience helpers over PARITY join semantics.
+
+Relation definitions themselves target Drizzle parity. `JoinRel` and `InnerJoinRel` are Go-specific shorthand for applying a relation's already-declared `ON` expression to the parity `LEFT JOIN` / `INNER JOIN` builders.
 
 ### Relational query API (`findMany` / `findFirst`) — DEVIATION:GAP (not designed)
 
@@ -66,7 +68,7 @@ Drizzle's relational API automatically issues efficient SQL (or multiple queries
 
 **Grizzle:** No direct equivalent. Users compose the equivalent manually — see the preloading section below.
 
-The relational query API is a significant usability gap. It should be designed and implemented after the Kit workflow is stabilised. The target API must:
+The relational query API is a significant usability gap. It should be designed and implemented after the Kit workflow is stabilized. The target API must:
 - Accept a relation graph (`With` option specifying which relations to load)
 - Issue the minimum number of queries (batch loading, not N+1)
 - Return typed nested structs (via generics or code generation)
@@ -74,7 +76,7 @@ The relational query API is a significant usability gap. It should be designed a
 
 ## Manual batch-loading (current approach)
 
-Until the relational query API is implemented, users load related rows explicitly in two queries. This is correct and efficient — it is what Drizzle does internally — but requires more code.
+Until the relational query API is implemented, users load related rows explicitly in two queries. This is a Grizzle-only interim pattern that avoids N+1 queries while preserving the same batched-loading goal as Drizzle's relational query API, but it requires more user code.
 
 **Full example — BelongsTo (user → realm):**
 

@@ -1,51 +1,61 @@
 # Mutations
 
+::: warning Target API status
+This page describes the target mutation API for the RC.1 parity work. Some examples use APIs that are specified but not fully implemented yet, including `query.Assign[T]`, `SetStruct`, `DoUpdateSetStruct`, and optional shared conflict helpers. Check [spec/README.md](/spec/) before treating an example as current branch behavior.
+:::
+
 ## INSERT
 
-Use a db-tagged struct to supply values. Fields tagged `omitempty` are omitted when nil or zero:
+Use a db-tagged struct to supply values. Optional non-null/defaulted fields use pointers with `omitempty`. Nullable assignable fields use `query.Assign[T]` so callers can distinguish omitted fields from explicit SQL `NULL`:
+
+When examples use string column names in `Set` or optional string-name assignment helpers, those strings must be compile-time literals or generated constants. The builder must quote and validate them as single identifiers; never pass user input as a column name. Conflict examples use generated column handles through `query.ConflictColumn` and `query.SetValue`.
 
 ```go
 type UserInsert struct {
-    ID        *uuid.UUID `db:"id,omitempty"`       // optional — DEFAULT gen_random_uuid()
-    RealmID   uuid.UUID  `db:"realm_id"`            // required
-    Username  string     `db:"username"`             // required
-    Email     *string    `db:"email,omitempty"`      // optional
-    Enabled   *bool      `db:"enabled,omitempty"`    // optional — DEFAULT true
+    ID        *uuid.UUID          `db:"id,omitempty"`      // optional — DEFAULT gen_random_uuid()
+    RealmID   uuid.UUID           `db:"realm_id"`           // required
+    Username  string              `db:"username"`            // required
+    Email     query.Assign[string] `db:"email"`              // nullable — unset/value/null
+    Enabled   *bool               `db:"enabled,omitempty"`   // optional — DEFAULT true
 }
 
 row := UserInsert{
     RealmID:  realmID,
     Username: "alice",
+    Email:    query.Unset[string](),
 }
 
-sql, args := query.InsertInto(db.UsersT).
+sql, args, err := query.InsertInto(db.UsersT).
     Values(row).
     Returning(db.UsersT.ID, db.UsersT.CreatedAt).
     Build(dialect.Postgres)
-// INSERT INTO "users" ("realm_id", "username") VALUES ($1, $2)
+// INSERT INTO "users" (...) VALUES (... dialect defaults for omitted fields ...)
 // RETURNING "users"."id", "users"."created_at"
 ```
 
 ### Multiple rows
 
 ```go
-// Pass structs one at a time
-q := query.InsertInto(db.UsersT).
-    Values(row1).
-    Values(row2)
+// Pass multiple structs in one call
+qMulti := query.InsertInto(db.UsersT).
+    Values(row1, row2)
 
 // Or pass a slice
-q := query.InsertInto(db.UsersT).ValueSlice(rows)
+qSlice := query.InsertInto(db.UsersT).ValueSlice(rows)
 ```
 
 ### Executing an INSERT
 
 ```go
 // With RETURNING — scan the returned rows
+type InsertedUserID struct {
+    ID uuid.UUID `db:"id"`
+}
+
 rows, err := d.Query(ctx,
     query.InsertInto(db.UsersT).Values(row).Returning(db.UsersT.ID),
 )
-result, err := pgxdb.ScanOne[db.UserSelect](rows, err)
+result, err := pgxdb.ScanOne[InsertedUserID](rows, err)
 
 // Without RETURNING — just get the row count
 n, err := d.Exec(ctx, query.InsertInto(db.UsersT).Values(row))
@@ -53,48 +63,66 @@ n, err := d.Exec(ctx, query.InsertInto(db.UsersT).Values(row))
 
 ## UPSERT
 
-### PostgreSQL — ON CONFLICT
+### PostgreSQL / SQLite — ON CONFLICT
 
 ```go
 // Conflict on column list → DO UPDATE SET excluded columns
 query.InsertInto(db.UsersT).
     Values(row).
-    OnConflict("realm_id", "username").
-    DoUpdateSetExcluded("email", "enabled")
+    OnConflict(query.ConflictColumn(db.UsersT.RealmID), query.ConflictColumn(db.UsersT.Username)).
+    DoUpdateSetExcluded(db.UsersT.Email, db.UsersT.Enabled)
 // ON CONFLICT ("realm_id", "username")
 // DO UPDATE SET "email" = EXCLUDED."email", "enabled" = EXCLUDED."enabled"
-
-// Conflict on named constraint
-query.InsertInto(db.UsersT).
-    Values(row).
-    OnConflictConstraint("users_realm_username_idx").
-    DoNothing()
 
 // Explicit SET values on conflict
 query.InsertInto(db.UsersT).
     Values(row).
-    OnConflict("email").
-    DoUpdateSet("enabled", true).
-    DoUpdateSet("updated_at", time.Now())
+    OnConflict(query.ConflictColumn(db.UsersT.Email)).
+    DoUpdateSet(
+        query.SetValue(db.UsersT.Enabled, true),
+        query.SetValue(db.UsersT.UpdatedAt, time.Now()),
+    )
 
 // Struct-based SET on conflict
+enabled := true
 query.InsertInto(db.UsersT).
     Values(row).
-    OnConflict("email").
-    DoUpdateSetStruct(UserUpdate{Enabled: ptr(true)})
+    OnConflict(query.ConflictColumn(db.UsersT.Email)).
+    DoUpdateSetStruct(UserUpdate{Enabled: &enabled})
 ```
 
-### MySQL / SQLite — INSERT IGNORE
+### Grizzle-only / future constraint targets
+
+Drizzle RC.1 PostgreSQL conflict targets are column-based; SQLite also accepts trusted SQL conflict-target expressions. A named-constraint conflict helper such as `OnConflictConstraint("users_realm_username_idx")` is not RC.1 parity and must stay out of the initial parity path unless it is separately implemented and labeled as a Grizzle-only extension.
+
+### Dialect-specific ignore helpers
 
 ```go
-// Silently skip rows that violate unique/PK constraints
-// MySQL:  INSERT IGNORE INTO ...
-// SQLite: INSERT OR IGNORE INTO ...
-query.InsertInto(db.UsersT).Values(row).IgnoreConflicts()
+// Skip conflicting rows without returning an error. On MySQL, INSERT IGNORE
+// can also downgrade broader constraint/data problems to warnings.
+// MySQL: INSERT IGNORE INTO ... (assumes a generated MySQL schema package)
+query.MySQLInsertInto(mysqlschema.UsersT).Ignore().Values(row)
 ```
 
 ::: info Dialect differences
-`ON CONFLICT` is PostgreSQL / SQLite syntax. MySQL uses `ON DUPLICATE KEY UPDATE`, which is emitted automatically when the MySQL dialect is active. `IgnoreConflicts()` emits `INSERT IGNORE` for MySQL and `INSERT OR IGNORE` for SQLite.
+`ON CONFLICT` is PostgreSQL / SQLite syntax and must not be presented as MySQL parity. MySQL upsert uses a separate `ON DUPLICATE KEY UPDATE` builder with no conflict target:
+
+```go
+query.MySQLInsertInto(mysqlschema.UsersT).
+    Values(row).
+    OnDuplicateKeyUpdateSet(query.MySQLSetColValue(mysqlschema.UsersT.Email, "alice@example.com"))
+
+// MySQL no-op conflict handling:
+query.MySQLInsertInto(mysqlschema.UsersT).
+    Values(row).
+    OnDuplicateKeyUpdateSet(query.MySQLSetColSelf(mysqlschema.UsersT.ID))
+```
+
+`IgnoreConflicts()` is an optional shared wrapper. If retained, it must render `ON CONFLICT DO NOTHING` for PostgreSQL and SQLite, `INSERT IGNORE` for MySQL, and a build error for unsupported/custom dialects.
+:::
+
+::: warning
+Ignore helpers can hide data-quality or integrity problems. Use them only when skipped rows are expected and observable through row counts, diagnostics, or application-level reconciliation.
 :::
 
 ## UPDATE
@@ -102,7 +130,7 @@ query.InsertInto(db.UsersT).Values(row).IgnoreConflicts()
 ### Explicit SET
 
 ```go
-sql, args := query.Update(db.UsersT).
+sql, args, err := query.Update(db.UsersT).
     Set("email", "new@example.com").
     Set("updated_at", time.Now()).
     Where(db.UsersT.ID.EQ(userID)).
@@ -112,19 +140,22 @@ sql, args := query.Update(db.UsersT).
 
 ### Struct-based SET
 
-Use a struct where all fields are pointers. Nil fields are skipped — only non-nil fields are included in the SET clause:
+Use a struct where non-null assignable fields are pointers and nullable assignable fields use `query.Assign[T]`. Nil pointers and unset assignments are skipped for UPDATE/UPSERT SET structs; `omitempty` is not required for update omission:
 
 ```go
 type UserUpdate struct {
-    Email     *string    `db:"email"`
-    Enabled   *bool      `db:"enabled"`
-    DeletedAt *time.Time `db:"deleted_at"`
-    UpdatedAt *time.Time `db:"updated_at"`
+    Email     query.Assign[string]    `db:"email"`
+    Enabled   *bool                   `db:"enabled"`
+    DeletedAt query.Assign[time.Time] `db:"deleted_at"`
+    UpdatedAt *time.Time              `db:"updated_at"`
 }
 
 now := time.Now()
-sql, args := query.Update(db.UsersT).
-    SetStruct(UserUpdate{DeletedAt: &now, UpdatedAt: &now}).
+sql, args, err := query.Update(db.UsersT).
+    SetStruct(UserUpdate{
+        DeletedAt: query.Value(now),
+        UpdatedAt: &now,
+    }).
     Where(db.UsersT.ID.EQ(userID)).
     Returning(db.UsersT.UpdatedAt).
     Build(dialect.Postgres)
@@ -136,13 +167,17 @@ sql, args := query.Update(db.UsersT).
 
 ```go
 // With RETURNING
+type UpdatedTimestamp struct {
+    UpdatedAt time.Time `db:"updated_at"`
+}
+
 rows, err := d.Query(ctx,
     query.Update(db.UsersT).
         SetStruct(update).
         Where(db.UsersT.ID.EQ(userID)).
         Returning(db.UsersT.UpdatedAt),
 )
-result, err := pgxdb.ScanOne[db.UserSelect](rows, err)
+result, err := pgxdb.ScanOne[UpdatedTimestamp](rows, err)
 
 // Without RETURNING
 n, err := d.Exec(ctx,
@@ -153,7 +188,7 @@ n, err := d.Exec(ctx,
 ## DELETE
 
 ```go
-sql, args := query.DeleteFrom(db.UsersT).
+sql, args, err := query.DeleteFrom(db.UsersT).
     Where(db.UsersT.ID.EQ(userID)).
     Build(dialect.Postgres)
 // DELETE FROM "users" WHERE "users"."id" = $1
@@ -167,12 +202,17 @@ rows, err := d.Query(ctx,
         Where(db.UsersT.DeletedAt.IsNotNull()).
         Returning(db.UsersT.ID, db.UsersT.Username),
 )
-deleted, err := pgxdb.ScanAll[db.UserSelect](rows, err)
+type DeletedUser struct {
+    ID       uuid.UUID `db:"id"`
+    Username string    `db:"username"`
+}
+
+deleted, err := pgxdb.ScanAll[DeletedUser](rows, err)
 ```
 
 ## RETURNING clause
 
-`RETURNING` is supported on INSERT, UPDATE, and DELETE for PostgreSQL and SQLite. It is silently dropped for MySQL.
+`RETURNING` is supported on INSERT, UPDATE, and DELETE for PostgreSQL and SQLite. MySQL does not have normal `RETURNING` parity; Grizzle must reject or omit that API for MySQL rather than silently dropping it.
 
 ```go
 // Any selectable column can be returned

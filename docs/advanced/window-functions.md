@@ -1,6 +1,12 @@
 # Window Functions
 
+::: warning Target query API
+Examples on this page use the target error-returning `Build(dialect)` and fail-fast unsupported-feature behavior. The current branch may still expose older two-return builders; any silent dialect fallback is non-conforming implementation debt until those target query contracts land.
+:::
+
 Window expressions (`fn OVER (PARTITION BY … ORDER BY …)`) are in the `expr` package. They implement `SelectableColumn` so they can appear in SELECT and ORDER BY.
+
+Drizzle RC.1 parity for window expressions is raw `sql` fragment support. The typed helpers on this page are Grizzle-only conveniences over that SQL capability.
 
 ## Ranking functions
 
@@ -70,7 +76,7 @@ ranked, err := pgxdb.ScanAll[UserRanked](rows, err)
 type UserWithTotal struct {
     ID          uuid.UUID `db:"id"`
     Score       int       `db:"score"`
-    RunningSum  float64   `db:"running_sum"`
+    RunningSum  string    `db:"running_sum"`
 }
 
 rows, err := d.Query(ctx,
@@ -83,7 +89,10 @@ rows, err := d.Query(ctx,
             As("running_sum"),
     ).From(db.UsersT),
 )
+totals, err := pgxdb.ScanAll[UserWithTotal](rows, err)
 ```
+
+Aggregate window scan types are driver/dialect dependent. Numeric aggregates commonly scan as strings, matching Drizzle's conservative `sum()`/`avg()` result typing; use the destination type required by the selected driver.
 
 ## Sorting by window result
 
@@ -99,28 +108,23 @@ query.Select(db.UsersT.ID, rn.As("rn")).
 
 ## Dialect compatibility
 
-| Dialect | Window functions |
+| Dialect | Window function SQL capability |
 |---|---|
 | PostgreSQL | Fully supported |
 | MySQL | Supported (8.0+) |
 | SQLite | Supported (3.25+) |
 
-When building against a dialect where `SupportsWindowFunctions()` returns false, the query builder **silently drops window function columns** from the SELECT list. Non-window columns in the same SELECT are kept. If every column in the SELECT list is a window function, the query falls back to `SELECT *`.
+When building against a dialect where `SupportsWindowFunctions()` returns false, Grizzle must fail at `Build` with an unsupported-feature error or omit the window-function API from that dialect-specific builder. It must not drop window expressions or fall back to `SELECT *`.
 
 ```go
 // On a dialect that does not support window functions:
-query.Select(
-    db.UsersT.ID,         // kept
-    expr.RowNumber().As("rn"),  // dropped — window fn
-).From(db.UsersT)
-// → SELECT "users"."id" FROM "users"
-
-query.Select(
-    expr.RowNumber().As("rn"),  // only column, dropped
-).From(db.UsersT)
-// → SELECT * FROM "users"  (fallback)
+sql, args, err := query.Select(
+    db.UsersT.ID,
+    expr.RowNumber().As("rn"),
+).From(db.UsersT).Build(legacyDialect)
+// err: unsupported_feature
 ```
 
 ::: warning
-The silent-drop behaviour exists for forward compatibility with older database versions. Relying on it in production means the dropped columns will be missing from query results without an error. If window functions are required for correctness (e.g. for pagination or ranking), check `d.SupportsWindowFunctions()` before building the query.
+If window functions are required for correctness, such as pagination or ranking, check `d.SupportsWindowFunctions()` before constructing portable queries.
 :::

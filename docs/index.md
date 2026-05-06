@@ -4,7 +4,7 @@ layout: home
 hero:
   name: Grizzle
   text: Type-safe SQL for Go
-  tagline: A code-generated query builder and migration toolkit inspired by Drizzle ORM. Compile-time column types. Immutable builders. Multi-dialect.
+  tagline: A code-generated query builder and migration toolkit inspired by Drizzle ORM. Compile-time column types. Composable builders. Multi-dialect.
   actions:
     - theme: brand
       text: Get Started
@@ -19,22 +19,22 @@ features:
     details: Column types enforce correct operators at compile time. A UUIDColumn only accepts UUIDs. A StringColumn only accepts strings. Type mismatches are compiler errors, not runtime panics.
 
   - icon: ⚡
-    title: Immutable query builders
-    details: Every method returns a new copy. Share and extend query fragments safely across goroutines without unexpected mutation.
+    title: Composable query builders
+    details: Build typed query fragments with clear dialect gates and checked SQL output. Copy-style builders may be retained as a Go adaptation, but SQL behavior is the parity target.
 
   - icon: 🗄️
     title: Multi-dialect
-    details: One builder API targets PostgreSQL, MySQL/MariaDB, and SQLite. Placeholder style, RETURNING, and upsert syntax differences are handled automatically.
+    details: Dialect-aware builders target PostgreSQL, MySQL/MariaDB, and SQLite. Shared SQL stays portable; dialect-specific mutation APIs handle differences like MySQL duplicate-key updates.
 
   - icon: 🔧
     title: Migration kit
-    details: Introspect your live database, diff against your Go schema, and apply DDL atomically — with a migration history table tracked in the database.
+    details: Target workflow: generate migration artifacts, review them, run check, then migrate with database history tracking. Current legacy helpers remain separate until the RC.1 file workflow lands.
 
   - icon: ✨
     title: Code generation
-    details: Run grizzle gen to turn your schema.go into typed table handles with a UUIDColumn, StringColumn, etc. for every column. No manual typing.
+    details: Run grizzle gen to turn schema definition files into typed table handles with a UUIDColumn, StringColumn, etc. for every column. No manual typing.
 
   - icon: 📦
     title: Zero magic
-    details: No global state, no interface{} surprises, no hidden SQL. Every query produces a plain (string, []any) that you execute however you like.
+    details: No global state, controlled any-value escape hatches, and no hidden SQL. Target query builders return SQL, args, and a checked error before execution.
 ---
