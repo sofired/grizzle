@@ -562,7 +562,7 @@ Code-area tracking issues for migration-kit follow-up work. Each should hang off
 
 3. `Replace legacy snapshot file model`
    - paths: `kit/snapshot.go`, `cmd/grizzle` snapshot/diff wiring, tests that use `schema.snapshot.json`
-   - labels: `area:file-migrations`, `phase:implementation`, `slice:2`, `slice:8`
+   - labels: `area:file-migrations`, `phase:implementation`, `slice:1`, `slice:2`, `slice:8`
 
 4. `Adapt schema definitions and static loader for strict file migrations`
    - paths: `schema/*`, `gen/parser/*`
@@ -596,9 +596,11 @@ Issue-side gate (from [Issue Triage](#issue-triage)):
 - old-direction issues are closed, marked `superseded`, or rewritten (per [Immediate Cleanup Recommendations](#immediate-cleanup-recommendations))
 - one parent issue exists for every slice 0 through 8 (per [Per-Slice Parent Issues](#per-slice-parent-issues))
 - one parent issue exists for every project-wide workstream (per [P1: Project-Wide Parent Issues](#p1-project-wide-parent-issues-canonical))
+- every open issue is assigned to a project area, mapped to a slice/workstream parent, or explicitly left as non-gating backlog
 - child issues are mapped to the relevant slice or workstream parent
 - direct-sync `push` and unsupported object-family work are visibly deferred or `blocked-by-spec`
 - no open issue body remains the de facto source of truth when it conflicts with `docs/spec/*` or Drizzle RC.1 source
+- no open issue remains capable of pulling old flat-file, `meta/`, checksum, baseline, or live-diff behavior into the RC.1 migration-kit implementation
 
 Spec-side gate:
 
