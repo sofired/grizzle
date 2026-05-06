@@ -25,13 +25,11 @@ If code or issues disagree with the specs, code/issues are stale unless the spec
 
 ## New Review Artifacts
 
-Project-wide entry points:
+Project-wide entry point:
 
-- [project-code-triage.md](./project-code-triage.md)
-- [project-issue-triage.md](./project-issue-triage.md)
-- [project-implementation-plan.md](./project-implementation-plan.md)
+- [project-plan.md](./project-plan.md) — combines code triage, issue triage, and the forward-looking implementation plan into a single source. Triage findings are preamble; the plan is the forward-looking body.
 
-Detailed migration-kit content is incorporated directly into the project-wide triage documents rather than linked as separate handoff files.
+Detailed migration-kit content is incorporated directly into `project-plan.md` rather than linked as separate handoff files.
 
 ## Important Correction
 
@@ -45,7 +43,7 @@ The phrase "file migrations" in the prior session's handoff and triage does not 
 
 ## Next Steps
 
-1. Review and merge the project-wide triage docs.
+1. Review and merge `project-plan.md`.
 2. Normalize GitHub issues across all areas, not just migration issues.
 3. Create parent issues/milestones for major spec areas.
 4. Create one parent issue per file-migration implementation slice before starting Slice 0.
