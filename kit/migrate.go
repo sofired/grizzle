@@ -315,13 +315,8 @@ func applyMigrationFilePostgres(ctx context.Context, pool *pgxpool.Pool, tag, sq
 		return fmt.Errorf("begin transaction: %w", err)
 	}
 
-	// Execute the migration SQL. We split on ";" to handle multi-statement files.
 	stmts := splitSQLStatements(sql)
 	for _, stmt := range stmts {
-		stmt = strings.TrimSpace(stmt)
-		if stmt == "" {
-			continue
-		}
 		if _, err := tx.Exec(ctx, stmt); err != nil {
 			_ = tx.Rollback(ctx)
 			return fmt.Errorf("exec statement: %w", err)
@@ -472,51 +467,44 @@ func DescribeChanges(changes []Change) string {
 
 // splitSQLStatements splits a SQL text into individual statements on
 // semicolons, skipping semicolons that appear inside single-quoted string
-// literals, double-quoted identifiers, line comments (--), and block comments
-// (/* */). Dollar-quoted blocks ($$...$$) are not handled; migration files
-// containing PL/pgSQL body text should not be split this way.
+// literals, double-quoted identifiers, backtick-quoted identifiers (MySQL),
+// line comments (--), and block comments (/* */). Dollar-quoted blocks
+// ($$...$$) are not handled; migration files containing PL/pgSQL body text
+// should not be split this way.
+//
+// Unterminated constructs (e.g. an unclosed quote or block comment) are not
+// treated as errors; the partial content is flushed as a final statement and
+// will fail at SQL execution time with a clear database error.
 func splitSQLStatements(sql string) []string {
 	var result []string
 	var cur strings.Builder
 	i, n := 0, len(sql)
 
+	// consumeQuoted reads a quoted token (single-quote, double-quote, or
+	// backtick) into cur, handling the SQL doubling escape ('' / "" / ``).
+	consumeQuoted := func(delim byte) {
+		cur.WriteByte(delim)
+		i++
+		for i < n {
+			c := sql[i]
+			cur.WriteByte(c)
+			i++
+			if c == delim {
+				if i < n && sql[i] == delim {
+					cur.WriteByte(sql[i])
+					i++
+				} else {
+					break
+				}
+			}
+		}
+	}
+
 	for i < n {
 		ch := sql[i]
 		switch ch {
-		case '\'':
-			// Single-quoted literal; '' is the escape sequence for an embedded quote.
-			cur.WriteByte(ch)
-			i++
-			for i < n {
-				c := sql[i]
-				cur.WriteByte(c)
-				i++
-				if c == '\'' {
-					if i < n && sql[i] == '\'' {
-						cur.WriteByte(sql[i])
-						i++
-					} else {
-						break
-					}
-				}
-			}
-		case '"':
-			// Double-quoted identifier; "" is the escape sequence.
-			cur.WriteByte(ch)
-			i++
-			for i < n {
-				c := sql[i]
-				cur.WriteByte(c)
-				i++
-				if c == '"' {
-					if i < n && sql[i] == '"' {
-						cur.WriteByte(sql[i])
-						i++
-					} else {
-						break
-					}
-				}
-			}
+		case '\'', '"', '`':
+			consumeQuoted(ch)
 		case '-':
 			if i+1 < n && sql[i+1] == '-' {
 				// Line comment: consume through end of line.

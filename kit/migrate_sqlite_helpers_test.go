@@ -66,6 +66,23 @@ func TestSplitSQLStatements(t *testing.T) {
 			in:   "ALTER TABLE t ADD CONSTRAINT chk CHECK (col NOT LIKE '%;%');\nCREATE INDEX idx ON t (col);",
 			want: []string{"ALTER TABLE t ADD CONSTRAINT chk CHECK (col NOT LIKE '%;%')", "CREATE INDEX idx ON t (col)"},
 		},
+		{
+			desc: "semicolon inside backtick-quoted identifier (MySQL) is not a split point",
+			in:   "ALTER TABLE t RENAME COLUMN `old;name` TO new_name;",
+			want: []string{"ALTER TABLE t RENAME COLUMN `old;name` TO new_name"},
+		},
+		// Unterminated constructs: no error is returned; the partial content is
+		// flushed as a trailing statement and will produce a SQL error at execution.
+		{
+			desc: "unterminated single-quoted literal is flushed as trailing statement",
+			in:   "SELECT 'unclosed",
+			want: []string{"SELECT 'unclosed"},
+		},
+		{
+			desc: "unterminated block comment is flushed as trailing statement",
+			in:   "/* no close\nSELECT 1",
+			want: []string{"/* no close\nSELECT 1"},
+		},
 	}
 
 	for _, c := range cases {
