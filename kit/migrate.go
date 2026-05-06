@@ -470,17 +470,98 @@ func DescribeChanges(changes []Change) string {
 	return strings.Join(parts, "; ")
 }
 
-// splitSQLStatements naively splits a SQL text on ";" to produce individual
-// runnable statements. Empty statements (from trailing semicolons) are omitted.
-// This is intentionally simple: migration files are expected to contain
-// well-formed DDL, not PL/pgSQL dollar-quoted blocks.
+// splitSQLStatements splits a SQL text into individual statements on
+// semicolons, skipping semicolons that appear inside single-quoted string
+// literals, double-quoted identifiers, line comments (--), and block comments
+// (/* */). Dollar-quoted blocks ($$...$$) are not handled; migration files
+// containing PL/pgSQL body text should not be split this way.
 func splitSQLStatements(sql string) []string {
-	parts := strings.Split(sql, ";")
-	result := make([]string, 0, len(parts))
-	for _, p := range parts {
-		if s := strings.TrimSpace(p); s != "" {
-			result = append(result, s)
+	var result []string
+	var cur strings.Builder
+	i, n := 0, len(sql)
+
+	for i < n {
+		ch := sql[i]
+		switch ch {
+		case '\'':
+			// Single-quoted literal; '' is the escape sequence for an embedded quote.
+			cur.WriteByte(ch)
+			i++
+			for i < n {
+				c := sql[i]
+				cur.WriteByte(c)
+				i++
+				if c == '\'' {
+					if i < n && sql[i] == '\'' {
+						cur.WriteByte(sql[i])
+						i++
+					} else {
+						break
+					}
+				}
+			}
+		case '"':
+			// Double-quoted identifier; "" is the escape sequence.
+			cur.WriteByte(ch)
+			i++
+			for i < n {
+				c := sql[i]
+				cur.WriteByte(c)
+				i++
+				if c == '"' {
+					if i < n && sql[i] == '"' {
+						cur.WriteByte(sql[i])
+						i++
+					} else {
+						break
+					}
+				}
+			}
+		case '-':
+			if i+1 < n && sql[i+1] == '-' {
+				// Line comment: consume through end of line.
+				for i < n && sql[i] != '\n' {
+					cur.WriteByte(sql[i])
+					i++
+				}
+			} else {
+				cur.WriteByte(ch)
+				i++
+			}
+		case '/':
+			if i+1 < n && sql[i+1] == '*' {
+				// Block comment: consume through closing */.
+				cur.WriteByte(ch)
+				i++
+				cur.WriteByte(sql[i])
+				i++
+				for i+1 < n && !(sql[i] == '*' && sql[i+1] == '/') {
+					cur.WriteByte(sql[i])
+					i++
+				}
+				if i+1 < n {
+					cur.WriteByte(sql[i])
+					cur.WriteByte(sql[i+1])
+					i += 2
+				}
+			} else {
+				cur.WriteByte(ch)
+				i++
+			}
+		case ';':
+			if s := strings.TrimSpace(cur.String()); s != "" {
+				result = append(result, s)
+			}
+			cur.Reset()
+			i++
+		default:
+			cur.WriteByte(ch)
+			i++
 		}
+	}
+
+	if s := strings.TrimSpace(cur.String()); s != "" {
+		result = append(result, s)
 	}
 	return result
 }
