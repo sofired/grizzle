@@ -535,7 +535,7 @@ func splitSQLStatements(sql string) []string {
 				i++
 				cur.WriteByte(sql[i])
 				i++
-				for i+1 < n && !(sql[i] == '*' && sql[i+1] == '/') {
+				for i+1 < n && (sql[i] != '*' || sql[i+1] != '/') {
 					cur.WriteByte(sql[i])
 					i++
 				}
