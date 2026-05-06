@@ -13,7 +13,7 @@ expr.Case().
     When(db.UsersT.Score.GTE(60), expr.Lit("C")).
     Else(expr.Lit("F")).
     As("grade")
-// CASE WHEN "users"."score" >= 90 THEN $1 WHEN ... ELSE $4 END AS "grade"
+// CASE WHEN "users"."score" >= $1 THEN $2 WHEN ... ELSE $8 END AS "grade"
 ```
 
 ## Simple CASE

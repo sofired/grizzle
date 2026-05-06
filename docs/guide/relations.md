@@ -60,7 +60,7 @@ query.Select(
 ).
     From(db.UsersT).
     InnerJoinRel(db.UserRealm).
-    LeftJoinRel(db.UserProfile)
+    JoinRel(db.UserProfile)
 ```
 
 ## Relation kinds
@@ -78,7 +78,7 @@ The `Kind` field is informational — it doesn't change how the JOIN is rendered
 If you don't have a pre-defined relation, use the standard join methods with an explicit ON condition:
 
 ```go
-query.Select().
+query.Select(db.OrdersT.ID, db.UsersT.Email, db.TenantsT.Name).
     From(db.OrdersT).
     LeftJoin(db.UsersT, db.UsersT.ID.EQCol(db.OrdersT.UserID)).
     InnerJoin(db.TenantsT, db.TenantsT.ID.EQCol(db.OrdersT.TenantID))

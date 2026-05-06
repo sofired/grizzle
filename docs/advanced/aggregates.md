@@ -20,7 +20,7 @@ expr.Min(db.UsersT.CreatedAt)          // MIN("created_at")
 query.Select(db.UsersT.RealmID, expr.Count().As("cnt")).
     From(db.UsersT).
     GroupBy(db.UsersT.RealmID)
-// SELECT "users"."realm_id", COUNT(*) AS "cnt"
+// Conceptual SQL: SELECT "realm_id", COUNT(*) AS "cnt"
 // FROM "users" GROUP BY "users"."realm_id"
 ```
 

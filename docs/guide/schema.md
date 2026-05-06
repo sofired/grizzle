@@ -1,6 +1,10 @@
 # Schema DSL
 
-Grizzle schemas are plain Go code in the `schema/pg` package. A schema file defines tables that are passed to `grizzle gen` for code generation and to the [migration kit](/kit/overview) for DDL diffing.
+Grizzle schemas are plain Go code in dialect schema packages such as `schema/pg`, `schema/mysql`, or `schema/sqlite`. A schema file defines tables that are passed to `grizzle gen` for code generation and to the [migration kit](/kit/overview) for DDL diffing.
+
+::: warning Target DDL expression API
+Examples using `schema/ddl` describe the strict file-migration target API. The current branch still exposes raw-string helpers such as `pg.Check(name, string)`; those are legacy compatibility APIs and are not accepted by the strict file-migration target.
+:::
 
 ## Declaring a table
 
@@ -70,7 +74,7 @@ pg.Timestamp().WithTimezone().OnUpdate()               // marks as app-managed u
 ```
 
 ::: tip OnUpdate
-Go has no runtime hook equivalent to Drizzle's `$onUpdate`. The `.OnUpdate()` marker tells `grizzle gen` to emit a comment reminding you to set this column on every UPDATE, but it doesn't enforce it automatically.
+Go has no initial runtime hook equivalent to Drizzle's `$defaultFn` / `$onUpdateFn`. Runtime hook markers tell `grizzle gen` to emit metadata/comment; INSERT and UPDATE/UPSERT builders must fail with `unsupported_feature` if Drizzle would have invoked a hook automatically.
 :::
 
 ### JSONB
@@ -110,22 +114,30 @@ Constraints are declared in the `.WithConstraints` callback, which receives a `T
 ### Unique index
 
 ```go
-pg.UniqueIndex("users_realm_username_idx").
-    On(t.Col("realm_id"), t.Col("username")).
-    Where(pg.IsNull(t.Col("deleted_at"))).  // partial index
-    Build()
+pg.Table("users", ...).WithConstraints(func(t pg.TableRef) []pg.Constraint {
+    return []pg.Constraint{
+        pg.UniqueIndex("users_realm_username_idx").
+            On(t.Col("realm_id"), t.Col("username")).
+            Where(ddl.IsNull(t.Col("deleted_at"))).  // partial index
+            Build(),
+    }
+})
 ```
 
 ### Non-unique index
 
 ```go
-pg.Index("users_realm_id_idx").On(t.Col("realm_id")).Build()
+pg.Table("users", ...).WithConstraints(func(t pg.TableRef) []pg.Constraint {
+    return []pg.Constraint{
+        pg.Index("users_realm_id_idx").On(t.Col("realm_id")).Build(),
+    }
+})
 ```
 
 ### CHECK constraint
 
 ```go
-pg.Check("price_positive", "price > 0")
+pg.Check("price_positive", ddl.GT(ddl.Column("price"), ddl.Lit(0)))
 ```
 
 ### Composite primary key

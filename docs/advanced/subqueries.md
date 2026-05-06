@@ -1,6 +1,14 @@
 # Subqueries
 
+::: warning Target query API
+Examples on this page use the target error-returning `Build(dialect)` contract and target fail-fast dialect behavior. The current branch may still expose the older two-return shape; any silent omission of unsupported CTE SQL is non-conforming implementation debt until those query contracts land.
+:::
+
 Subquery helpers live in the `query` package. They let you compose SELECT builders into correlated or uncorrelated sub-expressions.
+
+::: warning Trusted raw SQL
+Raw SQL fragments in this page are trusted static SQL snippets used for constants, predicates, or identifier-level references. Do not derive raw SQL text from user input; use `RawArgs` or normal builder predicates for dynamic values. Custom external expressions/selectables are the same trust boundary and must bind values through the build context rather than interpolation.
+:::
 
 ## EXISTS / NOT EXISTS
 
@@ -50,7 +58,7 @@ query.Select(db.UsersT.ID, db.UsersT.Username).
                 Where(db.PostsT.RealmID.EQ(realmID)),
         ),
     )
-// WHERE "users"."id" IN (SELECT "posts"."author_id" FROM "posts" WHERE ...)
+// Conceptual SQL: WHERE "users"."id" IN (SELECT "author_id" FROM "posts" WHERE ...)
 ```
 
 ```go
@@ -83,18 +91,21 @@ counts := query.FromSubquery(
     "counts",
 )
 
-// Reference columns from the subquery using expr.Raw (no typed column for derived tables)
-query.Select(expr.Raw(`"counts"."realm_id"`), expr.Raw(`"counts"."cnt"`)).
+// Reference columns from the subquery using expr.ColBase for derived tables.
+query.Select(
+    expr.ColBase{TableAlias: "counts", ColName: "realm_id"},
+    expr.ColBase{TableAlias: "counts", ColName: "cnt"},
+).
     From(counts).
-    Where(expr.Raw(`"counts"."cnt" > 10`))
-// SELECT "counts"."realm_id", "counts"."cnt"
-// FROM (SELECT "users"."realm_id", COUNT(*) AS "cnt" FROM "users" GROUP BY "users"."realm_id") AS "counts"
+    Where(expr.RawArgs(`"counts"."cnt" > $?`, 10))
+// Conceptual SQL: SELECT "counts"."realm_id", "counts"."cnt"
+// FROM (SELECT "realm_id", COUNT(*) AS "cnt" FROM "users" GROUP BY "users"."realm_id") AS "counts"
 // WHERE "counts"."cnt" > 10
 ```
 
 ## CTEs (Common Table Expressions)
 
-Use `With` and `WithRecursive` on a `SelectBuilder` to define Common Table Expressions:
+Use `With` on a `SelectBuilder` to define non-recursive Common Table Expressions. This is the Drizzle RC.1 parity path for SELECT CTE SQL behavior; the Go API shape uses explicit `With(name, sub)` / `CTERef(name)` helpers instead of RC.1's `$with(alias).as(...)` object flow.
 
 ```go
 // Non-recursive CTE
@@ -102,31 +113,18 @@ recent := query.Select(db.PostsT.ID, db.PostsT.AuthorID).
     From(db.PostsT).
     Where(db.PostsT.CreatedAt.GTE(cutoff))
 
-sql, args := query.Select(expr.ColBase{TableAlias: "recent", ColName: "id"}).
+sql, args, err := query.Select(expr.ColBase{TableAlias: "recent", ColName: "id"}).
     With("recent", recent).
     From(query.CTERef("recent")).
     Build(dialect.Postgres)
-// WITH "recent" AS (SELECT ...) SELECT "recent"."id" FROM "recent"
+// Conceptual SQL: WITH "recent" AS (SELECT ...) SELECT "recent"."id" FROM "recent"
 ```
 
-```go
-// Recursive CTE — traverse an org-chart by manager_id
-anchor := query.Select(db.EmployeesT.ID, db.EmployeesT.ManagerID).
-    From(db.EmployeesT).
-    Where(db.EmployeesT.ID.EQ(rootID))
+`CTERef(name)` is valid only when the active root statement's CTE namespace has registered `With(name, sub)`. That namespace is propagated through nested subquery and CTE-body rendering, so nested queries may reference visible root CTEs. A same-name real table is not enough to satisfy CTE registration, so misspelled or unregistered CTE references fail at build time.
 
-rec := query.Select(db.EmployeesT.ID, db.EmployeesT.ManagerID).
-    From(db.EmployeesT).
-    InnerJoin(query.CTERef("org"), db.EmployeesT.ManagerID.EQ(expr.ColBase{TableAlias: "org", ColName: "id"}))
+Drizzle RC.1 also supports CTE lists on some mutation builders: PostgreSQL/Cockroach and SQLite expose insert/update/delete builders from `db.with(...)`, and MySQL exposes update/delete builders from `db.with(...)` in the reviewed source. Returning affects result typing, not whether `WITH` is available. Grizzle's initial public CTE API is SELECT-only; mutation CTE APIs are deferred until their dialect-scoped builder and result rules are specified. Recursive CTE helpers are also outside the initial target; if added later, they are Grizzle-only helpers over raw SQL capability rather than RC.1 public-helper parity.
 
-sql, args := query.Select().
-    WithRecursive("org", anchor, rec).
-    From(query.CTERef("org")).
-    Build(dialect.Postgres)
-// WITH RECURSIVE "org" AS (SELECT ... UNION ALL SELECT ...) SELECT * FROM "org"
-```
-
-CTE support requires a dialect where `SupportsCTE()` is true. All built-in dialects return `true` (PostgreSQL, MySQL 8.0+, SQLite 3.8.3+). When a custom dialect returns `false`, the `WITH` clause is omitted from the output SQL. Any `CTERef` used in `From()` or `Join()` remains as a plain table name, producing a runtime database error (unknown table) rather than silently returning wrong results.
+CTE support requires a dialect where `SupportsCTE()` is true. All built-in dialects return `true` (PostgreSQL, MySQL 8.0+, SQLite 3.8.3+). When a custom dialect returns `false`, the builder must fail fast or omit the API rather than emitting dangling CTE references.
 
 ::: tip
 For most CTE use cases, the batch preloading utilities (`query.PreloadUUIDs`, `query.Index`, `query.GroupBy`) are a simpler alternative that avoids raw SQL entirely. See [Preloading](/guide/preloading).

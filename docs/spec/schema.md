@@ -26,6 +26,8 @@ var Users = pg.Table("users",
 
 `pg.C(name, builder)` pairs a column name with its type builder. In Drizzle the name is passed to the type function directly (`uuid('id')`); in Grizzle the name is always the first argument to `pg.C()` and the builder is the type only (`pg.UUID()`). The structures are equivalent.
 
+Drizzle RC.1 table-creator helpers such as `pgTableCreator`, `mysqlTableCreator`, and `sqliteTableCreator` customize generated table names. They are **DEVIATION:GAP (not designed)** in the initial Grizzle static schema loader; schema files must call the dialect table builders directly so table names are explicit at load time.
+
 **Status:** PARITY in structure; see column types below for per-type status.
 
 ## Column modifier parity
@@ -38,13 +40,14 @@ var Users = pg.Table("users",
 | `.default(val)` static value | `.Default(val)` | PARITY |
 | `.defaultNow()` | `.DefaultNow()` | PARITY |
 | `.defaultRandom()` | `.DefaultRandom()` | PARITY |
-| `.$default(fn)` runtime function | No equivalent | DEVIATION:LANGUAGE |
-| `.$defaultFn(fn)` | No equivalent | DEVIATION:LANGUAGE |
-| `.$onUpdate(fn)` | `.OnUpdate()` marker; codegen emits a comment | DEVIATION:LANGUAGE |
-| `.$onUpdateFn(fn)` | No equivalent | DEVIATION:LANGUAGE |
+| `.$defaultFn(fn)` / `.$default(fn)` runtime insert hook aliases | No DDL equivalent; codegen emits metadata/comment, and INSERT builders fail with `unsupported_feature` when Drizzle would invoke the hook | DEVIATION:GAP (designed) |
+| `.$onUpdateFn(fn)` / `.$onUpdate(fn)` runtime update/insert hook aliases | `.OnUpdate()` marker; codegen emits metadata/comment, and INSERT plus UPDATE/UPSERT builders fail with `unsupported_feature` when Drizzle would invoke the hook | DEVIATION:GAP (designed) |
 | `.references(tbl, col, opts)` | `.References(table, col, opts...)` | PARITY |
-| `.generatedAlwaysAs(expr)` | DEVIATION:GAP (not designed) | — |
-| *(no Drizzle equivalent)* | `.RenamedFrom(oldName)` | GRIZZLE-ONLY — see below |
+| `.generatedAlwaysAs(expr)` | Recognized in RC.1 snapshots but unsupported in initial Grizzle file-migration schema input | DEVIATION:GAP (designed); must fail with `unsupported_feature` |
+| MySQL `.autoincrement()` | `.AutoIncrement()` on integer-family builders | PARITY target; missing builder coverage is DEVIATION:GAP until implemented |
+| MySQL date/timestamp `.onUpdateNow({ fsp })` | `.OnUpdateNow(fsp?)` marker only | DEVIATION:GAP (designed); initial file migrations validate and reject `onUpdateNow` / `onUpdateNowFsp` with `unsupported_feature` rather than serializing them |
+| SQLite integer `.primaryKey({ autoIncrement })` | `.PrimaryKey(sqlite.AutoIncrement())` or equivalent | PARITY target; represented by `ColumnDef.AutoIncrement` in the file-migration schema input |
+| PostgreSQL unique `nullsNotDistinct()` | `.NullsNotDistinct()` on unique constraints | DEVIATION:GAP (designed) until represented in schema input and snapshot serialization |
 
 ## Column types
 
@@ -55,35 +58,40 @@ In Drizzle, the column name is the first argument to the type function: `uuid('i
 | Drizzle | Grizzle | Status |
 |---|---|---|
 | `uuid(name)` | `pg.UUID()` | PARITY |
-| `varchar(name, {length})` | `pg.Varchar(n)` | PARITY |
-| `text(name)` | `pg.Text()` | PARITY |
+| `varchar(name, { length?, enum? })` | `pg.Varchar(n?)` plus Go enum/type policy | PARITY for DDL; Drizzle `enum` is TypeScript type narrowing and maps to Go codegen/type policy as DEVIATION:LANGUAGE until represented |
+| `text(name, { enum? })` | `pg.Text()` plus Go enum/type policy | PARITY for DDL; Drizzle `enum` is TypeScript type narrowing and maps to Go codegen/type policy as DEVIATION:LANGUAGE until represented |
 | `boolean(name)` | `pg.Boolean()` | PARITY |
 | `integer(name)` | `pg.Integer()` | PARITY |
-| `bigint(name, {mode})` | `pg.BigInt()` | PARITY |
+| `smallint(name)` | `pg.SmallInt()` | PARITY target; DEVIATION:GAP until implemented if missing in current builders |
+| `bigint(name, {mode})` | `pg.BigInt()` plus mode-specific Go type mapping | PARITY for DDL; type/API mode coverage must distinguish `number` vs `bigint` as DEVIATION:GAP until implemented |
 | `serial(name)` | `pg.Serial()` | PARITY |
-| `bigserial(name)` | `pg.BigSerial()` | PARITY |
-| `timestamp(name, opts)` | `pg.Timestamp().WithTimezone()` | PARITY |
-| `numeric(name, {precision, scale})` | `pg.Numeric(p, s)` | PARITY |
+| `smallserial(name)` | `pg.SmallSerial()` | PARITY target; DEVIATION:GAP until implemented if missing in current builders |
+| `bigserial(name, { mode })` | `pg.BigSerial()` plus mode-specific Go type mapping | PARITY for DDL; type/API mode coverage must distinguish `number` vs `bigint` as DEVIATION:GAP until implemented |
+| `timestamp(name, { mode?, precision?, withTimezone? })` | `pg.Timestamp()` / `.WithTimezone()` plus precision support | PARITY for DDL; precision and mode-specific Go scan behavior are DEVIATION:GAP until implemented |
+| `numeric(name, { precision?, scale?, mode? })` / `decimal(...)` | `pg.Numeric(precision?, scale?)` plus mode-specific Go type mapping | PARITY for DDL; precision-only and mode/type API coverage are DEVIATION:GAP until implemented |
 | `json(name)` | `pg.JSON()` | PARITY |
 | `jsonb(name)` | `pg.JSONB()` | PARITY |
-| `date(name)` | `pg.Date()` | PARITY — generates `expr.DateColumn`; Go type `time.Time` |
-| `time(name, opts)` | `pg.Time()` / `pg.Time().WithTimezone()` | PARITY — generates `expr.TimestampColumn`; Go type `time.Time` |
-| `interval(name)` | `pg.Interval()` | PARITY — Go type `string`; see codegen.md for rationale |
+| `date(name, {mode})` | `pg.Date()` | PARITY for DDL; Drizzle mode-specific TypeScript type behavior maps to Go codegen policy and is DEVIATION:LANGUAGE where not represented |
+| `time(name, { precision?, withTimezone? })` | `pg.Time()` / `pg.Time().WithTimezone()` plus precision support | PARITY for DDL; precision support is DEVIATION:GAP until implemented |
+| `interval(name, { fields?, precision? })` | `pg.Interval()` plus fields/precision options | PARITY target for DDL; fields/precision API coverage is DEVIATION:GAP until specified/implemented; Go type `string`; see codegen.md for rationale |
 | `real(name)` | `pg.Real()` | PARITY — Go type `float64`; see codegen.md for rationale |
 | `doublePrecision(name)` | `pg.DoublePrecision()` | PARITY — Go type `float64` |
-| `char(name, {length})` | `pg.Char(n)` | PARITY — Go type `string` |
+| `char(name, { length?, enum? })` | `pg.Char(n?)` plus Go enum/type policy | PARITY for DDL; Drizzle `enum` is TypeScript type narrowing and maps to Go codegen/type policy as DEVIATION:LANGUAGE until represented |
 | `inet(name)` | `pg.Inet()` | PARITY — Go type `string`; see codegen.md for rationale |
 | `cidr(name)` | `pg.Cidr()` | PARITY — Go type `string` |
 | `macaddr(name)` | `pg.Macaddr()` | PARITY — Go type `string` |
+| `macaddr8(name)` | `pg.Macaddr8()` | PARITY target; Go type `string`; DEVIATION:GAP until implemented if missing in current builders |
 | `bytea(name)` | `pg.Bytea()` | PARITY — Go type `[]byte` |
 | `point(name)` | DEVIATION:GAP (not designed) | — |
 | `line(name)` | DEVIATION:GAP (not designed) | — |
 | `geometry(name)` | DEVIATION:GAP (not designed) | — |
-| `pgEnum(name, vals)` (inline column) | `pg.Enum(typeName, vals...)` | PARITY — Go type `string`; references a named type defined with `pg.CreateEnum()` |
-| `vector(name, {dim})` | DEVIATION:GAP (not designed) | — |
-| `halfvec(name, {dim})` | DEVIATION:GAP (not designed) | — |
-| `tsvector(name)` | `pg.Tsvector()` | PARITY — Go type `string`; `@@` matching already available via `Matches*` helpers on `TsvectorColumn`; additional FTS support tracked in #140 |
-| Array types (`.array()`) | `pg.Array(inner)` | PARITY — Go type `any`; typed `[]T` generation tracked in #144 |
+| column using a declared `pgEnum` factory | `pg.EnumColumn(typeName)` | PARITY — Go type `string`; references a named type defined with `pg.CreateEnum()` |
+| `vector(name, { dimensions })` | DEVIATION:GAP (not designed) | — |
+| `halfvec(name, { dimensions })` | DEVIATION:GAP (not designed) | — |
+| `bit(name, { dimensions })` | DEVIATION:GAP (not designed) | — |
+| `sparsevec(name, { dimensions })` | DEVIATION:GAP (not designed) | — |
+| *(no exported RC.1 PostgreSQL column builder)* | `pg.Tsvector()` | GRIZZLE-ONLY — PostgreSQL `tsvector` storage column/source-generation support; Go type `string`; typed FTS helpers remain PostgreSQL-only Grizzle conveniences |
+| Array types (`.array()` / `.array('[][]')`) | `pg.Array(inner, dimensions?)` or equivalent | PARITY target for one-dimensional arrays; explicit multidimensional dimension strings are DEVIATION:GAP until specified/implemented; Go type `any`; typed `[]T` generation tracked in #144 |
 | Custom types (`.customType()`) | DEVIATION:GAP (not designed) | — |
 | *(no Drizzle equivalent)* | `pg.Tsquery()` | GRIZZLE-ONLY — PostgreSQL `tsquery` storage column; Go type `string` |
 | *(no Drizzle equivalent)* | `pg.Int4Range()`, `pg.Int8Range()`, `pg.NumRange()`, `pg.TsRange()`, `pg.TstzRange()`, `pg.DateRange()` | GRIZZLE-ONLY — PostgreSQL range types; Go type `string` |
@@ -93,42 +101,52 @@ In Drizzle, the column name is the first argument to the type function: `uuid('i
 | Drizzle | Grizzle | Status |
 |---|---|---|
 | `mysqlTable(name, cols)` | `mysql.Table(name, cols...)` | PARITY |
-| `int(name)` | `mysql.Int()` | PARITY |
-| `varchar(name, {length})` | `mysql.Varchar(n)` | PARITY |
-| `text(name)` | `mysql.Text()` | PARITY |
+| `int(name, { unsigned? })` | `mysql.Int()` plus unsigned option | PARITY for DDL and generated signed/unsigned Go type mapping; see [codegen.md](./codegen.md#go-type-mappings) |
+| `varchar(name, { length, enum? })` | `mysql.Varchar(n)` plus Go enum/type policy | PARITY for DDL; Drizzle `enum` is TypeScript type narrowing and maps to Go codegen/type policy as DEVIATION:LANGUAGE until represented |
+| `text(name, { enum? })` | `mysql.Text()` plus Go enum/type policy | PARITY for DDL; Drizzle `enum` is TypeScript type narrowing and maps to Go codegen/type policy as DEVIATION:LANGUAGE until represented |
 | `boolean(name)` | `mysql.Boolean()` | PARITY |
-| `timestamp(name)` | `mysql.Timestamp()` | PARITY |
-| `bigint(name, opts)` | `mysql.BigInt()` | PARITY |
-| `serial(name)` | `mysql.Serial()` | PARITY |
-| `datetime(name, opts)` | DEVIATION:GAP (designed) | — |
-| `date(name)` | DEVIATION:GAP (designed) | — |
-| `time(name)` | DEVIATION:GAP (designed) | — |
+| `timestamp(name, { mode?, fsp? })` | `mysql.Timestamp()` plus mode/fsp mapping | PARITY for DDL; mode/fsp API coverage is DEVIATION:GAP until specified |
+| `bigint(name, { mode, unsigned? })` | `mysql.BigInt()` plus mode/unsigned mapping | PARITY for DDL and generated signed/unsigned Go type mapping; Drizzle mode-specific API behavior remains DEVIATION:GAP until represented |
+| `serial(name)` | `mysql.Serial()` | PARITY for DDL; generated Go type `uint64` is DEVIATION:LANGUAGE from RC.1's JavaScript `number`/uint53 surface to preserve MySQL's unsigned physical range |
+| `datetime(name, { mode?, fsp? })` | `mysql.DateTime()` plus mode/fsp mapping | PARITY target; DEVIATION:GAP until API/options are specified/implemented |
+| `date(name, { mode? })` | `mysql.Date()` plus mode-specific Go type mapping | PARITY target for DDL; mode is a type/API mapping concern and is DEVIATION:GAP until specified/implemented |
+| `time(name, { fsp? })` | `mysql.Time()` plus fsp option | PARITY target; DEVIATION:GAP until API/options are specified/implemented |
 | `year(name)` | `mysql.Year()` | PARITY |
-| `float(name)` | DEVIATION:GAP (designed) | — |
-| `double(name)` | DEVIATION:GAP (designed) | — |
-| `decimal(name, opts)` | DEVIATION:GAP (designed) | — |
-| `json(name)` | DEVIATION:GAP (designed) | — |
-| `mediumint(name)` | `mysql.MediumInt()` | PARITY |
-| `smallint(name)` | DEVIATION:GAP (designed) | — |
-| `tinyint(name)` | DEVIATION:GAP (designed) | — |
+| `float(name, { precision?, scale?, unsigned? })` | `mysql.Float()` plus precision/scale/unsigned options | PARITY target; DEVIATION:GAP until API/options are specified/implemented |
+| `double(name, { precision?, scale?, unsigned? })` | `mysql.Double()` plus precision/scale/unsigned options | PARITY target; DEVIATION:GAP until API/options are specified/implemented |
+| `real(name, { precision?, scale? })` | `mysql.Real()` plus precision/scale options | PARITY target; DEVIATION:GAP until API/options are specified/implemented |
+| `decimal(name, { precision?, scale?, unsigned?, mode? })` | `mysql.Decimal(precision?, scale?)` plus unsigned/mode-specific Go type mapping | PARITY target; DEVIATION:GAP until API/options are specified/implemented |
+| `json(name)` | `mysql.JSON()` | PARITY target; DEVIATION:GAP until implemented |
+| `mediumint(name, { unsigned? })` | `mysql.MediumInt()` plus unsigned option | PARITY for DDL and generated signed/unsigned Go type mapping |
+| `smallint(name, { unsigned? })` | `mysql.SmallInt()` plus unsigned option | PARITY target for DDL and generated signed/unsigned Go type mapping; DEVIATION:GAP until builder coverage is implemented if missing |
+| `tinyint(name, { unsigned? })` | `mysql.TinyInt()` plus unsigned option | PARITY target for DDL and generated signed/unsigned Go type mapping; DEVIATION:GAP until builder coverage is implemented if missing |
 | `binary(name)` | DEVIATION:GAP (not designed) | — |
 | `varbinary(name)` | DEVIATION:GAP (not designed) | — |
-| `char(name)` | DEVIATION:GAP (designed) | — |
+| `blob(name)` | DEVIATION:GAP (not designed) | — |
+| `longblob(name)` | DEVIATION:GAP (not designed) | — |
+| `mediumblob(name)` | DEVIATION:GAP (not designed) | — |
+| `tinyblob(name)` | DEVIATION:GAP (not designed) | — |
+| `char(name, { length?, enum? })` | `mysql.Char(n?)` plus Go enum/type policy | PARITY target for DDL; DEVIATION:GAP until API/options are specified/implemented |
+| `longtext(name, { enum? })` | `mysql.LongText()` plus Go enum/type policy | PARITY target for DDL; DEVIATION:GAP until implemented |
+| `mediumtext(name, { enum? })` | `mysql.MediumText()` plus Go enum/type policy | PARITY target for DDL; DEVIATION:GAP until implemented |
+| `tinytext(name, { enum? })` | `mysql.TinyText()` plus Go enum/type policy | PARITY target for DDL; DEVIATION:GAP until implemented |
 | `mysqlEnum(name, vals)` | `mysql.Enum(vals...)` | PARITY |
-| `mysqlSet(name, vals)` | `mysql.Set(vals...)` | PARITY |
+| `customType(...)` | DEVIATION:GAP (not designed) | — |
+| *(no RC.1 builder)* | `mysql.Set(vals...)` | GRIZZLE-ONLY existing extension; not Drizzle RC.1 parity |
 
 ### SQLite
 
 | Drizzle | Grizzle | Status |
 |---|---|---|
 | `sqliteTable(name, cols)` | `sqlite.Table(name, cols...)` | PARITY |
-| `text(name, opts)` | `sqlite.Text()` | PARITY |
-| `integer(name, opts)` | `sqlite.Integer()` | PARITY |
+| `text(name, { mode?, length?, enum? })` | `sqlite.Text()` plus mode/length/enum mapping | PARITY for DDL; full mode/type API coverage is DEVIATION:GAP until specified |
+| `integer(name, { mode })` | `sqlite.Integer()` plus timestamp/timestamp_ms/boolean mode mapping | PARITY for DDL; full mode/type API coverage is DEVIATION:GAP until specified |
 | `real(name)` | `sqlite.Real()` | PARITY |
-| `blob(name)` | `sqlite.Blob()` | PARITY |
-| `numeric(name)` | `sqlite.Numeric(p, s)` | PARITY |
-| `text(name, { mode: 'json' })` | `sqlite.JSON()` | PARITY — both store as TEXT; `.JSON()` sets the Go scan type to `any` |
-| `blob(name, { mode: 'json' })` or `text(name, { mode: 'json' })` | `sqlite.JSONB()` | PARITY — stored as TEXT; use `.JSONB()` for schemas migrated from PostgreSQL |
+| `blob(name, { mode })` | `sqlite.Blob()` plus buffer/json/bigint mode mapping | PARITY for DDL; full mode/type API coverage is DEVIATION:GAP until specified |
+| `numeric(name, { mode })` | `sqlite.Numeric()` plus explicit mode mapping | PARITY target; current `sqlite.Numeric(p, s)` is DEVIATION:GAP until revised because RC.1 SQLite numeric models mode, not precision/scale |
+| `text(name, { mode: 'json' })` | `sqlite.JSON()` | PARITY target — text-backed JSON |
+| `blob(name, { mode: 'json' })` | dedicated blob-backed JSON mapping required | DEVIATION:GAP (designed); current `sqlite.JSONB()` text storage is a Grizzle/PostgreSQL-migration convenience, not RC.1 SQLite parity |
+| `customType(...)` | DEVIATION:GAP (not designed) | — |
 
 ## Table-level constraints
 
@@ -151,12 +169,26 @@ var Users = pg.Table("users", ...).WithConstraints(func(t pg.TableRef) []pg.Cons
 | `index(name).on(cols)` | `pg.Index(name).On(t.Col(name)...).Build()` | PARITY |
 | `uniqueIndex(name).on(cols)` | `pg.UniqueIndex(name).On(t.Col(name)...).Build()` | PARITY |
 | `.where(expr)` partial index | `.Where(expr)` | PARITY |
-| `primaryKey({columns})` composite | `pg.CompositePrimaryKey(cols...)` | PARITY |
-| `unique({columns})` | `pg.UniqueConstraint(name, cols...)` | PARITY |
-| `check(name, expr)` | `pg.Check(name, exprStr)` | PARITY for string expressions; typed expression form is DEVIATION:GAP (not designed) |
-| `foreignKey({cols, refs})` composite | `pg.ForeignKey(name).From(cols).References(tbl, cols).Build()` | PARITY |
+| `primaryKey({ columns })` / `primaryKey({ name?, columns })` composite | `pg.CompositePrimaryKey(cols...)` / `pg.CompositePrimaryKeyNamed(name, cols...)` | PARITY target with `nameExplicit` preservation |
+| `unique({ columns })` / `unique(name).on(...)` | unnamed unique builder plus `pg.UniqueConstraint(name, cols...)` | PARITY target with `nameExplicit` preservation |
+| `check(name, expr)` | `pg.Check(name, ddl.Expression)` | PARITY target; raw-string `pg.Check(name, exprStr)` is trusted-internal only and not public file-migration input |
+| `foreignKey({ columns, foreignColumns, name? })` composite | unnamed FK builder plus `pg.ForeignKey(name).From(cols).References(tbl, cols).Build()` | PARITY target with `nameExplicit` preservation |
 
-**Note on FK actions for non-PostgreSQL dialects:** FK `ON DELETE`/`ON UPDATE` actions are now evaluated for all dialects (pg, mysql, sqlite). Issue **#114** (previously dropped for MySQL/SQLite) was fixed in this PR by updating `gen/parser/eval.go` to accept FK options from any of the three dialect packages.
+Constraint naming must preserve RC.1's explicit-vs-generated-name distinction in snapshots:
+
+- unnamed primary keys use `pg.CompositePrimaryKey(cols...)` and serialize `nameExplicit=false`
+- explicitly named primary keys use a named variant such as `pg.CompositePrimaryKeyNamed(name, cols...)` and serialize `nameExplicit=true`
+- unique and foreign-key builders need both unnamed and explicitly named forms; explicit-name-only support is not parity and must be labeled `DEVIATION:GAP` until unnamed builders are implemented
+- empty names are not accepted as a stand-in for unnamed constraints because they are ambiguous in Go APIs and diagnostics
+
+Typed check-expression contract:
+
+- public file-migration schema input must represent checks with the shared typed expression model, but render through `schema/ddl` / `ddl.BuildContext` with literalization rather than the query placeholder renderer
+- rendered check SQL is stored in `snapshot.json` as the RC.1 `value` / expression string after dialect validation
+- raw string check expressions are not Drizzle RC.1 parity because RC.1 uses typed `SQL` values
+- raw string checks are treated as a temporary trusted-internal API only and must not be accepted from untrusted schema input
+
+**Note on FK actions for non-PostgreSQL dialects:** FK `ON DELETE`/`ON UPDATE` actions are evaluated for PostgreSQL, MySQL, and SQLite schema definitions.
 
 ## Schema namespaces
 
@@ -173,7 +205,9 @@ var Users = pg.SchemaTable("myschema", "users", ...).Build()
 
 **Status:** PARITY for basic schema qualification. The `pgSchema` shared-object pattern (reusable schema reference) is DEVIATION:GAP (not designed).
 
-## Views — GRIZZLE-ONLY (kit migration support)
+Generated query handles for schema-qualified tables must expose schema and table as separate identifier parts through the table identity contract in [query-builder.md](./query-builder.md#table-identity-contract). Dotted table names are invalid because they would be quoted as one identifier part.
+
+## Views
 
 **Drizzle:**
 ```typescript
@@ -184,19 +218,41 @@ const activeUsers = pgView('active_users').as((qb) =>
 
 **Grizzle:**
 ```go
-var ActiveUsers = pg.CreateView("active_users",
-    `SELECT id, username, email FROM users WHERE enabled = true`)
+var ActiveUsers = pg.CreateView("active_users").As(
+    ddl.Select(
+        ddl.Table("users").Col("id"),
+        ddl.Table("users").Col("username"),
+        ddl.Table("users").Col("email"),
+    ).From(ddl.Table("users")).Where(ddl.EQ(ddl.Table("users").Col("enabled"), ddl.Lit(true))),
+)
 ```
 
 | Drizzle | Grizzle | Status |
 |---|---|---|
-| `pgView(name).as(qb)` or `.as(sql\`...\`)` | `pg.CreateView(name, sql)` | PARITY — raw SQL path; query builder form is DEVIATION:LANGUAGE (Go has no template literal types) |
-| `pgSchema("s").view(name).as(...)` | `pg.SchemaView(schema, name, sql)` | PARITY |
-| `pgMaterializedView(name)` | DEVIATION:GAP (not designed) | — |
+| `pgView(name).as(qb)` | `pg.CreateView(name).As(expr)` typed DDL-expression view definition | PARITY target |
+| `pgView(name, columns).as(sql\`...\`)` manual/raw-SQL view definition | `pg.CreateView(name).Columns(cols...).As(ddl.RawTrusted(sql))` with explicit column metadata | PARITY target for trusted raw SQL plus explicit generated-column metadata; raw SQL without column metadata is unsupported for generated view handles |
+| `pgSchema("s").view(name).as(...)` | `pg.SchemaView(schema, name).As(expr)` typed DDL-expression schema view definition | PARITY target |
+| `mysqlView(name).as(...)` | `mysql.CreateView(name).As(expr)` typed DDL-expression view definition | PARITY target |
+| `mysqlSchema("s").view(name).as(...)` | query-surface schema view reference only; not accepted as initial file-migration schema input | DEVIATION:GAP for file migrations; RC.1 Kit MySQL snapshots do not serialize schema-qualified views |
+| `sqliteView(name).as(...)` | `sqlite.CreateView(name).As(expr)` typed DDL-expression view definition | PARITY target |
+| `.existing()` on views | Query-only existing-view declaration; not initial strict file-migration schema input | PARITY for query references if implemented; DEVIATION:GAP for file-migration input |
+| `pgMaterializedView(name)` | Recognized in RC.1 snapshots but unsupported in initial Grizzle file-migration schema input | DEVIATION:GAP (designed); must fail with `unsupported_feature` |
 
-**Note on kit support:** Drizzle Kit v0.30 does not support views in migrations — views must be managed manually. Grizzle's `Diff` and the SQL generation layer fully support views via `ChangeCreateView`, `ChangeReplaceView`, and `ChangeDropView`. `Push` and `Migrate` are table-only for now because `liveToSnapshot` intentionally excludes live views to avoid silently dropping unmanaged views. Full `Push`/`Migrate` support for views is tracked in #136 (`PushSchema`). This is **GRIZZLE-ONLY** capability.
+Untyped raw view SQL strings are not public file-migration schema input. Public view definitions should render through the typed DDL-expression path. When typed DDL cannot express an RC.1-compatible view yet, callers may use `ddl.RawTrusted(sql)` as an explicit trusted-input escape hatch; the SQL must be a literal/constant under the same static-loader and redaction rules as other DDL expressions.
 
-`pg.CreateView(name, sql)` panics if `name` or `sql` is empty.
+Schema-authored views that should generate query handles must have explicit view-column metadata with deterministic property keys. `ViewColumnDef.PropertyKey` is the generated source property key used for `ColumnMeta.SelectionKey` and `GrizSelectAllFieldKeys()`; when omitted for explicit column metadata, loaders derive it from `Name` using Grizzle's schema/codegen default identifier casing, `camel`, and must reject empty keys or collisions before code generation. Typed `ddl.Select(...)` view definitions may derive view-column metadata from selected generated columns and explicit aliases. Trusted raw view definitions without explicit column metadata must fail for generated view-handle output; they may still be represented as unsupported/file-migration DDL input until a safe generated-column contract is provided.
+
+Exact target API rule:
+
+- file-migration-facing view constructors return a builder requiring `.As(ddl.Expression)` before serialization
+- `.Existing()` view declarations are allowed only as query/source-generation references in the initial target. Strict file-migration schema loading must reject `IsExisting` view inputs with `unsupported_feature` rather than silently dropping them, including PostgreSQL/MySQL existing views that RC.1 serializers skip and SQLite `isExisting` records that RC.1 can serialize.
+- the legacy current constructors `pg.CreateView(name, sql string)` and `pg.SchemaView(schema, name, sql string)` are trusted-internal or legacy compatibility APIs only; they must not be accepted by the strict file-migration schema loader unless converted to `ddl.RawTrusted(sql)` by a trusted introspection path or rewritten to a typed `ddl.Expression`
+- empty names, empty definitions, unsupported view options, and unsupported materialized-view fields must become typed validation errors in file-migration flows, not panics
+- MySQL schema-qualified tables/views may exist in the ORM/query surface, but RC.1 Kit file-migration serialization skips schema-qualified MySQL tables and has no schema field for MySQL views. Initial Grizzle file migrations must not label schema-qualified MySQL table/view artifacts as RC.1 Kit parity; accept them only in query/codegen surfaces or fail with `unsupported_feature` before snapshot serialization.
+
+**Note on kit support:** Drizzle RC.1 snapshot and DDL models include views for PostgreSQL, MySQL, and SQLite. Grizzle's current legacy live-diff helpers have partial PostgreSQL-shaped view support and should not be treated as the target file-migration contract. RC.1-aligned file migrations must add dialect view definitions/renderers for all supported initial dialects or fail with `unsupported_feature` for view options they cannot represent.
+
+Current legacy `pg.CreateView(name, sql string)` panics if `name` or `sql` is empty. That panic behavior is not the file-migration contract; file-migration schema loading and serialization must surface stable validation errors such as `unsupported_schema_construct`, `unsupported_feature`, or `invalid_identifier`.
 
 ## Named enum types (PostgreSQL)
 
@@ -224,39 +280,24 @@ var Orders = pg.Table("orders",
 | `pgSchema("s").enum(name, vals)` | `pg.SchemaCreateEnum(schema, name, vals...)` | PARITY |
 | `enumCol()` — column referencing named type | `pg.EnumColumn(typeName)` | PARITY |
 
-`pg.CreateEnum` and `pg.SchemaCreateEnum` panic if `name` is empty or if any value is empty. Values must be declared in the order they should appear in the database — PostgreSQL preserves declaration order and `ALTER TYPE ... ADD VALUE` uses `AFTER`/`BEFORE` anchors to maintain ordering when new values are inserted.
+`pg.CreateEnum` and `pg.SchemaCreateEnum` currently panic if `name` is empty or if any value is empty. File-migration schema loading must convert those invalid inputs into stable validation errors rather than relying on panics. Values must be declared in the order they should appear in the database — PostgreSQL preserves declaration order and `ALTER TYPE ... ADD VALUE` uses `AFTER`/`BEFORE` anchors to maintain ordering when new values are inserted.
 
-See also `pg.Enum(typeName, vals...)` in the column types table for the inline MySQL-style enum variant (no separate `CREATE TYPE` statement).
+See also the PostgreSQL column-type table row for columns that reference a declared enum factory.
 
-## `RenamedFrom()` — GRIZZLE-ONLY (kit rename detection)
+## Rename Resolution
 
-**Status:** GRIZZLE-ONLY — there is no Drizzle TypeScript equivalent; Drizzle Kit infers renames interactively at diff time. Grizzle uses a schema annotation because Go has no runtime inference.
+Schema-level rename annotations are not part of the initial RC.1-aligned target.
 
-`.RenamedFrom(oldName)` can be called on any column or table builder to declare that the entity was renamed from `oldName` in the current migration step. The kit diff engine (`kit.Diff`) reads `PreviousName` from the snapshot and emits a `RENAME COLUMN` or `RENAME TABLE` change instead of drop+add.
-
-```go
-// Column rename: "email" was previously "email_address"
-pg.C("email", pg.Varchar(255).NotNull().RenamedFrom("email_address"))
-
-// Table rename: "users" was previously "accounts"
-var Users = pg.Table("users", ...).RenamedFrom("accounts").Build()
-```
-
-**Rules:**
-- Call `.RenamedFrom()` only in the schema version used to generate the migration. Once the migration has been applied, remove the call — it must not persist across snapshot saves. (The `PreviousName` field is tagged `json:"-"` to prevent it from appearing in committed snapshots.)
-- `oldName` for columns is the bare column name. For tables without a schema, pass the bare table name; for schema-qualified tables, pass `"schema.tablename"` to match the snapshot key.
-- If `oldName` does not match a dropped entity in the old snapshot, Diff falls back to drop+add silently.
-
-**Rationale:** Drizzle Kit detects renames interactively (the user chooses "rename" vs "drop+add" during `drizzle-kit push`). In Grizzle the diff engine is non-interactive; the annotation is the only way to communicate intent without user prompting.
+Drizzle RC.1 resolves migration renames interactively during `generate`, not through schema annotations. Grizzle must match that behavior for the initial file-migrations implementation. See [file-migrations-generate.md](./file-migrations-generate.md#rename-handling).
 
 ## `drizzle()` instance — DEVIATION:INTENTIONAL
 
 **Drizzle:** `drizzle(client, { schema })` wires schema definitions to a database client and enables the relational query API via `db.query.users.findMany(...)`. It also establishes a query logger, custom type serializers, and query caching config.
 
-**Grizzle:** No initialisation step exists. Query builders and relation definitions are used directly. This is **DEVIATION:INTENTIONAL**: Go does not need a runtime registry because type safety is enforced at compile time through generated types and the builder API.
+**Grizzle:** No initialization step exists. Query builders and relation definitions are used directly. This is **DEVIATION:INTENTIONAL**: Go does not need a runtime registry because type safety is enforced at compile time through generated types and the builder API.
 
 The features enabled by `drizzle()` are handled as follows in Grizzle:
 - Relational query API → not yet implemented (DEVIATION:GAP — see [relations.md](./relations.md))
 - Query logger → not yet implemented (DEVIATION:GAP, not designed)
-- Custom type serializers → handled via the `db` struct tag and `.Type("T")` column modifier
-- Query caching → not planned
+- Custom type serializers/codecs → out of initial scope (DEVIATION:GAP, not designed); `db` struct tags map scan fields, and `.Type("T")` is only a generated Go type/scan hint, not Drizzle `customType(...)` serializer parity
+- Query caching → not planned in the initial target (**DEVIATION:GAP (not designed)**)

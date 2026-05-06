@@ -1,146 +1,92 @@
 # Migration Kit
 
-The `kit` package provides database migration tooling — schema introspection, diff computation, SQL generation, and migration history — all driven by the same Go schema definitions you use for queries.
+The `kit` package contains Grizzle's schema migration and code-generation tooling.
 
-## How it works
+Grizzle is moving toward a Drizzle Kit RC.1-style file-migration workflow:
 
-1. **Introspect** the live database schema
-2. **Diff** it against your `schema/pg` table definitions
-3. **Generate** the SQL needed to bring the live schema up to date
-4. **Apply** that SQL, optionally recording history
+```text
+schema definitions
+  -> grizzle generate (runs pre-check)
+  -> review generated artifacts
+  -> grizzle check
+  -> grizzle migrate
+```
 
-Because the schema source of truth is Go code (not separate migration files), there is no drift between your query builders and your database columns.
+In that target workflow, migration artifacts are generated as files, committed to source control, validated before use, and then applied by `migrate`.
+
+## Target File-Migration Workflow
+
+The target public commands are:
+
+| Command | Role |
+|---|---|
+| `grizzle generate` | Convert Go schema definitions into migration artifacts under `./grizzle` |
+| `grizzle check` | Validate migration artifacts, snapshots, ordering, and branch consistency |
+| `grizzle migrate` | Apply pending committed migration artifacts to a database |
+| `grizzle push` | Public direct-sync command boundary; full safety contract belongs to a dedicated push spec |
+| `grizzle pull` | Introspect a live database into Go schema definition source |
+| `grizzle introspect` | Alias of `grizzle pull` |
+
+The target file-migration history table defaults to `__grizzle_migrations`. PostgreSQL uses the default migration schema `grizzle`. Those Grizzle-branded default names are **DEVIATION:INTENTIONAL** namespace/branding divergence from RC.1's `__drizzle_migrations` / `drizzle` defaults; row schema and migration behavior still target RC.1.
+
+The detailed target contract lives in [the migration specs](../spec/kit.md). Those specs are pinned to Drizzle ORM / Drizzle Kit `v1.0.0-rc.1`.
+
+## Current Live-Diff Helpers
+
+Some existing `kit` APIs are current implementation surface, not the final file-migration deployment model.
+
+| API | Current role |
+|---|---|
+| `kit.Push` | Diff live database state against schema definitions and apply DDL directly |
+| `kit.DryRun` | Diff live database state against schema definitions and return SQL without applying it |
+| `kit.Migrate` | Current flat `.sql` file runner with legacy history recording; broken relative to the RC.1 folder-per-migration target |
+| `kit.Status` | Legacy/current history and pending-change reporting helper |
+
+The current live-diff history table name is legacy implementation detail. New RC.1-aligned file-migration work must use the `__grizzle_migrations` contract specified in [file-migrations-history.md](../spec/file-migrations-history.md).
+
+Current direct-sync helpers, including `kit.Push`, are development/control-plane tools in the current implementation. They are not deployment-safe defaults for shared environments and must not be expanded or recommended for production-style use until a dedicated push/direct-sync spec defines locking, destructive-change handling, dry-run behavior, and non-interactive safety.
 
 ## Push
 
-`kit.Push` compares the live schema to your table definitions and applies all required DDL in a single transaction. It does **not** record migration history.
+`push` remains a direct-apply shortcut in the public command model, but it is not specified by the file-migration documents because it does not create, validate, or apply migration artifacts.
 
-```go
-import (
-    "github.com/sofired/grizzle/kit"
-    db "your-module/schema"
-)
+Before new RC.1-aligned `push` work resumes, a dedicated direct-sync spec must define destructive-change handling, force behavior, dry-run behavior, locking, non-interactive behavior, and CI safety. Production-style deployment should use generated, reviewed, committed artifacts with `check` and `migrate`.
 
-result, err := kit.Push(ctx, pool, db.UsersT, db.RealmsT, db.PostsT)
-if err != nil {
-    log.Fatal(err)
-}
-for _, stmt := range result.SQL {
-    fmt.Println(stmt)
-}
-```
+## Generate
 
-Use `Push` in development or CI environments where you want an always-up-to-date schema without tracking history.
+`grizzle generate` is the target schema-to-migration-artifact command. It must:
 
-## DryRun
+- run `check` before writing artifacts
+- compare current schema definitions against the selected prior snapshot context
+- resolve ambiguous renames through Drizzle RC.1-style interactive prompts
+- write a migration directory containing `migration.sql` and `snapshot.json`
 
-`kit.DryRun` computes the required changes and returns the SQL without applying it:
+## Check
 
-```go
-result, err := kit.DryRun(ctx, pool, db.UsersT, db.RealmsT)
-if err != nil {
-    log.Fatal(err)
-}
-fmt.Println("Pending changes:", len(result.Changes))
-for _, stmt := range result.SQL {
-    fmt.Println(stmt)
-}
-```
+`grizzle check` validates the local migration artifact set. It is an offline command for the initial design and does not connect to the database, even if shared config contains database credentials.
 
-## Migrate (with history)
+## Migrate
 
-`kit.Migrate` is like `Push` but records every applied SQL batch in a `_grizzle_migrations` history table. Calling `Migrate` twice with an unchanged schema is a safe no-op.
+`grizzle migrate` is the target artifact execution command. It must apply pending migration directories from the configured migrations output directory and record successful applications in `__grizzle_migrations`.
 
-```go
-result, err := kit.Migrate(ctx, pool, db.UsersT, db.RealmsT, db.PostsT)
-if err != nil {
-    log.Fatal(err)
-}
-if result.AlreadyCurrent {
-    fmt.Println("schema is up to date")
-} else {
-    fmt.Printf("applied %d change(s) — checksum %s\n", len(result.Changes), result.Checksum)
-}
-```
+The target runner uses migration directory names as identity and explicit `--> statement-breakpoint` markers for statement segmentation. It does not scan arbitrary root-level `.sql` files.
 
-The `_grizzle_migrations` table is created automatically on first use.
+## Pull
 
-## Status
+`grizzle pull` connects to a live database, introspects schema state, and writes Go schema definition files such as `schema.go` and `relations.go`.
 
-`kit.Status` shows applied migration history and any pending changes without modifying the database:
+`pull` is the Go equivalent of Drizzle Kit `pull` / `introspect`. It is not the same command as `grizzle gen`.
 
-```go
-status, err := kit.Status(ctx, pool, db.UsersT, db.RealmsT)
-if err != nil {
-    log.Fatal(err)
-}
-fmt.Printf("applied migrations: %d\n", len(status.Applied))
-for _, r := range status.Applied {
-    fmt.Printf("  [%s] %s\n", r.AppliedAt.Format(time.RFC3339), r.Description)
-}
-fmt.Printf("pending changes: %d\n", len(status.Pending))
-```
+Filesystem-mutating `pull` requires schema/table filters or an explicit `--all-schemas` / `AllowBroadScan` opt-in before broad introspection. Prefer filters for shared databases, and review generated files because object names and SQL literals come from the live database.
 
-## Generating SQL without a live DB
+## Gen
 
-`kit.GenerateCreateSQL` generates the full `CREATE TABLE` SQL from table definitions — no database connection needed:
-
-```go
-sql := kit.GenerateCreateSQL(db.UsersT, db.RealmsT)
-fmt.Println(sql)
-// CREATE TABLE "users" ( ... );
-//
-// CREATE TABLE "realms" ( ... );
-```
-
-Useful for seeding a new database, writing integration test fixtures, or auditing the expected schema.
-
-## Change types
-
-The diff engine detects and generates SQL for:
-
-| Change | DDL generated |
-|---|---|
-| New table | `CREATE TABLE …` |
-| Dropped table | `DROP TABLE IF EXISTS …` |
-| Renamed table | `ALTER TABLE … RENAME TO …` / `RENAME TABLE … TO …` |
-| New column | `ALTER TABLE … ADD COLUMN …` |
-| Dropped column | `ALTER TABLE … DROP COLUMN …` |
-| Renamed column | `ALTER TABLE … RENAME COLUMN … TO …` |
-| New index | `CREATE [UNIQUE] INDEX …` |
-| Dropped index | `DROP INDEX …` |
-
-To rename a table or column without data loss, use `RenamedFrom()` on the table or column builder. `Diff()` will emit `ChangeRenameTable` or `ChangeRenameColumn` instead of a destructive drop-and-recreate. **Remove the `RenamedFrom()` call from your schema definition once the migration has been applied** — it is a one-time migration annotation. Column type, nullability, and default changes can be generated for PostgreSQL and MySQL; SQLite may still require a manual table rebuild for those changes.
-
-```go
-// Rename a table
-pg.Table("users",
-    pg.C("id", pg.UUID().PrimaryKey()),
-    pg.C("login_name", pg.Varchar(255).NotNull()),
-).RenamedFrom("accounts")
-
-// Rename a column
-pg.Table("users",
-    pg.C("login_name", pg.Varchar(255).NotNull().RenamedFrom("username")),
-)
-```
-
-The `oldName` argument must exactly match how the table or column appears as a key in the existing snapshot — for introspected snapshots, public-schema tables are keyed without the `public.` prefix. See the `RenamedFrom` godoc for details.
-
-## `grizzle gen` — code generation
-
-The CLI companion to the migration kit generates typed Go table definitions from an existing database schema:
+`grizzle gen` reads existing Go schema definition files and emits typed Go helper code such as table structs, select structs, insert structs, update structs, and typed column handles.
 
 ```sh
-# Install the CLI
-go install github.com/sofired/grizzle/cmd/grizzle@latest
-
-# Generate schema code from a live PostgreSQL database
-grizzle gen \
-  --dsn "postgres://user:pass@localhost/mydb" \
-  --out ./schema/db
+grizzle gen --schema ./schema --out ./schema --package schema
 ```
 
-The generated file contains `TableDef` values, typed column handles, and `Insert` / `Select` structs ready for use with `pgxdb.FromSelect` and `pgxdb.ScanAll`.
+`gen` exists because Go needs generated helper types where TypeScript can infer them directly. It does not connect to a live database.
 
-See [Getting Started](/guide/getting-started) for a full walkthrough.
+See [codegen.md](../spec/codegen.md) for the authoritative `grizzle gen` contract.
