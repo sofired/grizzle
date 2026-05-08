@@ -234,11 +234,11 @@ func (s *FSArtifactStore) ReadArtifact(ctx context.Context, root ArtifactRoot, n
 
 	sql, err := readArtifactFile(ctx, dir, "migration.sql", lim.MaxMigrationSQLBytes)
 	if err != nil {
-		return nil, &Error{Code: CodeInvalidPath, Op: fsOp + ".read_artifact", Migration: name, Err: err}
+		return nil, &Error{Code: artifactReadErrorCode(err), Op: fsOp + ".read_artifact", Migration: name, Err: err}
 	}
 	snap, err := readArtifactFile(ctx, dir, "snapshot.json", lim.MaxSnapshotJSONBytes)
 	if err != nil {
-		return nil, &Error{Code: CodeInvalidPath, Op: fsOp + ".read_artifact", Migration: name, Err: err}
+		return nil, &Error{Code: artifactReadErrorCode(err), Op: fsOp + ".read_artifact", Migration: name, Err: err}
 	}
 
 	digests := computeArtifactDigest(sql, snap)
@@ -336,7 +336,7 @@ func readArtifactFile(ctx context.Context, dir, name string, maxBytes int64) ([]
 		return nil, fmt.Errorf("%s: not a regular file", name)
 	}
 	if fi.Size() > maxBytes {
-		return nil, fmt.Errorf("%s: file size %d exceeds limit %d", name, fi.Size(), maxBytes)
+		return nil, fmt.Errorf("%s: file size %d exceeds limit %d: %w", name, fi.Size(), maxBytes, ErrResourceLimit)
 	}
 
 	f, err := os.Open(path)
@@ -350,9 +350,20 @@ func readArtifactFile(ctx context.Context, dir, name string, maxBytes int64) ([]
 		return nil, fmt.Errorf("read %s: %w", name, err)
 	}
 	if int64(len(data)) > maxBytes {
-		return nil, fmt.Errorf("%s: content exceeds limit %d", name, maxBytes)
+		return nil, fmt.Errorf("%s: content exceeds limit %d: %w", name, maxBytes, ErrResourceLimit)
 	}
 	return data, nil
+}
+
+// artifactReadErrorCode classifies an error returned by readArtifactFile so the
+// caller can wrap it with the right ErrorCode. Size-cap failures are reported
+// as resource_limit (per the artifacts spec), and everything else as
+// invalid_path (lstat / open / read I/O failures, type-shape rejections).
+func artifactReadErrorCode(err error) ErrorCode {
+	if errors.Is(err, ErrResourceLimit) {
+		return CodeResourceLimit
+	}
+	return CodeInvalidPath
 }
 
 // writeFile writes data to path, creating or truncating the file.
@@ -433,9 +444,18 @@ func validateArtifactName(name string) error {
 
 // assertContained ensures that name, when joined with root, does not escape
 // root via path traversal. name must already have passed validateArtifactName.
+//
+// The check is performed via filepath.Rel rather than a string-prefix
+// comparison so that relative roots (notably "." for the current directory)
+// are handled correctly: filepath.Join(".", "name") cleans to "name", which
+// would fail a "name has prefix ./" check even though it is contained.
 func assertContained(root, name string) error {
-	full := filepath.Join(root, name)
-	if !strings.HasPrefix(full+string(filepath.Separator), root+string(filepath.Separator)) {
+	full := filepath.Clean(filepath.Join(root, name))
+	rel, err := filepath.Rel(filepath.Clean(root), full)
+	if err != nil {
+		return fmt.Errorf("path escapes root")
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return fmt.Errorf("path escapes root")
 	}
 	return nil

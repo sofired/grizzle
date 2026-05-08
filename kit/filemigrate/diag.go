@@ -194,6 +194,19 @@ func (e *ExecutionError) Error() string { return e.Base.Error() }
 // Is satisfies errors.Is by delegating to the embedded Error.
 func (e *ExecutionError) Is(target error) bool { return e.Base.Is(target) }
 
+// As satisfies errors.As. It exposes the embedded Base so callers using the
+// canonical errors.As(err, &*Error) pattern can recover the shared
+// Code/Op/Path/Migration/Dialect fields without traversing the redacted
+// Unwrap chain. Without this, Unwrap returns the safe cause (or nil) and
+// the *Error type is never reached.
+func (e *ExecutionError) As(target any) bool {
+	if t, ok := target.(**Error); ok {
+		*t = &e.Base
+		return true
+	}
+	return false
+}
+
 // Unwrap returns the redacted safe cause.
 func (e *ExecutionError) Unwrap() error { return e.Base.Unwrap() }
 

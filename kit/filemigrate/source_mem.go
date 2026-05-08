@@ -80,9 +80,20 @@ func (s *MemSourceStore) ListSourceFiles(ctx context.Context, root SourceRoot, o
 }
 
 // ReadSourceFile returns a caller-owned copy of the file at root/relpath.
+// Non-Go relpaths (those without a .go suffix) are rejected with
+// CodeInvalidPath, matching the production FSSourceStore contract that
+// only .go files are valid schema inputs.
 func (s *MemSourceStore) ReadSourceFile(ctx context.Context, root SourceRoot, relpath string, opts ReadSourceFileOptions) (*SourceFile, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
+	}
+	if !strings.HasSuffix(relpath, ".go") {
+		return nil, &Error{
+			Code: CodeInvalidPath,
+			Op:   "mem_source_store.read_source_file",
+			Path: safeRenderPath(relpath),
+			Err:  fmt.Errorf("only .go schema files are supported"),
+		}
 	}
 	lim := opts.Limits.resolve()
 	if err := lim.Validate("mem_source_store.read_source_file"); err != nil {

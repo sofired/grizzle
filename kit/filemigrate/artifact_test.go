@@ -656,8 +656,130 @@ func TestFSArtifactStore_ByteCapEnforced(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected resource limit error for oversized migration.sql")
 	}
-	if !errors.Is(err, filemigrate.ErrInvalidPath) && !errors.Is(err, filemigrate.ErrResourceLimit) {
-		// The fs store wraps the byte-cap error inside ErrInvalidPath.
-		t.Errorf("expected ErrInvalidPath or ErrResourceLimit, got %v", err)
+	if !errors.Is(err, filemigrate.ErrResourceLimit) {
+		t.Errorf("expected ErrResourceLimit, got %v", err)
+	}
+	if errors.Is(err, filemigrate.ErrInvalidPath) {
+		t.Errorf("oversized files must not be reported as ErrInvalidPath: %v", err)
+	}
+}
+
+// TestFSArtifactStore_OversizedSnapshotReturnsResourceLimit verifies that an
+// oversized snapshot.json is reported as resource_limit (not invalid_path),
+// matching the spec contract that user-tunable size limit breaches use a
+// distinct, classifiable error code from corrupt-path failures.
+func TestFSArtifactStore_OversizedSnapshotReturnsResourceLimit(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping filesystem test in short mode")
+	}
+	dir := t.TempDir()
+	store := filemigrate.NewFSArtifactStore()
+	root := mustResolveRoot(t, store, dir, filemigrate.RootEnsureForWrite)
+	mustCreateArtifact(t, store, root, "20240101000000_snap", []byte("a;"), []byte(`{"version":"1"}`))
+
+	_, err := store.ReadArtifact(t.Context(), root, "20240101000000_snap", filemigrate.ReadArtifactOptions{
+		Limits: filemigrate.ResourceLimits{MaxSnapshotJSONBytes: 3}, // smaller than the snapshot
+	})
+	if err == nil {
+		t.Fatal("expected resource limit error for oversized snapshot.json")
+	}
+	if !errors.Is(err, filemigrate.ErrResourceLimit) {
+		t.Errorf("expected ErrResourceLimit, got %v", err)
+	}
+}
+
+// TestFSArtifactStore_NonRegularArtifactFileReturnsInvalidPath verifies the
+// non-size readArtifactFile failure paths still report invalid_path, so the
+// caller can tell user-tunable size breaches apart from path/shape failures.
+func TestFSArtifactStore_NonRegularArtifactFileReturnsInvalidPath(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping filesystem test in short mode")
+	}
+	dir := t.TempDir()
+	store := filemigrate.NewFSArtifactStore()
+	root := mustResolveRoot(t, store, dir, filemigrate.RootEnsureForWrite)
+	// Build a directory that contains a non-regular migration.sql (use a FIFO
+	// so the type-shape check fires inside readArtifactFile).
+	migDir := filepath.Join(dir, "20240101000000_bad")
+	if err := os.Mkdir(migDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Mkfifo(filepath.Join(migDir, "migration.sql"), 0o600); err != nil {
+		t.Skipf("Mkfifo not supported on this platform: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(migDir, "snapshot.json"), []byte("{}"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := store.ReadArtifact(t.Context(), root, "20240101000000_bad", filemigrate.ReadArtifactOptions{})
+	if err == nil {
+		t.Fatal("expected error for non-regular migration.sql")
+	}
+	if !errors.Is(err, filemigrate.ErrInvalidPath) {
+		t.Errorf("expected ErrInvalidPath, got %v", err)
+	}
+	if errors.Is(err, filemigrate.ErrResourceLimit) {
+		t.Errorf("non-regular file must not be reported as ErrResourceLimit: %v", err)
+	}
+}
+
+// TestFSArtifactStore_CurrentDirRoot verifies that "." resolves and operates
+// as a valid artifact root: filepath.Join(".", name) cleans to name (no leading
+// "./"), so the prefix-style containment check used previously rejected every
+// artifact name in the current directory. The filepath.Rel-based check now
+// handles this correctly.
+func TestFSArtifactStore_CurrentDirRoot(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping filesystem test in short mode")
+	}
+	t.Chdir(t.TempDir())
+	store := filemigrate.NewFSArtifactStore()
+	root, err := store.ResolveRoot(t.Context(), ".", filemigrate.ResolveArtifactRootOptions{Mode: filemigrate.RootEnsureForWrite})
+	if err != nil {
+		t.Fatalf("ResolveRoot(\".\"): %v", err)
+	}
+
+	loaded := mustCreateArtifact(t, store, root, "20240101000000_init", []byte("CREATE TABLE t (id INT);"), []byte(`{"version":"1"}`))
+	if loaded.Name != "20240101000000_init" {
+		t.Errorf("unexpected loaded.Name: %q", loaded.Name)
+	}
+
+	read, err := store.ReadArtifact(t.Context(), root, "20240101000000_init", filemigrate.ReadArtifactOptions{})
+	if err != nil {
+		t.Fatalf("ReadArtifact: %v", err)
+	}
+	if !bytes.Equal(read.MigrationSQL, []byte("CREATE TABLE t (id INT);")) {
+		t.Errorf("unexpected SQL: %q", read.MigrationSQL)
+	}
+
+	entries, err := store.ListArtifacts(t.Context(), root, filemigrate.ListArtifactsOptions{})
+	if err != nil {
+		t.Fatalf("ListArtifacts: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Name != "20240101000000_init" {
+		t.Errorf("unexpected entries: %v", entries)
+	}
+}
+
+// TestMemArtifactStore_ListEnforcesDirEntryLimit verifies that the in-memory
+// artifact store enforces MaxArtifactDirEntries (the raw directory-entry cap
+// FSArtifactStore checks against os.ReadDir output) and not just MaxArtifacts.
+// Without this, tests using the memory backend can miss configurations that
+// would fail under the production FS store.
+func TestMemArtifactStore_ListEnforcesDirEntryLimit(t *testing.T) {
+	store := filemigrate.NewMemArtifactStore()
+	root := mustResolveRoot(t, store, "/migrations", filemigrate.RootEnsureForWrite)
+	for _, name := range []string{"20240101000000_a", "20240102000000_b", "20240103000000_c"} {
+		mustCreateArtifact(t, store, root, name, []byte("a;"), []byte("{}"))
+	}
+
+	_, err := store.ListArtifacts(t.Context(), root, filemigrate.ListArtifactsOptions{
+		Limits: filemigrate.ResourceLimits{MaxArtifactDirEntries: 2, MaxArtifacts: 100},
+	})
+	if err == nil {
+		t.Fatal("expected resource limit error for dir-entry overflow")
+	}
+	if !errors.Is(err, filemigrate.ErrResourceLimit) {
+		t.Errorf("expected ErrResourceLimit, got %v", err)
 	}
 }

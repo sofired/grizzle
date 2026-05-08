@@ -56,6 +56,64 @@ func TestErrorIs(t *testing.T) {
 			t.Fatal("ExecutionError should match ErrMigrationExecution")
 		}
 	})
+
+	t.Run("errors.As recovers Base from ExecutionError", func(t *testing.T) {
+		idx := 3
+		ee := &filemigrate.ExecutionError{
+			Base: filemigrate.Error{
+				Code:      filemigrate.CodeMigrationExecution,
+				Op:        "exec",
+				Migration: "20240101_users",
+				Dialect:   "postgresql",
+			},
+			StatementIndex: &idx,
+			HistoryStage:   filemigrate.HistoryStageInsert,
+		}
+		var got *filemigrate.Error
+		if !errors.As(ee, &got) {
+			t.Fatal("errors.As should recover *Error from ExecutionError")
+		}
+		if got == nil {
+			t.Fatal("recovered *Error is nil")
+		}
+		if got.Migration != "20240101_users" {
+			t.Errorf("Migration: got %q, want %q", got.Migration, "20240101_users")
+		}
+		if got.Code != filemigrate.CodeMigrationExecution {
+			t.Errorf("Code: got %q, want %q", got.Code, filemigrate.CodeMigrationExecution)
+		}
+		if got.Dialect != "postgresql" {
+			t.Errorf("Dialect: got %q, want %q", got.Dialect, "postgresql")
+		}
+	})
+
+	t.Run("errors.As recovers Base from PartialApplicationError", func(t *testing.T) {
+		idx := 1
+		pae := &filemigrate.PartialApplicationError{
+			ExecutionError: filemigrate.ExecutionError{
+				Base: filemigrate.Error{
+					Code:      filemigrate.CodePartialApplication,
+					Op:        "apply",
+					Migration: "20240101_partial",
+				},
+				StatementIndex:   &idx,
+				HistoryStage:     filemigrate.HistoryStageInsert,
+				MayHaveCommitted: true,
+			},
+			HistoryInsertStarted:   true,
+			HistoryInsertSucceeded: false,
+		}
+		var got *filemigrate.Error
+		if !errors.As(pae, &got) {
+			t.Fatal("errors.As should recover *Error from PartialApplicationError")
+		}
+		if got.Migration != "20240101_partial" {
+			t.Errorf("Migration: got %q, want %q", got.Migration, "20240101_partial")
+		}
+		if got.Code != filemigrate.CodePartialApplication {
+			t.Errorf("Code: got %q, want %q", got.Code, filemigrate.CodePartialApplication)
+		}
+	})
 }
 
 func TestErrorString(t *testing.T) {

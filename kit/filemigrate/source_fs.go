@@ -147,12 +147,24 @@ func (s *FSSourceStore) ListSourceFiles(ctx context.Context, root SourceRoot, op
 // ReadSourceFile reads the file at relpath under root using Lstat (no follow),
 // validates it is a regular .go file, enforces byte caps, and returns a
 // caller-owned copy. Honors ctx cancellation before any filesystem work runs.
+//
+// Non-Go relpaths (those without a .go suffix) are rejected with CodeInvalidPath
+// before any filesystem work runs, matching the schema-loader contract that
+// only .go files are valid schema inputs.
 func (s *FSSourceStore) ReadSourceFile(ctx context.Context, root SourceRoot, relpath string, opts ReadSourceFileOptions) (*SourceFile, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	if err := assertSourceContained(root.RealPath, relpath); err != nil {
 		return nil, &Error{Code: CodeInvalidPath, Op: sourceOp + ".read_source_file", Path: safeRenderPath(relpath), Err: err}
+	}
+	if !strings.HasSuffix(relpath, ".go") {
+		return nil, &Error{
+			Code: CodeInvalidPath,
+			Op:   sourceOp + ".read_source_file",
+			Path: safeRenderPath(relpath),
+			Err:  fmt.Errorf("only .go schema files are supported"),
+		}
 	}
 	lim := opts.Limits.resolve()
 	if err := lim.Validate(sourceOp + ".read_source_file"); err != nil {
@@ -248,13 +260,22 @@ func assertNoSymlinkInChain(root, relpath string) error {
 
 // assertSourceContained verifies that relpath, when joined with root, stays
 // within root (no path-traversal escape).
+//
+// The check is performed via filepath.Rel rather than a string-prefix
+// comparison so that relative roots (notably "." for the current directory)
+// are handled correctly: filepath.Join(".", "schema.go") cleans to
+// "schema.go", which would fail a "schema.go has prefix ./" check even though
+// it is contained.
 func assertSourceContained(root, relpath string) error {
 	if filepath.IsAbs(relpath) {
 		return fmt.Errorf("absolute paths are not allowed")
 	}
-	full := filepath.Join(root, relpath)
-	rootSlash := root + string(filepath.Separator)
-	if full != root && !strings.HasPrefix(full, rootSlash) {
+	full := filepath.Clean(filepath.Join(root, relpath))
+	rel, err := filepath.Rel(filepath.Clean(root), full)
+	if err != nil {
+		return fmt.Errorf("path escapes root")
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return fmt.Errorf("path escapes root")
 	}
 	return nil

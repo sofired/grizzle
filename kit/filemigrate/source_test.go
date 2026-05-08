@@ -545,3 +545,86 @@ func TestFSSourceStore_ReadByteCap(t *testing.T) {
 		t.Errorf("expected ErrResourceLimit, got %v", err)
 	}
 }
+
+// TestFSSourceStore_ReadRejectsNonGoFile verifies that a direct ReadSourceFile
+// call for a non-.go relpath fails with CodeInvalidPath before any filesystem
+// I/O. The schema-loader contract is that only .go files are valid schema
+// inputs, so explicitly configured sidecars (README.md, generated.txt, etc.)
+// must be rejected at the call site, not just filtered out of ListSourceFiles.
+func TestFSSourceStore_ReadRejectsNonGoFile(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping filesystem test in short mode")
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("# docs"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	store := filemigrate.NewFSSourceStore()
+	root, err := store.ResolveSourceRoot(t.Context(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = store.ReadSourceFile(t.Context(), root, "README.md", filemigrate.ReadSourceFileOptions{})
+	if err == nil {
+		t.Fatal("expected error for non-.go file")
+	}
+	if !errors.Is(err, filemigrate.ErrInvalidPath) {
+		t.Errorf("expected ErrInvalidPath, got %v", err)
+	}
+}
+
+// TestMemSourceStore_ReadRejectsNonGoFile mirrors the FS test on the in-memory
+// store so the two backends agree on non-.go rejection semantics.
+func TestMemSourceStore_ReadRejectsNonGoFile(t *testing.T) {
+	store := filemigrate.NewMemSourceStore()
+	store.AddFile("/schema", "README.md", []byte("# docs"))
+	root, _ := store.ResolveSourceRoot(t.Context(), "/schema")
+
+	_, err := store.ReadSourceFile(t.Context(), root, "README.md", filemigrate.ReadSourceFileOptions{})
+	if err == nil {
+		t.Fatal("expected error for non-.go file")
+	}
+	if !errors.Is(err, filemigrate.ErrInvalidPath) {
+		t.Errorf("expected ErrInvalidPath, got %v", err)
+	}
+}
+
+// TestFSSourceStore_CurrentDirRoot verifies that "." resolves and operates as
+// a valid schema source root: filepath.Join(".", relpath) cleans to relpath
+// (no leading "./"), so the prefix-style containment check used previously
+// rejected every direct read in the current directory. The filepath.Rel-based
+// check now handles this correctly.
+func TestFSSourceStore_CurrentDirRoot(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping filesystem test in short mode")
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "schema.go"), []byte("package schema"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+
+	store := filemigrate.NewFSSourceStore()
+	root, err := store.ResolveSourceRoot(t.Context(), ".")
+	if err != nil {
+		t.Fatalf("ResolveSourceRoot(\".\"): %v", err)
+	}
+
+	files, err := store.ListSourceFiles(t.Context(), root, filemigrate.ListSourceFilesOptions{})
+	if err != nil {
+		t.Fatalf("ListSourceFiles: %v", err)
+	}
+	if len(files) != 1 || files[0] != "schema.go" {
+		t.Errorf("expected [schema.go], got %v", files)
+	}
+
+	sf, err := store.ReadSourceFile(t.Context(), root, "schema.go", filemigrate.ReadSourceFileOptions{})
+	if err != nil {
+		t.Fatalf("ReadSourceFile: %v", err)
+	}
+	if !bytes.Equal(sf.Content, []byte("package schema")) {
+		t.Errorf("unexpected content: %q", sf.Content)
+	}
+}

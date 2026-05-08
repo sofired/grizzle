@@ -68,6 +68,11 @@ func (s *MemArtifactStore) ResolveRoot(ctx context.Context, dir string, opts Res
 }
 
 // ListArtifacts returns all artifact entries for the given root, sorted by name.
+// It enforces both MaxArtifactDirEntries (the raw directory-entry budget that
+// FSArtifactStore checks against os.ReadDir output) and MaxArtifacts. The
+// in-memory store has no concept of sidecars or staging dirs, so the entry
+// count equals the artifact count, but the dir-entry limit is still checked
+// to keep mem and FS behavior aligned for tests using either backend.
 func (s *MemArtifactStore) ListArtifacts(ctx context.Context, root ArtifactRoot, opts ListArtifactsOptions) ([]ArtifactEntry, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -91,6 +96,13 @@ func (s *MemArtifactStore) ListArtifacts(ctx context.Context, root ArtifactRoot,
 			Name: a.name,
 			Path: root.RealPath + "/" + a.name,
 		})
+	}
+	if len(out) > lim.MaxArtifactDirEntries {
+		return nil, &Error{
+			Code:      CodeResourceLimit,
+			Op:        "mem_artifact_store.list_artifacts",
+			Migration: fmt.Sprintf("dir_entries=%d limit=%d", len(out), lim.MaxArtifactDirEntries),
+		}
 	}
 	// Sort before enforcing the limit so the result matches FS store behavior:
 	// the limit fires on a deterministic ordered set, not map-iteration order.
