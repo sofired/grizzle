@@ -80,13 +80,19 @@ func (s *MemSourceStore) ListSourceFiles(ctx context.Context, root SourceRoot, o
 }
 
 // ReadSourceFile returns a caller-owned copy of the file at root/relpath.
+//
+// Validations run in this order: ctx cancellation, .go suffix, containment,
+// resolved limit fields, map lookup, then per-file size cap. The order
+// matters for test assertions — an invalid limit combined with a bad
+// relpath surfaces the path error first, not the config error.
+//
 // Non-Go relpaths (those without a .go suffix) are rejected with
 // CodeInvalidPath, matching the production FSSourceStore contract that
 // only .go files are valid schema inputs. Relpaths that escape the
 // configured root (absolute paths or paths containing `..` segments that
-// resolve outside root) are rejected with CodeInvalidPath, matching
-// FSSourceStore.assertSourceContained, so test seeds cannot bypass
-// containment that production filesystem reads enforce.
+// resolve outside root) are rejected with CodeInvalidPath, matching the
+// containment enforcement used by FSSourceStore, so test seeds cannot
+// bypass containment that production filesystem reads enforce.
 func (s *MemSourceStore) ReadSourceFile(ctx context.Context, root SourceRoot, relpath string, opts ReadSourceFileOptions) (*SourceFile, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err

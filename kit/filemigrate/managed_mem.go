@@ -64,6 +64,14 @@ func (s *MemManagedSourceStore) WriteManagedFile(ctx context.Context, root Sourc
 			Err:  fmt.Errorf("ManagedWriteOptions.Header must not be empty"),
 		}
 	}
+	if err := assertSourceContained(root.RealPath, relpath); err != nil {
+		return ManagedFile{}, &Error{
+			Code: CodeInvalidPath,
+			Op:   "mem_managed_source_store.write_managed_file",
+			Path: safeRenderPath(relpath),
+			Err:  err,
+		}
+	}
 	lim := opts.Limits.resolve()
 	if err := lim.Validate("mem_managed_source_store.write_managed_file"); err != nil {
 		return ManagedFile{}, err

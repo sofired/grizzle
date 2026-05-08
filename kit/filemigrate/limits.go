@@ -86,7 +86,9 @@ type ResourceLimits struct {
 	MaxSchemaDeclarations    int
 	MaxSchemaLiteralBytes    int64
 
-	// Secret enforcement — not published in ResourceLimitStatus.
+	// Secret enforcement — not published in ResourceLimitStatus, but the
+	// configured cap itself is still rejected by Validate when negative,
+	// matching the negative-value contract for every other public field.
 	MaxSecretValueBytes int64
 }
 

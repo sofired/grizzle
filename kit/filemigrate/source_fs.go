@@ -261,13 +261,19 @@ func assertNoSymlinkInChain(root, relpath string) error {
 }
 
 // assertSourceContained verifies that relpath, when joined with root, stays
-// within root (no path-traversal escape).
+// within root (no path-traversal escape) and names a file under root rather
+// than root itself.
 //
-// The check is performed via filepath.Rel rather than a string-prefix
-// comparison so that relative roots (notably "." for the current directory)
-// are handled correctly: filepath.Join(".", "schema.go") cleans to
-// "schema.go", which would fail a "schema.go has prefix ./" check even though
-// it is contained.
+// The containment check is performed via filepath.Rel rather than a
+// string-prefix comparison so that relative roots (notably "." for the
+// current directory) are handled correctly: filepath.Join(".", "schema.go")
+// cleans to "schema.go", which would fail a "schema.go has prefix ./" check
+// even though it is contained.
+//
+// An empty relpath, ".", or any path that cleans to root itself is also
+// rejected: those forms are not valid file names and would otherwise produce
+// degenerate map keys in the in-memory stores or refer to the root directory
+// in the filesystem store.
 func assertSourceContained(root, relpath string) error {
 	if filepath.IsAbs(relpath) {
 		return fmt.Errorf("absolute paths are not allowed")
@@ -276,6 +282,9 @@ func assertSourceContained(root, relpath string) error {
 	rel, err := filepath.Rel(filepath.Clean(root), full)
 	if err != nil {
 		return fmt.Errorf("path escapes root")
+	}
+	if rel == "." {
+		return fmt.Errorf("relpath must name a file under root")
 	}
 	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return fmt.Errorf("path escapes root")
