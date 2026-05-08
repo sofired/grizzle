@@ -180,9 +180,9 @@ Issue-side gate:
 - [x] Defer targets carry `blocked-by-spec` (#157, #296, #137, #248, #250, #172, #253, #254, #277, #278, #279, #240).
 - [x] One parent issue exists for every Slice 0-8 (#290, #291, #292, #169, #153, #293, #294, #158, #295).
 - [x] One workstream parent exists for every project-wide area (#282-#289).
-- [x] Every open issue carries an `area:*` label or is explicitly non-gating backlog (docs/release).
+- [x] Every open issue carries an `area:*` label.
 - [x] Every implementation issue with a target slice carries exactly one `slice:N` tag (the delivery slice).
-- [ ] Direct-sync `push` and unsupported object-family work remain `blocked-by-spec` until spec exists.
+- [x] Direct-sync `push` and unsupported object-family work remain `blocked-by-spec` until spec exists.
 
 Spec-side gate:
 
