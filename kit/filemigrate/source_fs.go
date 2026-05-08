@@ -31,7 +31,7 @@ const sourceOp = "source_store"
 // cannot redirect resolution outside the intended tree.
 func (s *FSSourceStore) ResolveSourceRoot(_ context.Context, dir string) (SourceRoot, error) {
 	if dir == "" {
-		return SourceRoot{}, newError(CodeInvalidConfig, sourceOp+".resolve_source_root")
+		return SourceRoot{}, newInvalidConfigError(sourceOp + ".resolve_source_root")
 	}
 	if err := assertNoSymlinkInPathChain(dir); err != nil {
 		return SourceRoot{}, &Error{
@@ -193,7 +193,7 @@ func (s *FSSourceStore) ReadSourceFile(_ context.Context, root SourceRoot, relpa
 	if err != nil {
 		return nil, newPathError(sourceOp+".read_source_file", relpath, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	data, err := io.ReadAll(io.LimitReader(f, lim.MaxSchemaSourceFileBytes+1))
 	if err != nil {

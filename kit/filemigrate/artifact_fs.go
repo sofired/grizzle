@@ -37,7 +37,7 @@ func (s *FSArtifactStore) ResolveRoot(ctx context.Context, dir string, opts Reso
 		return ArtifactRoot{}, err
 	}
 	if dir == "" {
-		return ArtifactRoot{}, newError(CodeInvalidConfig, fsOp+".resolve_root")
+		return ArtifactRoot{}, newInvalidConfigError(fsOp + ".resolve_root")
 	}
 
 	// Reject any symlink in the parent chain before Lstat / EvalSymlinks /
@@ -77,7 +77,7 @@ func (s *FSArtifactStore) ResolveRoot(ctx context.Context, dir string, opts Reso
 			}
 			return ArtifactRoot{Configured: dir, RealPath: real, State: RootCreated}, nil
 		default:
-			return ArtifactRoot{}, newError(CodeInvalidConfig, fsOp+".resolve_root")
+			return ArtifactRoot{}, newInvalidConfigError(fsOp + ".resolve_root")
 		}
 	}
 	if err != nil {
@@ -345,7 +345,7 @@ func readArtifactFile(ctx context.Context, dir, name string, maxBytes int64) ([]
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", name, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	data, err := io.ReadAll(io.LimitReader(f, maxBytes+1))
 	if err != nil {

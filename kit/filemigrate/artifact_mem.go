@@ -38,7 +38,7 @@ func (s *MemArtifactStore) ResolveRoot(ctx context.Context, dir string, opts Res
 		return ArtifactRoot{}, err
 	}
 	if dir == "" {
-		return ArtifactRoot{}, newError(CodeInvalidConfig, "mem_artifact_store.resolve_root")
+		return ArtifactRoot{}, newInvalidConfigError("mem_artifact_store.resolve_root")
 	}
 	s.mu.Lock()
 	hasAny := false

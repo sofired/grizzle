@@ -225,15 +225,11 @@ type Diagnostic struct {
 	Path     string // safe-rendered; root-relative or canonicalized; no DSNs
 }
 
-// newError constructs an *Error with the given code and op.
-func newError(code ErrorCode, op string) *Error {
-	return &Error{Code: code, Op: op}
-}
-
-// wrapError wraps a redacted safe cause inside a new *Error.
-// The caller is responsible for ensuring cause contains no credentials or SQL.
-func wrapError(code ErrorCode, op string, cause error) *Error {
-	return &Error{Code: code, Op: op, Err: cause}
+// newInvalidConfigError constructs an *Error with CodeInvalidConfig for the
+// given op. Used by store constructors when the configured directory or other
+// caller-supplied input fails the public contract.
+func newInvalidConfigError(op string) *Error {
+	return &Error{Code: CodeInvalidConfig, Op: op}
 }
 
 // newPathError constructs an *Error for path-related failures.

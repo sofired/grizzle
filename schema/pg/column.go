@@ -223,6 +223,7 @@ func (b *VarcharBuilder) PrimaryKey() *VarcharBuilder {
 	}
 	return b
 }
+
 // Unique adds a UNIQUE constraint to the column.
 func (b *VarcharBuilder) Unique() *VarcharBuilder { b.def.Unique = true; return b }
 
@@ -279,6 +280,7 @@ func (b *BooleanBuilder) PrimaryKey() *BooleanBuilder {
 	}
 	return b
 }
+
 // Unique adds a UNIQUE constraint to the column.
 func (b *BooleanBuilder) Unique() *BooleanBuilder { b.def.Unique = true; return b }
 func (b *BooleanBuilder) Default(val bool) *BooleanBuilder {

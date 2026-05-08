@@ -37,7 +37,7 @@ func (s *MemManagedSourceStore) ResolveSourceRoot(ctx context.Context, dir strin
 		return SourceRoot{}, err
 	}
 	if dir == "" {
-		return SourceRoot{}, newError(CodeInvalidConfig, "mem_managed_source_store.resolve_source_root")
+		return SourceRoot{}, newInvalidConfigError("mem_managed_source_store.resolve_source_root")
 	}
 	return SourceRoot{Configured: dir, RealPath: dir}, nil
 }
