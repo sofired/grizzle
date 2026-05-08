@@ -104,9 +104,18 @@ func applyBaseType(info *ColumnInfo, chain *parser.ChainResult) error {
 		info.GoType = "int64"
 		info.GoTypePtr = "*int64"
 
+	// Numeric(p,s) maps to string to avoid precision loss. float64 cannot
+	// represent arbitrary decimal values without rounding; string preserves the
+	// exact representation returned by the database driver. See codegen.md,
+	// "Go type mappings" section, and issue #236.
+	case "Numeric":
+		info.ColType = "expr.StringColumn"
+		info.GoType = "string"
+		info.GoTypePtr = "*string"
+
 	// MySQL-specific: Double maps to FloatColumn.
 	// SQLite-specific: Real maps to FloatColumn (SQLite REAL storage class).
-	case "Numeric", "Real", "DoublePrecision", "Double":
+	case "Real", "DoublePrecision", "Double":
 		info.ColType = "expr.FloatColumn"
 		info.GoType = "float64"
 		info.GoTypePtr = "*float64"

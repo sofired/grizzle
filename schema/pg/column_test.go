@@ -376,3 +376,206 @@ func TestColumnNameInjected(t *testing.T) {
 		}
 	}
 }
+
+// --- Issue #234 regressions: VarcharBuilder / Text missing PrimaryKey ---
+
+func TestVarcharPrimaryKey(t *testing.T) {
+	def := pg.Varchar(255).PrimaryKey().Build("slug")
+	if !def.PrimaryKey {
+		t.Error("PrimaryKey should be true")
+	}
+	if !def.NotNull {
+		t.Error("PrimaryKey implies NotNull")
+	}
+	// Varchar PKs require caller-supplied values; HasDefault must be false.
+	if def.HasDefault {
+		t.Error("HasDefault should be false for varchar primary key")
+	}
+}
+
+func TestTextPrimaryKey(t *testing.T) {
+	// Text() returns a *VarcharBuilder, so PrimaryKey() applies to both.
+	def := pg.Text().PrimaryKey().Build("handle")
+	if !def.PrimaryKey {
+		t.Error("PrimaryKey should be true")
+	}
+	if !def.NotNull {
+		t.Error("PrimaryKey implies NotNull")
+	}
+	// Text PKs require caller-supplied values; HasDefault must be false.
+	if def.HasDefault {
+		t.Error("HasDefault should be false for text primary key")
+	}
+}
+
+func TestVarcharUnique(t *testing.T) {
+	def := pg.Varchar(255).Unique().Build("email")
+	if !def.Unique {
+		t.Error("Unique should be true")
+	}
+}
+
+func TestTextUnique(t *testing.T) {
+	def := pg.Text().Unique().Build("handle")
+	if !def.Unique {
+		t.Error("Unique should be true")
+	}
+}
+
+// --- Issue #235 regressions: BooleanBuilder missing Unique and PrimaryKey ---
+
+func TestBooleanPrimaryKey(t *testing.T) {
+	def := pg.Boolean().PrimaryKey().Build("flag")
+	if !def.PrimaryKey {
+		t.Error("PrimaryKey should be true")
+	}
+	if !def.NotNull {
+		t.Error("PrimaryKey implies NotNull")
+	}
+	// Boolean PKs require caller-supplied values; HasDefault must be false.
+	if def.HasDefault {
+		t.Error("HasDefault should be false for boolean primary key")
+	}
+}
+
+func TestBooleanUnique(t *testing.T) {
+	def := pg.Boolean().Unique().Build("flag")
+	if !def.Unique {
+		t.Error("Unique should be true")
+	}
+}
+
+// --- Default(...).PrimaryKey() preserves explicit defaults ---
+
+// Default(...) chained before PrimaryKey() must not have its HasDefault flag
+// silently cleared. The SQL generators only emit a DEFAULT clause when both
+// HasDefault and DefaultExpr are set, so the previous behavior dropped the
+// migration's DEFAULT while codegen still treated the column as defaulted.
+func TestVarcharDefaultBeforePrimaryKeyPreserved(t *testing.T) {
+	def := pg.Varchar(255).Default("foo").PrimaryKey().Build("slug")
+	if !def.PrimaryKey {
+		t.Error("PrimaryKey should be true")
+	}
+	if !def.HasDefault {
+		t.Error("HasDefault should be true when Default(...) preceded PrimaryKey()")
+	}
+	if def.DefaultExpr != "'foo'" {
+		t.Errorf("DefaultExpr = %q, want %q", def.DefaultExpr, "'foo'")
+	}
+}
+
+func TestTextDefaultBeforePrimaryKeyPreserved(t *testing.T) {
+	def := pg.Text().Default("bar").PrimaryKey().Build("handle")
+	if !def.PrimaryKey {
+		t.Error("PrimaryKey should be true")
+	}
+	if !def.HasDefault {
+		t.Error("HasDefault should be true when Default(...) preceded PrimaryKey()")
+	}
+	if def.DefaultExpr != "'bar'" {
+		t.Errorf("DefaultExpr = %q, want %q", def.DefaultExpr, "'bar'")
+	}
+}
+
+func TestBooleanDefaultBeforePrimaryKeyPreserved(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		val  bool
+		want string
+	}{
+		{"true", true, "true"},
+		{"false", false, "false"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			def := pg.Boolean().Default(tc.val).PrimaryKey().Build("flag")
+			if !def.PrimaryKey {
+				t.Error("PrimaryKey should be true")
+			}
+			if !def.HasDefault {
+				t.Error("HasDefault should be true when Default(...) preceded PrimaryKey()")
+			}
+			if def.DefaultExpr != tc.want {
+				t.Errorf("DefaultExpr = %q, want %q", def.DefaultExpr, tc.want)
+			}
+		})
+	}
+}
+
+// PrimaryKey().Default(...) (the reverse order) must continue to work too.
+func TestVarcharPrimaryKeyThenDefault(t *testing.T) {
+	def := pg.Varchar(255).PrimaryKey().Default("baz").Build("slug")
+	if !def.PrimaryKey {
+		t.Error("PrimaryKey should be true")
+	}
+	if !def.HasDefault {
+		t.Error("HasDefault should be true after Default(...) follows PrimaryKey()")
+	}
+	if def.DefaultExpr != "'baz'" {
+		t.Errorf("DefaultExpr = %q, want %q", def.DefaultExpr, "'baz'")
+	}
+}
+
+// Boolean().PrimaryKey().Default(...) (reverse order) for both true and false
+// values exercises the symmetric path to TestVarcharPrimaryKeyThenDefault.
+func TestBooleanPrimaryKeyThenDefault(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		val  bool
+		want string
+	}{
+		{"true", true, "true"},
+		{"false", false, "false"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			def := pg.Boolean().PrimaryKey().Default(tc.val).Build("flag")
+			if !def.PrimaryKey {
+				t.Error("PrimaryKey should be true")
+			}
+			if !def.HasDefault {
+				t.Error("HasDefault should be true after Default(...) follows PrimaryKey()")
+			}
+			if def.DefaultExpr != tc.want {
+				t.Errorf("DefaultExpr = %q, want %q", def.DefaultExpr, tc.want)
+			}
+		})
+	}
+}
+
+// --- NumericBuilder ---
+
+func TestNumericGoType(t *testing.T) {
+	def := pg.Numeric(10, 2).Build("amount")
+	if def.SQLType != "numeric(10,2)" {
+		t.Errorf("SQLType = %q, want %q", def.SQLType, "numeric(10,2)")
+	}
+	// Numeric maps to string to avoid precision loss (issue #236).
+	if def.GoType != pg.GoTypeString {
+		t.Errorf("GoType = %q, want %q", def.GoType, pg.GoTypeString)
+	}
+}
+
+// --- Issue #259 regression: NumericBuilder.Default passes raw SQL expression through ---
+
+func TestNumericDefaultRawExpression(t *testing.T) {
+	tests := []struct {
+		name string
+		val  string
+		want string
+	}{
+		{"plain number", "3.14", "3.14"},
+		{"NaN keyword", "'NaN'", "'NaN'"},
+		{"zero", "0", "0"},
+		{"negative", "-1.5", "-1.5"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			def := pg.Numeric(10, 2).Default(tt.val).Build("amount")
+			if !def.HasDefault {
+				t.Error("HasDefault should be true")
+			}
+			if def.DefaultExpr != tt.want {
+				t.Errorf("DefaultExpr = %q, want %q", def.DefaultExpr, tt.want)
+			}
+		})
+	}
+}

@@ -104,8 +104,9 @@ func TestNumeric_ColumnDef(t *testing.T) {
 	if col.SQLType != "numeric(10,2)" {
 		t.Errorf("SQLType: got %q, want %q", col.SQLType, "numeric(10,2)")
 	}
-	if col.GoType != pg.GoTypeFloat64 {
-		t.Errorf("GoType: got %v, want %v", col.GoType, pg.GoTypeFloat64)
+	// Numeric maps to string to avoid precision loss (issue #236).
+	if col.GoType != pg.GoTypeString {
+		t.Errorf("GoType: got %v, want %v", col.GoType, pg.GoTypeString)
 	}
 }
 

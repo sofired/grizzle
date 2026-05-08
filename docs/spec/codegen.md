@@ -291,7 +291,7 @@ Target semantics are Drizzle parity: callers must be able to omit a nullable fie
 | `varchar(n)`, `text`, `char(n)` | `string` | |
 | `boolean` | `bool` | |
 | `smallint` | `int16` | PARITY target; DEVIATION:GAP until generated handle/type coverage is implemented |
-| `integer`, PostgreSQL `serial` | `int32` | |
+| `integer`, PostgreSQL `serial` | `int` | DEVIATION:INTENTIONAL — spec originally said `int32`; Grizzle uses plain `int` (idiomatic Go, pointer-size integer) for consistency with Go conventions. `int32` is a parity target if explicit 32-bit arithmetic is needed in the future. |
 | `smallserial` | `int16` | PARITY target; DEVIATION:GAP until generated handle/type coverage is implemented |
 | `bigint`, `bigserial` | `int64` | Default Go mapping; Drizzle mode-specific `number`/`bigint` behavior is DEVIATION:LANGUAGE / DEVIATION:GAP until explicit mode policy is implemented |
 | `numeric(p,s)` | `string` | Default; avoids precision loss. Drizzle mode-specific string/number/bigint behavior is DEVIATION:GAP until explicitly supported |
