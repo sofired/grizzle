@@ -47,6 +47,9 @@ func (s *MemSourceStore) ListSourceFiles(ctx context.Context, root SourceRoot, o
 		return nil, err
 	}
 	lim := opts.Limits.resolve()
+	if err := lim.Validate("mem_source_store.list_source_files"); err != nil {
+		return nil, err
+	}
 	prefix := root.RealPath + "/"
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -76,6 +79,9 @@ func (s *MemSourceStore) ReadSourceFile(ctx context.Context, root SourceRoot, re
 		return nil, err
 	}
 	lim := opts.Limits.resolve()
+	if err := lim.Validate("mem_source_store.read_source_file"); err != nil {
+		return nil, err
+	}
 	key := root.RealPath + "/" + relpath
 	s.mu.Lock()
 	data, ok := s.files[key]

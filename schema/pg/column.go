@@ -211,10 +211,16 @@ func Text() *VarcharBuilder {
 func (b *VarcharBuilder) NotNull() *VarcharBuilder { b.setNotNull(); return b }
 
 // PrimaryKey marks the column as the primary key. Varchar primary keys have no
-// implicit default; callers must supply explicit values on insert.
+// implicit default; callers must supply explicit values on insert. An explicit
+// Default(...) set earlier in the chain is preserved (DefaultExpr untouched and
+// HasDefault stays true).
 func (b *VarcharBuilder) PrimaryKey() *VarcharBuilder {
 	b.setPrimaryKey()
-	b.def.HasDefault = false // varchar PKs require caller-supplied values
+	// Avoid the implicit PK default flag, but only if the caller did not
+	// supply an explicit Default(...) earlier in the chain.
+	if b.def.DefaultExpr == "" {
+		b.def.HasDefault = false
+	}
 	return b
 }
 // Unique adds a UNIQUE constraint to the column.
@@ -264,10 +270,13 @@ func Boolean() *BooleanBuilder {
 func (b *BooleanBuilder) NotNull() *BooleanBuilder { b.setNotNull(); return b }
 
 // PrimaryKey marks the column as the primary key. Boolean primary keys have no
-// implicit default; callers must supply explicit values on insert.
+// implicit default; callers must supply explicit values on insert. An explicit
+// Default(...) set earlier in the chain is preserved.
 func (b *BooleanBuilder) PrimaryKey() *BooleanBuilder {
 	b.setPrimaryKey()
-	b.def.HasDefault = false // boolean PKs require caller-supplied values
+	if b.def.DefaultExpr == "" {
+		b.def.HasDefault = false
+	}
 	return b
 }
 // Unique adds a UNIQUE constraint to the column.

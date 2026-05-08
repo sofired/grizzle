@@ -3,6 +3,7 @@ package filemigrate
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -27,12 +28,27 @@ const fsOp = "artifact_store"
 
 // ResolveRoot resolves dir against the real filesystem.
 // It rejects symlinks, non-directory entries, and paths with unsafe components.
+// Existing parent components of dir are walked with Lstat and rejected if any
+// is a symlink, so a configured path like `<base>/link/migrations` (where
+// `link` is a symlink) cannot redirect resolution outside the intended tree.
+// Non-existent components are tolerated for the RootEnsureForWrite case.
 func (s *FSArtifactStore) ResolveRoot(ctx context.Context, dir string, opts ResolveArtifactRootOptions) (ArtifactRoot, error) {
 	if err := ctx.Err(); err != nil {
 		return ArtifactRoot{}, err
 	}
 	if dir == "" {
 		return ArtifactRoot{}, newError(CodeInvalidConfig, fsOp+".resolve_root")
+	}
+
+	// Reject any symlink in the parent chain before Lstat / EvalSymlinks /
+	// MkdirAll runs. A symlinked parent would otherwise be silently followed.
+	if err := assertNoSymlinkInPathChain(dir); err != nil {
+		return ArtifactRoot{}, &Error{
+			Code: CodeInvalidPath,
+			Op:   fsOp + ".resolve_root",
+			Path: safeRenderPath(dir),
+			Err:  err,
+		}
 	}
 
 	fi, err := os.Lstat(dir)
@@ -101,6 +117,9 @@ func (s *FSArtifactStore) ListArtifacts(ctx context.Context, root ArtifactRoot, 
 	}
 
 	lim := opts.Limits.resolve()
+	if err := lim.Validate(fsOp + ".list_artifacts"); err != nil {
+		return nil, err
+	}
 	entries, err := os.ReadDir(root.RealPath)
 	if err != nil {
 		return nil, &Error{
@@ -183,6 +202,9 @@ func (s *FSArtifactStore) ReadArtifact(ctx context.Context, root ArtifactRoot, n
 	}
 
 	lim := opts.Limits.resolve()
+	if err := lim.Validate(fsOp + ".read_artifact"); err != nil {
+		return nil, err
+	}
 	dir := filepath.Join(root.RealPath, name)
 
 	// Lstat the artifact directory entry itself before reading children.
@@ -245,6 +267,9 @@ func (s *FSArtifactStore) CreateArtifact(ctx context.Context, root ArtifactRoot,
 	}
 
 	lim := opts.Limits.resolve()
+	if err := lim.Validate(fsOp + ".create_artifact"); err != nil {
+		return nil, err
+	}
 	if int64(len(artifact.MigrationSQL)) > lim.MaxMigrationSQLBytes {
 		return nil, &Error{Code: CodeResourceLimit, Op: fsOp + ".create_artifact", Migration: artifact.Name}
 	}
@@ -414,6 +439,53 @@ func assertContained(root, name string) error {
 	full := filepath.Join(root, name)
 	if !strings.HasPrefix(full+string(filepath.Separator), root+string(filepath.Separator)) {
 		return fmt.Errorf("path escapes root")
+	}
+	return nil
+}
+
+// assertNoSymlinkInPathChain Lstats every existing component of dir from the
+// filesystem root down. It returns an error if any existing component is a
+// symlink. Components that do not exist (ENOENT) are tolerated — the walk
+// stops there because only existing components can be symlinks. This is the
+// configured-path equivalent of [assertNoSymlinkInChain] (which works on
+// relative paths under a trusted root).
+func assertNoSymlinkInPathChain(dir string) error {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return err
+	}
+	abs = filepath.Clean(abs)
+
+	// Walk from the path itself up to the volume root, then iterate from root
+	// downward. filepath.Dir terminates when parent == self (e.g., "/" or "C:\").
+	var paths []string
+	cur := abs
+	for {
+		paths = append(paths, cur)
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			break
+		}
+		cur = parent
+	}
+
+	// paths is now [abs, parent, ..., root]; iterate from root down, skipping
+	// the volume root itself (which is conceptually outside the user-controlled
+	// tree and on Unix is just "/").
+	for i := len(paths) - 2; i >= 0; i-- {
+		p := paths[i]
+		fi, statErr := os.Lstat(p)
+		if errors.Is(statErr, fs.ErrNotExist) {
+			// Remaining (deeper) components cannot exist either, so they
+			// cannot be symlinks. Permit creation by callers that mkdir.
+			return nil
+		}
+		if statErr != nil {
+			return statErr
+		}
+		if fi.Mode()&fs.ModeSymlink != 0 {
+			return fmt.Errorf("symlink in path component %q is not supported", p)
+		}
 	}
 	return nil
 }

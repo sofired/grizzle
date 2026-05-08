@@ -445,6 +445,65 @@ func TestBooleanUnique(t *testing.T) {
 	}
 }
 
+// --- Default(...).PrimaryKey() preserves explicit defaults ---
+
+// Default(...) chained before PrimaryKey() must not have its HasDefault flag
+// silently cleared. The SQL generators only emit a DEFAULT clause when both
+// HasDefault and DefaultExpr are set, so the previous behavior dropped the
+// migration's DEFAULT while codegen still treated the column as defaulted.
+func TestVarcharDefaultBeforePrimaryKeyPreserved(t *testing.T) {
+	def := pg.Varchar(255).Default("foo").PrimaryKey().Build("slug")
+	if !def.PrimaryKey {
+		t.Error("PrimaryKey should be true")
+	}
+	if !def.HasDefault {
+		t.Error("HasDefault should be true when Default(...) preceded PrimaryKey()")
+	}
+	if def.DefaultExpr != "'foo'" {
+		t.Errorf("DefaultExpr = %q, want %q", def.DefaultExpr, "'foo'")
+	}
+}
+
+func TestTextDefaultBeforePrimaryKeyPreserved(t *testing.T) {
+	def := pg.Text().Default("bar").PrimaryKey().Build("handle")
+	if !def.PrimaryKey {
+		t.Error("PrimaryKey should be true")
+	}
+	if !def.HasDefault {
+		t.Error("HasDefault should be true when Default(...) preceded PrimaryKey()")
+	}
+	if def.DefaultExpr != "'bar'" {
+		t.Errorf("DefaultExpr = %q, want %q", def.DefaultExpr, "'bar'")
+	}
+}
+
+func TestBooleanDefaultBeforePrimaryKeyPreserved(t *testing.T) {
+	def := pg.Boolean().Default(true).PrimaryKey().Build("flag")
+	if !def.PrimaryKey {
+		t.Error("PrimaryKey should be true")
+	}
+	if !def.HasDefault {
+		t.Error("HasDefault should be true when Default(...) preceded PrimaryKey()")
+	}
+	if def.DefaultExpr != "true" {
+		t.Errorf("DefaultExpr = %q, want %q", def.DefaultExpr, "true")
+	}
+}
+
+// PrimaryKey().Default(...) (the reverse order) must continue to work too.
+func TestVarcharPrimaryKeyThenDefault(t *testing.T) {
+	def := pg.Varchar(255).PrimaryKey().Default("baz").Build("slug")
+	if !def.PrimaryKey {
+		t.Error("PrimaryKey should be true")
+	}
+	if !def.HasDefault {
+		t.Error("HasDefault should be true after Default(...) follows PrimaryKey()")
+	}
+	if def.DefaultExpr != "'baz'" {
+		t.Errorf("DefaultExpr = %q, want %q", def.DefaultExpr, "'baz'")
+	}
+}
+
 // --- NumericBuilder ---
 
 func TestNumericGoType(t *testing.T) {

@@ -25,10 +25,21 @@ var _ SourceStore = (*FSSourceStore)(nil)
 const sourceOp = "source_store"
 
 // ResolveSourceRoot resolves dir as a schema source root.
-// It rejects symlinked paths and non-directory entries.
+// It rejects symlinked paths and non-directory entries. Existing parent
+// components of dir are walked with Lstat and rejected if any is a symlink,
+// so a configured path like `<base>/link/schema` (where `link` is a symlink)
+// cannot redirect resolution outside the intended tree.
 func (s *FSSourceStore) ResolveSourceRoot(_ context.Context, dir string) (SourceRoot, error) {
 	if dir == "" {
 		return SourceRoot{}, newError(CodeInvalidConfig, sourceOp+".resolve_source_root")
+	}
+	if err := assertNoSymlinkInPathChain(dir); err != nil {
+		return SourceRoot{}, &Error{
+			Code: CodeInvalidPath,
+			Op:   sourceOp + ".resolve_source_root",
+			Path: safeRenderPath(dir),
+			Err:  err,
+		}
 	}
 	fi, err := os.Lstat(dir)
 	if err != nil {
@@ -64,6 +75,9 @@ func (s *FSSourceStore) ListSourceFiles(ctx context.Context, root SourceRoot, op
 		return nil, err
 	}
 	lim := opts.Limits.resolve()
+	if err := lim.Validate(sourceOp + ".list_source_files"); err != nil {
+		return nil, err
+	}
 	var out []string
 
 	walkErr := filepath.WalkDir(root.RealPath, func(path string, d fs.DirEntry, err error) error {
@@ -134,6 +148,9 @@ func (s *FSSourceStore) ReadSourceFile(_ context.Context, root SourceRoot, relpa
 		return nil, &Error{Code: CodeInvalidPath, Op: sourceOp + ".read_source_file", Path: safeRenderPath(relpath), Err: err}
 	}
 	lim := opts.Limits.resolve()
+	if err := lim.Validate(sourceOp + ".read_source_file"); err != nil {
+		return nil, err
+	}
 	path := filepath.Join(root.RealPath, relpath)
 
 	// Lstat each path component under root so we reject parent-directory

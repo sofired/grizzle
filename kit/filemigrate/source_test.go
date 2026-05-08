@@ -317,6 +317,72 @@ func TestFSSourceStore_ReadRejectsSymlinkedParent(t *testing.T) {
 	}
 }
 
+// TestFSSourceStore_SymlinkedParentRootRejected covers the case where the
+// configured root path itself contains a symlinked parent component (e.g.
+// `<base>/link/schema` where `link -> /outside`). A bare Lstat on the final
+// component would silently follow that parent symlink; ResolveSourceRoot must
+// reject it before EvalSymlinks redirects scanning outside the intended tree.
+func TestFSSourceStore_SymlinkedParentRootRejected(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping filesystem test in short mode")
+	}
+	base := t.TempDir()
+	// Create a real "schema" directory outside the base.
+	outside := t.TempDir()
+	realParent := filepath.Join(outside, "real")
+	if err := os.MkdirAll(filepath.Join(realParent, "schema"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	// Place a symlink "link" under base pointing at the outside parent.
+	if err := os.Symlink(realParent, filepath.Join(base, "link")); err != nil {
+		t.Skip("symlinks not supported on this platform")
+	}
+
+	store := filemigrate.NewFSSourceStore()
+	_, err := store.ResolveSourceRoot(t.Context(), filepath.Join(base, "link", "schema"))
+	if err == nil {
+		t.Fatal("expected error for symlinked parent component in source root")
+	}
+	if !errors.Is(err, filemigrate.ErrInvalidPath) {
+		t.Errorf("expected ErrInvalidPath, got %v", err)
+	}
+}
+
+// TestFSSourceStore_NegativeLimitRejected verifies that a negative field in
+// ResourceLimits is rejected with ErrInvalidConfig before any filesystem work
+// runs, so that callers cannot silently get unexpected behavior from the
+// resolve()-then-compare flow.
+func TestFSSourceStore_NegativeLimitRejected(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping filesystem test in short mode")
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "schema.go"), []byte("package x"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	store := filemigrate.NewFSSourceStore()
+	root, err := store.ResolveSourceRoot(t.Context(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// ListSourceFiles
+	_, err = store.ListSourceFiles(t.Context(), root, filemigrate.ListSourceFilesOptions{
+		Limits: filemigrate.ResourceLimits{MaxSchemaFiles: -1},
+	})
+	if !errors.Is(err, filemigrate.ErrInvalidConfig) {
+		t.Errorf("ListSourceFiles: expected ErrInvalidConfig, got %v", err)
+	}
+
+	// ReadSourceFile
+	_, err = store.ReadSourceFile(t.Context(), root, "schema.go", filemigrate.ReadSourceFileOptions{
+		Limits: filemigrate.ResourceLimits{MaxSchemaSourceFileBytes: -1},
+	})
+	if !errors.Is(err, filemigrate.ErrInvalidConfig) {
+		t.Errorf("ReadSourceFile: expected ErrInvalidConfig, got %v", err)
+	}
+}
+
 func TestFSSourceStore_ReadByteCap(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping filesystem test in short mode")

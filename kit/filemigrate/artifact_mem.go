@@ -76,6 +76,9 @@ func (s *MemArtifactStore) ListArtifacts(ctx context.Context, root ArtifactRoot,
 		return nil, nil
 	}
 	lim := opts.Limits.resolve()
+	if err := lim.Validate("mem_artifact_store.list_artifacts"); err != nil {
+		return nil, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -111,6 +114,9 @@ func (s *MemArtifactStore) ReadArtifact(ctx context.Context, root ArtifactRoot, 
 		return nil, &Error{Code: CodeInvalidMigrationName, Op: "mem_artifact_store.read_artifact", Migration: name, Err: err}
 	}
 	lim := opts.Limits.resolve()
+	if err := lim.Validate("mem_artifact_store.read_artifact"); err != nil {
+		return nil, err
+	}
 	key := root.RealPath + "/" + name
 	s.mu.Lock()
 	a, ok := s.artifacts[key]
@@ -151,6 +157,9 @@ func (s *MemArtifactStore) CreateArtifact(ctx context.Context, root ArtifactRoot
 		return nil, &Error{Code: CodeInvalidMigrationName, Op: "mem_artifact_store.create_artifact", Migration: artifact.Name, Err: err}
 	}
 	lim := opts.Limits.resolve()
+	if err := lim.Validate("mem_artifact_store.create_artifact"); err != nil {
+		return nil, err
+	}
 	if int64(len(artifact.MigrationSQL)) > lim.MaxMigrationSQLBytes {
 		return nil, &Error{Code: CodeResourceLimit, Op: "mem_artifact_store.create_artifact", Migration: artifact.Name}
 	}

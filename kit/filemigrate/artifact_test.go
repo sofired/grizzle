@@ -502,6 +502,145 @@ func TestFSArtifactStore_ListIgnoresReservedStagingDir(t *testing.T) {
 	}
 }
 
+// TestFSArtifactStore_SymlinkedParentRootRejected covers the case where the
+// configured migrations root contains a symlinked parent component (e.g.
+// `<base>/link/migrations` where `link -> /outside`). A bare Lstat on the
+// final component would silently follow that parent symlink and let
+// EvalSymlinks accept the outside path as RealPath; ResolveRoot must reject
+// the configured root before any file work runs. Verified for all three modes
+// (read-for-check, read-for-migrate, ensure-for-write).
+func TestFSArtifactStore_SymlinkedParentRootRejected(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping filesystem test in short mode")
+	}
+
+	store := filemigrate.NewFSArtifactStore()
+	modes := []filemigrate.ArtifactRootMode{
+		filemigrate.RootReadForCheck,
+		filemigrate.RootReadForMigrate,
+		filemigrate.RootEnsureForWrite,
+	}
+	for _, mode := range modes {
+		t.Run(string(mode), func(t *testing.T) {
+			base := t.TempDir()
+			outside := t.TempDir()
+			// Create a parent directory and a real "migrations" inside it,
+			// outside the configured base.
+			realParent := filepath.Join(outside, "real")
+			if err := os.MkdirAll(filepath.Join(realParent, "migrations"), 0o750); err != nil {
+				t.Fatal(err)
+			}
+			// Symlink "link" under base to the outside parent.
+			if err := os.Symlink(realParent, filepath.Join(base, "link")); err != nil {
+				t.Skip("symlinks not supported on this platform")
+			}
+			_, err := store.ResolveRoot(t.Context(), filepath.Join(base, "link", "migrations"),
+				filemigrate.ResolveArtifactRootOptions{Mode: mode})
+			if err == nil {
+				t.Fatalf("mode=%s: expected error for symlinked parent", mode)
+			}
+			if !errors.Is(err, filemigrate.ErrInvalidPath) {
+				t.Errorf("mode=%s: expected ErrInvalidPath, got %v", mode, err)
+			}
+		})
+	}
+}
+
+// TestFSArtifactStore_NegativeLimitRejected verifies that public store methods
+// fail closed with ErrInvalidConfig when a negative ResourceLimits field is
+// supplied, before any filesystem work runs.
+func TestFSArtifactStore_NegativeLimitRejected(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping filesystem test in short mode")
+	}
+	dir := t.TempDir()
+	store := filemigrate.NewFSArtifactStore()
+	root := mustResolveRoot(t, store, dir, filemigrate.RootEnsureForWrite)
+	mustCreateArtifact(t, store, root, "20240101000000_x", []byte("SELECT 1;"), []byte("{}"))
+
+	// ListArtifacts
+	_, err := store.ListArtifacts(t.Context(), root, filemigrate.ListArtifactsOptions{
+		Limits: filemigrate.ResourceLimits{MaxArtifactDirEntries: -1},
+	})
+	if !errors.Is(err, filemigrate.ErrInvalidConfig) {
+		t.Errorf("ListArtifacts: expected ErrInvalidConfig, got %v", err)
+	}
+
+	// ReadArtifact
+	_, err = store.ReadArtifact(t.Context(), root, "20240101000000_x", filemigrate.ReadArtifactOptions{
+		Limits: filemigrate.ResourceLimits{MaxMigrationSQLBytes: -1},
+	})
+	if !errors.Is(err, filemigrate.ErrInvalidConfig) {
+		t.Errorf("ReadArtifact: expected ErrInvalidConfig, got %v", err)
+	}
+
+	// CreateArtifact
+	_, err = store.CreateArtifact(t.Context(), root, filemigrate.NewArtifact{
+		Name:         "20240102000000_y",
+		MigrationSQL: []byte("SELECT 1;"),
+		SnapshotJSON: []byte("{}"),
+	}, filemigrate.CreateArtifactOptions{
+		Limits: filemigrate.ResourceLimits{MaxArtifacts: -1},
+	})
+	if !errors.Is(err, filemigrate.ErrInvalidConfig) {
+		t.Errorf("CreateArtifact: expected ErrInvalidConfig, got %v", err)
+	}
+}
+
+// TestMemArtifactStore_NegativeLimitRejected mirrors the FS test for the
+// in-memory store so the validation contract is consistent across backends.
+func TestMemArtifactStore_NegativeLimitRejected(t *testing.T) {
+	store := filemigrate.NewMemArtifactStore()
+	root := mustResolveRoot(t, store, "/m", filemigrate.RootEnsureForWrite)
+	mustCreateArtifact(t, store, root, "20240101000000_x", []byte("a"), []byte("{}"))
+
+	_, err := store.ListArtifacts(t.Context(), root, filemigrate.ListArtifactsOptions{
+		Limits: filemigrate.ResourceLimits{MaxArtifacts: -1},
+	})
+	if !errors.Is(err, filemigrate.ErrInvalidConfig) {
+		t.Errorf("ListArtifacts: expected ErrInvalidConfig, got %v", err)
+	}
+	_, err = store.ReadArtifact(t.Context(), root, "20240101000000_x", filemigrate.ReadArtifactOptions{
+		Limits: filemigrate.ResourceLimits{MaxMigrationSQLBytes: -1},
+	})
+	if !errors.Is(err, filemigrate.ErrInvalidConfig) {
+		t.Errorf("ReadArtifact: expected ErrInvalidConfig, got %v", err)
+	}
+	_, err = store.CreateArtifact(t.Context(), root, filemigrate.NewArtifact{
+		Name:         "20240102000000_y",
+		MigrationSQL: []byte("a"),
+		SnapshotJSON: []byte("{}"),
+	}, filemigrate.CreateArtifactOptions{
+		Limits: filemigrate.ResourceLimits{MaxSnapshotJSONBytes: -1},
+	})
+	if !errors.Is(err, filemigrate.ErrInvalidConfig) {
+		t.Errorf("CreateArtifact: expected ErrInvalidConfig, got %v", err)
+	}
+}
+
+// TestMemSourceStore_NegativeLimitRejected mirrors the FS test for the
+// in-memory source store.
+func TestMemSourceStore_NegativeLimitRejected(t *testing.T) {
+	store := filemigrate.NewMemSourceStore()
+	store.AddFile("/schema", "a.go", []byte("package x"))
+	root, err := store.ResolveSourceRoot(t.Context(), "/schema")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = store.ListSourceFiles(t.Context(), root, filemigrate.ListSourceFilesOptions{
+		Limits: filemigrate.ResourceLimits{MaxSchemaFiles: -1},
+	})
+	if !errors.Is(err, filemigrate.ErrInvalidConfig) {
+		t.Errorf("ListSourceFiles: expected ErrInvalidConfig, got %v", err)
+	}
+	_, err = store.ReadSourceFile(t.Context(), root, "a.go", filemigrate.ReadSourceFileOptions{
+		Limits: filemigrate.ResourceLimits{MaxSchemaSourceFileBytes: -1},
+	})
+	if !errors.Is(err, filemigrate.ErrInvalidConfig) {
+		t.Errorf("ReadSourceFile: expected ErrInvalidConfig, got %v", err)
+	}
+}
+
 func TestFSArtifactStore_ByteCapEnforced(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping filesystem test in short mode")
