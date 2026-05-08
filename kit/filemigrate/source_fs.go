@@ -120,6 +120,14 @@ func (s *FSSourceStore) ListSourceFiles(ctx context.Context, root SourceRoot, op
 				Err:  fmt.Errorf("not a regular file"),
 			}
 		}
+		if hasExtraHardLinks(fi) {
+			return &Error{
+				Code: CodeInvalidPath,
+				Op:   sourceOp + ".list_source_files",
+				Path: safeRenderPath(path),
+				Err:  fmt.Errorf("hardlinks are not supported"),
+			}
+		}
 		if !strings.HasSuffix(path, ".go") {
 			return nil
 		}

@@ -805,12 +805,12 @@ func TestFSArtifactStore_ReadRejectsHardlinkedArtifactFile(t *testing.T) {
 
 			// Build the real artifact bytes outside the configured root.
 			realSrc := filepath.Join(outside, target)
-			if err := os.WriteFile(realSrc, []byte("hardlinked"), 0o640); err != nil {
+			if err := os.WriteFile(realSrc, []byte("hard-linked"), 0o640); err != nil {
 				t.Fatal(err)
 			}
 
 			// Build the artifact directory under the root, with one of the
-			// expected files hardlinked from outside and the other a normal
+			// expected files hard-linked from outside and the other a normal
 			// regular file.
 			artDir := filepath.Join(dir, "20240101000000_hl")
 			if err := os.Mkdir(artDir, 0o750); err != nil {

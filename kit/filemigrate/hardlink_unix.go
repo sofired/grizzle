@@ -9,8 +9,8 @@ import (
 
 // hasExtraHardLinks reports whether fi describes a regular file with more than
 // one hard link, where the platform exposes link-count metadata. The artifact
-// and source store contracts require rejecting hardlinked inputs because a
-// hardlink lets the same bytes be aliased from outside the configured root
+// and source store contracts require rejecting hard-linked inputs because a
+// hard link lets the same bytes be aliased from outside the configured root
 // without using a symlink. On platforms where Nlink is exposed (Linux, macOS,
 // the BSDs), this returns true when st_nlink > 1; on other platforms a
 // separate build tag returns false ("where detectable", per the spec).
@@ -19,5 +19,5 @@ func hasExtraHardLinks(fi fs.FileInfo) bool {
 	if !ok {
 		return false
 	}
-	return uint64(st.Nlink) > 1
+	return st.Nlink > 1
 }

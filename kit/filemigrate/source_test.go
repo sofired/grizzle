@@ -661,11 +661,12 @@ func TestFSSourceStore_CurrentDirRoot(t *testing.T) {
 	}
 }
 
-// TestFSSourceStore_HardlinkedFileRejected verifies that ReadSourceFile fails
-// with invalid_path when the requested .go file has more than one hard link.
-// The schema source contract requires rejecting hardlinks where platform
-// metadata exposes them so a file aliased from outside the configured root
-// cannot be ingested even when containment and symlink checks pass.
+// TestFSSourceStore_HardlinkedFileRejected verifies that both ReadSourceFile
+// and ListSourceFiles fail with invalid_path when a .go file under the
+// configured source root has more than one hard link. The schema source
+// contract requires rejecting hardlinks where platform metadata exposes them
+// so a file aliased from outside the configured root cannot be ingested or
+// enumerated even when containment and symlink checks pass.
 func TestFSSourceStore_HardlinkedFileRejected(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping filesystem test in short mode")
@@ -690,9 +691,19 @@ func TestFSSourceStore_HardlinkedFileRejected(t *testing.T) {
 	}
 	_, err = store.ReadSourceFile(t.Context(), root, "schema.go", filemigrate.ReadSourceFileOptions{})
 	if err == nil {
-		t.Fatal("expected error for hardlinked source file")
+		t.Fatal("expected ReadSourceFile error for hardlinked source file")
 	}
 	if !errors.Is(err, filemigrate.ErrInvalidPath) {
-		t.Errorf("expected ErrInvalidPath, got %v", err)
+		t.Errorf("ReadSourceFile: expected ErrInvalidPath, got %v", err)
+	}
+
+	// ListSourceFiles must also reject the hardlinked .go entry at discovery
+	// time so a hardlinked file never reaches the caller's returned slice.
+	_, listErr := store.ListSourceFiles(t.Context(), root, filemigrate.ListSourceFilesOptions{})
+	if listErr == nil {
+		t.Fatal("expected ListSourceFiles error for hardlinked source file")
+	}
+	if !errors.Is(listErr, filemigrate.ErrInvalidPath) {
+		t.Errorf("ListSourceFiles: expected ErrInvalidPath, got %v", listErr)
 	}
 }
