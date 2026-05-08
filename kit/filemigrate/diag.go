@@ -226,8 +226,9 @@ type Diagnostic struct {
 }
 
 // newInvalidConfigError constructs an *Error with CodeInvalidConfig for the
-// given op. Used by store constructors when the configured directory or other
-// caller-supplied input fails the public contract.
+// given op. Used by store resolution methods (ResolveRoot / ResolveSourceRoot)
+// when the configured directory or other caller-supplied input fails the
+// public contract.
 func newInvalidConfigError(op string) *Error {
 	return &Error{Code: CodeInvalidConfig, Op: op}
 }

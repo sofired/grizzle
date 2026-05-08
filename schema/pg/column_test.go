@@ -478,15 +478,26 @@ func TestTextDefaultBeforePrimaryKeyPreserved(t *testing.T) {
 }
 
 func TestBooleanDefaultBeforePrimaryKeyPreserved(t *testing.T) {
-	def := pg.Boolean().Default(true).PrimaryKey().Build("flag")
-	if !def.PrimaryKey {
-		t.Error("PrimaryKey should be true")
-	}
-	if !def.HasDefault {
-		t.Error("HasDefault should be true when Default(...) preceded PrimaryKey()")
-	}
-	if def.DefaultExpr != "true" {
-		t.Errorf("DefaultExpr = %q, want %q", def.DefaultExpr, "true")
+	for _, tc := range []struct {
+		name string
+		val  bool
+		want string
+	}{
+		{"true", true, "true"},
+		{"false", false, "false"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			def := pg.Boolean().Default(tc.val).PrimaryKey().Build("flag")
+			if !def.PrimaryKey {
+				t.Error("PrimaryKey should be true")
+			}
+			if !def.HasDefault {
+				t.Error("HasDefault should be true when Default(...) preceded PrimaryKey()")
+			}
+			if def.DefaultExpr != tc.want {
+				t.Errorf("DefaultExpr = %q, want %q", def.DefaultExpr, tc.want)
+			}
+		})
 	}
 }
 
@@ -501,6 +512,32 @@ func TestVarcharPrimaryKeyThenDefault(t *testing.T) {
 	}
 	if def.DefaultExpr != "'baz'" {
 		t.Errorf("DefaultExpr = %q, want %q", def.DefaultExpr, "'baz'")
+	}
+}
+
+// Boolean().PrimaryKey().Default(...) (reverse order) for both true and false
+// values exercises the symmetric path to TestVarcharPrimaryKeyThenDefault.
+func TestBooleanPrimaryKeyThenDefault(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		val  bool
+		want string
+	}{
+		{"true", true, "true"},
+		{"false", false, "false"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			def := pg.Boolean().PrimaryKey().Default(tc.val).Build("flag")
+			if !def.PrimaryKey {
+				t.Error("PrimaryKey should be true")
+			}
+			if !def.HasDefault {
+				t.Error("HasDefault should be true after Default(...) follows PrimaryKey()")
+			}
+			if def.DefaultExpr != tc.want {
+				t.Errorf("DefaultExpr = %q, want %q", def.DefaultExpr, tc.want)
+			}
+		})
 	}
 }
 

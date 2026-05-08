@@ -40,8 +40,6 @@ func (s *FSArtifactStore) ResolveRoot(ctx context.Context, dir string, opts Reso
 		return ArtifactRoot{}, newInvalidConfigError(fsOp + ".resolve_root")
 	}
 
-	// Reject any symlink in the parent chain before Lstat / EvalSymlinks /
-	// MkdirAll runs. A symlinked parent would otherwise be silently followed.
 	if err := assertNoSymlinkInPathChain(dir); err != nil {
 		return ArtifactRoot{}, &Error{
 			Code: CodeInvalidPath,

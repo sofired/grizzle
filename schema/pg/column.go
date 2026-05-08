@@ -212,12 +212,12 @@ func (b *VarcharBuilder) NotNull() *VarcharBuilder { b.setNotNull(); return b }
 
 // PrimaryKey marks the column as the primary key. Varchar primary keys have no
 // implicit default; callers must supply explicit values on insert. An explicit
-// Default(...) set earlier in the chain is preserved (DefaultExpr untouched and
-// HasDefault stays true).
+// Default(...) is preserved regardless of call order (DefaultExpr untouched
+// and HasDefault stays true).
 func (b *VarcharBuilder) PrimaryKey() *VarcharBuilder {
 	b.setPrimaryKey()
 	// Avoid the implicit PK default flag, but only if the caller did not
-	// supply an explicit Default(...) earlier in the chain.
+	// supply an explicit Default(...).
 	if b.def.DefaultExpr == "" {
 		b.def.HasDefault = false
 	}
@@ -272,7 +272,7 @@ func (b *BooleanBuilder) NotNull() *BooleanBuilder { b.setNotNull(); return b }
 
 // PrimaryKey marks the column as the primary key. Boolean primary keys have no
 // implicit default; callers must supply explicit values on insert. An explicit
-// Default(...) set earlier in the chain is preserved.
+// Default(...) is preserved regardless of call order.
 func (b *BooleanBuilder) PrimaryKey() *BooleanBuilder {
 	b.setPrimaryKey()
 	if b.def.DefaultExpr == "" {
