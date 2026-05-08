@@ -209,6 +209,85 @@ func TestMemSourceStore_ListNonGoFilesNotCountedAgainstLimit(t *testing.T) {
 	}
 }
 
+// TestMemSourceStore_ListAppliesGoBuildRules verifies that MemSourceStore
+// filters _test.go files, GOOS/GOARCH-suffixed files for other targets, and
+// files with unsatisfied //go:build constraints — matching FSSourceStore so
+// tests using the in-memory backend cannot feed inputs that production
+// schema loading would skip. A matching-GOARCH file IS included as a
+// regression guard against a build context that left GOARCH blank.
+func TestMemSourceStore_ListAppliesGoBuildRules(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// "users_windows.go" must be excluded by MatchFile, which only
+		// happens on a non-windows GOOS. Skip on windows.
+		t.Skip("test fixture assumes non-windows GOOS")
+	}
+	store := filemigrate.NewMemSourceStore()
+	matchedArchFile := "users_" + runtime.GOARCH + ".go"
+	store.AddFile("/schema", "users.go", []byte("package schema\n"))
+	store.AddFile("/schema", "users_test.go", []byte("package schema\n"))
+	store.AddFile("/schema", "users_windows.go", []byte("package schema\n"))
+	store.AddFile("/schema", "inactive.go", []byte("//go:build never_set_tag\n\npackage schema\n"))
+	store.AddFile("/schema", "legacy_inactive.go", []byte("// +build never_set_tag\n\npackage schema\n"))
+	store.AddFile("/schema", matchedArchFile, []byte("package schema\n"))
+
+	root, _ := store.ResolveSourceRoot(t.Context(), "/schema")
+	got, err := store.ListSourceFiles(t.Context(), root, filemigrate.ListSourceFilesOptions{})
+	if err != nil {
+		t.Fatalf("ListSourceFiles: %v", err)
+	}
+	want := []string{matchedArchFile, "users.go"}
+	sort.Strings(want)
+	if len(got) != len(want) {
+		t.Fatalf("expected %v, got %v", want, got)
+	}
+	for i, f := range got {
+		if f != want[i] {
+			t.Errorf("got[%d] = %q, want %q", i, f, want[i])
+		}
+	}
+}
+
+// TestMemSourceStore_ListInactiveFilesDoNotConsumeLimit mirrors the
+// FSSourceStore test: files excluded by MatchFile (inactive build
+// constraints, _test.go) must be skipped before the MaxSchemaFiles guard
+// runs. A regression that counted them would silently fail with a tight
+// limit even though the schema loader never sees them.
+func TestMemSourceStore_ListInactiveFilesDoNotConsumeLimit(t *testing.T) {
+	store := filemigrate.NewMemSourceStore()
+	store.AddFile("/schema", "users.go", []byte("package schema\n"))
+	store.AddFile("/schema", "users_test.go", []byte("package schema\n"))
+	store.AddFile("/schema", "inactive.go", []byte("//go:build never_set_tag\n\npackage schema\n"))
+
+	root, _ := store.ResolveSourceRoot(t.Context(), "/schema")
+	got, err := store.ListSourceFiles(t.Context(), root, filemigrate.ListSourceFilesOptions{
+		Limits: filemigrate.ResourceLimits{MaxSchemaFiles: 1},
+	})
+	if err != nil {
+		t.Fatalf("ListSourceFiles: %v", err)
+	}
+	if len(got) != 1 || got[0] != "users.go" {
+		t.Errorf("expected only [users.go], got %v", got)
+	}
+}
+
+// TestMemSourceStore_ListRejectsBadBuildConstraint mirrors the FSSourceStore
+// test: a malformed //go:build expression in seeded bytes must surface as
+// CodeUnsupportedSchemaConstruct rather than be silently accepted or echo
+// raw build-line text into the diagnostic.
+func TestMemSourceStore_ListRejectsBadBuildConstraint(t *testing.T) {
+	store := filemigrate.NewMemSourceStore()
+	store.AddFile("/schema", "bad.go", []byte("//go:build &&\n\npackage schema\n"))
+
+	root, _ := store.ResolveSourceRoot(t.Context(), "/schema")
+	_, err := store.ListSourceFiles(t.Context(), root, filemigrate.ListSourceFilesOptions{})
+	if err == nil {
+		t.Fatal("expected error for invalid build constraint")
+	}
+	if !errors.Is(err, filemigrate.ErrUnsupportedSchemaConstruct) {
+		t.Errorf("expected ErrUnsupportedSchemaConstruct, got %v", err)
+	}
+}
+
 // --- FSSourceStore ---
 
 func TestFSSourceStore_ResolveAndList(t *testing.T) {
@@ -773,6 +852,46 @@ func assertHardlinkInvalidPathSource(t *testing.T, err error, wantOp, label stri
 		if ferr.Op != wantOp {
 			t.Errorf("%s: Op = %q, want %q", label, ferr.Op, wantOp)
 		}
+	}
+}
+
+// TestFSSourceStore_NonRegularNonGoSidecarIgnored verifies that a non-.go
+// sidecar that is also non-regular (a FIFO/socket/device entry produced by
+// tooling or a mounted workspace) does NOT fail discovery. The schema-loader
+// contract only treats unsafe metadata as fatal for discovered .go files;
+// non-Go sidecars must be skipped regardless of their mode so an unrelated
+// pipe in the schema directory cannot make the entire schema unreadable.
+// The .go suffix filter must therefore run before the regular-file check.
+func TestFSSourceStore_NonRegularNonGoSidecarIgnored(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping filesystem test in short mode")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("FIFOs not supported on this platform")
+	}
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "schema.go"), []byte("package schema"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	// syscall.Mkfifo is unix-only; use it via the standard mkfifo helper
+	// in golang.org/x/sys/unix when available, or fall back to skipping.
+	fifoPath := filepath.Join(dir, "build.pipe")
+	if err := makeFIFO(fifoPath); err != nil {
+		t.Skipf("FIFO creation not supported: %v", err)
+	}
+
+	store := filemigrate.NewFSSourceStore()
+	root, err := store.ResolveSourceRoot(t.Context(), dir)
+	if err != nil {
+		t.Fatalf("ResolveSourceRoot: %v", err)
+	}
+	files, err := store.ListSourceFiles(t.Context(), root, filemigrate.ListSourceFilesOptions{})
+	if err != nil {
+		t.Fatalf("ListSourceFiles: unexpected error for non-.go FIFO sidecar: %v", err)
+	}
+	if len(files) != 1 || files[0] != "schema.go" {
+		t.Errorf("expected [schema.go], got %v", files)
 	}
 }
 

@@ -125,9 +125,14 @@ var (
 // Use errors.Is(err, ErrXxx) to classify by code, or errors.As to recover
 // structured fields.
 type Error struct {
-	Code      ErrorCode
-	Op        string
-	Path      string // safe-rendered, bounded, control chars escaped
+	Code ErrorCode
+	Op   string
+	Path string // safe-rendered, bounded, control chars escaped
+	// Migration holds the raw caller-supplied identifier so errors.As
+	// consumers see the value they passed in. It is bounded and
+	// control-char-escaped at Error() rendering time via safeRenderName,
+	// so attacker-controlled names cannot inject newlines or terminal
+	// controls into CLI logs.
 	Migration string
 	Dialect   string
 	Err       error // redacted safe cause only
@@ -143,7 +148,7 @@ func (e *Error) Error() string {
 	}
 	if e.Migration != "" {
 		b.WriteString(" migration=")
-		b.WriteString(e.Migration)
+		b.WriteString(safeRenderName(e.Migration))
 	}
 	if e.Path != "" {
 		b.WriteString(" path=")
@@ -269,4 +274,17 @@ func safeRenderPath(p string) string {
 		p = p[:maxLen] + "…"
 	}
 	return fmt.Sprintf("%q", p)
+}
+
+// safeRenderName returns a version of n safe for inclusion in rendered
+// errors when the input is a caller-controlled identifier (notably
+// Error.Migration). It applies the same bounded length and control-char
+// escaping as safeRenderPath so attacker-controlled names cannot inject
+// newlines, terminal controls, or unbounded text into CLI logs.
+func safeRenderName(n string) string {
+	const maxLen = 256
+	if len(n) > maxLen {
+		n = n[:maxLen] + "…"
+	}
+	return fmt.Sprintf("%q", n)
 }

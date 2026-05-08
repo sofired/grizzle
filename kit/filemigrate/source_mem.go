@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -52,6 +54,16 @@ func (s *MemSourceStore) ResolveSourceRoot(ctx context.Context, dir string) (Sou
 // so the in-memory store must not surface them either. Counting them against
 // MaxSchemaFiles or returning them would let tests pass on listings the
 // production store could never produce.
+//
+// Build-rule filtering matches FSSourceStore: _test.go files,
+// GOOS/GOARCH-suffixed files for other targets, and files with unsatisfied
+// //go:build or legacy // +build constraints are skipped via
+// go/build.Context.MatchFile (per docs/spec/file-migrations-api.md:1417).
+// The build context uses a custom OpenFile that reads seeded bytes from the
+// in-memory map, so constraints declared inside file bodies are evaluated
+// the same way the production filesystem store evaluates them.
+// Build-constraint parse errors fail with CodeUnsupportedSchemaConstruct;
+// the diagnostic uses a generic message so build-line text is not echoed.
 func (s *MemSourceStore) ListSourceFiles(ctx context.Context, root SourceRoot, opts ListSourceFilesOptions) ([]string, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -61,19 +73,64 @@ func (s *MemSourceStore) ListSourceFiles(ctx context.Context, root SourceRoot, o
 		return nil, err
 	}
 	prefix := root.RealPath + "/"
+
+	// Snapshot files matching the prefix under the lock so MatchFile (which
+	// invokes OpenFile during constraint evaluation) does not need to
+	// re-acquire s.mu — re-entrancy on a sync.Mutex would deadlock.
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	snapshot := make(map[string][]byte, len(s.files))
+	for k, v := range s.files {
+		if hasPrefix(k, prefix) {
+			snapshot[k] = v
+		}
+	}
+	s.mu.Unlock()
+
+	ctxt := schemaBuildContext
+	ctxt.OpenFile = func(path string) (io.ReadCloser, error) {
+		// MatchFile passes filepath.Join(dir, name) here. We always invoke
+		// MatchFile with dir under root.RealPath, so resolve back to a key
+		// in our prefix-bounded snapshot.
+		rel, err := filepath.Rel(root.RealPath, path)
+		if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return nil, fmt.Errorf("file not found")
+		}
+		key := root.RealPath + "/" + filepath.ToSlash(rel)
+		if data, ok := snapshot[key]; ok {
+			return io.NopCloser(bytes.NewReader(data)), nil
+		}
+		return nil, fmt.Errorf("file not found")
+	}
 
 	var out []string
-	for k := range s.files {
-		if !hasPrefix(k, prefix) {
-			continue
-		}
+	for k := range snapshot {
 		rel := k[len(prefix):]
 		if !strings.HasSuffix(rel, ".go") {
 			continue
 		}
 		if assertSourceContained(root.RealPath, rel) != nil {
+			continue
+		}
+		base := filepath.Base(rel)
+		// MatchFile does not exclude _test.go files itself, so we filter
+		// them out here as FSSourceStore does (per spec line 1417).
+		if strings.HasSuffix(base, "_test.go") {
+			continue
+		}
+		matchDir := filepath.Join(root.RealPath, filepath.Dir(rel))
+		match, matchErr := ctxt.MatchFile(matchDir, base)
+		if matchErr != nil {
+			// Build-constraint parse errors (per spec line 1420) fail with
+			// unsupported_schema_construct using a generic diagnostic so
+			// build-line source text is not echoed (spec line 1415).
+			return nil, &Error{
+				Code: CodeUnsupportedSchemaConstruct,
+				Op:   "mem_source_store.list_source_files",
+				Path: safeRenderPath(rel),
+				Err:  fmt.Errorf("invalid build constraint"),
+			}
+		}
+		if !match {
 			continue
 		}
 		if len(out)+1 > lim.MaxSchemaFiles {

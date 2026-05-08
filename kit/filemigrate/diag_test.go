@@ -134,6 +134,48 @@ func TestErrorString(t *testing.T) {
 			t.Errorf("expected path field in error string, got %q", err.Error())
 		}
 	})
+
+	// migration field is rendered with bounded length and control-char
+	// escaping so a caller-supplied attacker-controlled name cannot inject
+	// newlines, terminal controls, or unbounded text into CLI logs. The
+	// raw value remains accessible via errors.As (covered in TestErrorIs);
+	// only the Error() output is sanitized.
+	t.Run("migration is escaped and bounded", func(t *testing.T) {
+		// Control character must not appear literally in the rendered string.
+		err := &filemigrate.Error{
+			Code:      filemigrate.CodeDuplicateMigration,
+			Op:        "op",
+			Migration: "20240101_init\nINJECTED",
+		}
+		s := err.Error()
+		if strings.Contains(s, "\n") {
+			t.Errorf("rendered error contains a literal newline: %q", s)
+		}
+		if !strings.Contains(s, `migration="20240101_init\nINJECTED"`) {
+			t.Errorf("expected escaped migration field, got %q", s)
+		}
+	})
+
+	t.Run("migration is bounded for very long names", func(t *testing.T) {
+		// Use a very long migration value: 2000 'a's plus a trailing marker.
+		// safeRenderName caps inputs at 256 chars and appends a horizontal
+		// ellipsis. The trailing marker must be dropped from the output.
+		long := strings.Repeat("a", 2000) + "TRAILING"
+		err := &filemigrate.Error{
+			Code:      filemigrate.CodeDuplicateMigration,
+			Op:        "op",
+			Migration: long,
+		}
+		s := err.Error()
+		if strings.Contains(s, "TRAILING") {
+			t.Errorf("expected bounded migration rendering, but trailing marker leaked: %q", s)
+		}
+		// The cap is well under the input length, so the rendered string
+		// must be far shorter than the raw 2000+ chars input.
+		if len(s) > 1024 {
+			t.Errorf("rendered error length %d exceeds reasonable cap", len(s))
+		}
+	})
 }
 
 func TestAllSentinelsHaveMatchingCode(t *testing.T) {

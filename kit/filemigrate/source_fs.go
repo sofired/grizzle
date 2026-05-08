@@ -136,6 +136,19 @@ func (s *FSSourceStore) ListSourceFiles(ctx context.Context, root SourceRoot, op
 			}
 			return nil
 		}
+		if !strings.HasSuffix(path, ".go") {
+			// Non-.go files are silently skipped regardless of mode. The
+			// schema-loader contract (docs/spec/file-migrations-api.md
+			// §static schema loader) only treats unsafe metadata as fatal
+			// for discovered .go files; a non-.go sidecar that happens to
+			// be a FIFO, socket, or device entry must not break discovery
+			// of the schema root. The hard-link check MUST also come
+			// after this return so that a hard-linked sidecar (README.md,
+			// .gitkeep, lockfiles) does not fail discovery; moving the
+			// hasExtraHardLinks call above this guard would break
+			// TestFSSourceStore_HardlinkedNonGoFileIgnored.
+			return nil
+		}
 		if !fi.Mode().IsRegular() {
 			return &Error{
 				Code: CodeInvalidPath,
@@ -143,15 +156,6 @@ func (s *FSSourceStore) ListSourceFiles(ctx context.Context, root SourceRoot, op
 				Path: safeRenderPath(path),
 				Err:  fmt.Errorf("not a regular file"),
 			}
-		}
-		if !strings.HasSuffix(path, ".go") {
-			// Non-.go files are silently skipped; the hard-link check
-			// MUST come after this return so that a hard-linked sidecar
-			// (README.md, .gitkeep, lockfiles) does not fail discovery
-			// of the entire source root. Moving the hasExtraHardLinks
-			// call above this guard would break
-			// TestFSSourceStore_HardlinkedNonGoFileIgnored.
-			return nil
 		}
 		if hasExtraHardLinks(fi) {
 			return &Error{
