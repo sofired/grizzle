@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/sofired/grizzle/kit/filemigrate"
 )
@@ -150,14 +151,18 @@ func TestMemSourceStore_EmptyDirRejected(t *testing.T) {
 
 // TestMemSourceStore_ListFiltersNonGoFiles verifies that ListSourceFiles
 // returns only .go files even when callers seed the store with sidecars
-// such as README.md or generated output. This keeps the in-memory store's
-// listing semantics aligned with FSSourceStore so tests using the memory
-// fixture do not feed non-Go content into schema parsing.
+// such as README.md, generated output, or uppercase-extension files. This
+// keeps the in-memory store's listing semantics aligned with FSSourceStore
+// (which is case-sensitive .go) so tests using the memory fixture do not
+// feed non-Go content into schema parsing.
 func TestMemSourceStore_ListFiltersNonGoFiles(t *testing.T) {
 	store := filemigrate.NewMemSourceStore()
 	store.AddFile("/schema", "users.go", []byte("package schema"))
 	store.AddFile("/schema", "README.md", []byte("# docs"))
 	store.AddFile("/schema", "generated.txt", []byte("ignore me"))
+	// Uppercase extension is not Go on a case-sensitive filesystem; both
+	// FSSourceStore and MemSourceStore must reject it.
+	store.AddFile("/schema", "Schema.GO", []byte("not a go file"))
 	store.AddFile("/schema", "posts.go", []byte("package schema"))
 	root, _ := store.ResolveSourceRoot(t.Context(), "/schema")
 
@@ -179,11 +184,15 @@ func TestMemSourceStore_ListFiltersNonGoFiles(t *testing.T) {
 // TestMemSourceStore_ListNonGoFilesNotCountedAgainstLimit verifies that
 // non-Go sidecars do not consume MaxSchemaFiles budget — they are skipped
 // before the limit check, so a store seeded with sidecars plus a small
-// number of .go files lists successfully under a tight limit.
+// number of .go files lists successfully under a tight limit. Multiple
+// non-Go files are seeded so a regression that counted them before the
+// filter would exceed the limit regardless of map-iteration order.
 func TestMemSourceStore_ListNonGoFilesNotCountedAgainstLimit(t *testing.T) {
 	store := filemigrate.NewMemSourceStore()
 	store.AddFile("/schema", "a.go", []byte("package schema"))
 	store.AddFile("/schema", "README.md", []byte("# docs"))
+	store.AddFile("/schema", "generated.txt", []byte("ignore"))
+	store.AddFile("/schema", ".gitkeep", []byte(""))
 	store.AddFile("/schema", "b.go", []byte("package schema"))
 	root, _ := store.ResolveSourceRoot(t.Context(), "/schema")
 
@@ -435,10 +444,11 @@ func TestFSSourceStore_NegativeLimitRejected(t *testing.T) {
 }
 
 // TestFSSourceStore_ResolveHonorsCancelledContext verifies that
-// ResolveSourceRoot returns immediately when given an already-cancelled
-// context, before doing any filesystem work — matching the cancellation
-// behavior of MemSourceStore.ResolveSourceRoot and the entry-time checks
-// in ListSourceFiles/ReadSourceFile.
+// ResolveSourceRoot returns immediately when the context is already done,
+// before doing any filesystem work — matching the cancellation behavior
+// of MemSourceStore.ResolveSourceRoot and the entry-time checks in
+// ListSourceFiles/ReadSourceFile. Both Canceled and DeadlineExceeded
+// states are exercised since ctx.Err() can return either sentinel.
 func TestFSSourceStore_ResolveHonorsCancelledContext(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping filesystem test in short mode")
@@ -446,14 +456,41 @@ func TestFSSourceStore_ResolveHonorsCancelledContext(t *testing.T) {
 	dir := t.TempDir()
 	store := filemigrate.NewFSSourceStore()
 
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
-	_, err := store.ResolveSourceRoot(ctx, dir)
-	if err == nil {
-		t.Fatal("expected error from cancelled context")
+	tests := []struct {
+		name    string
+		makeCtx func(t *testing.T) context.Context
+		want    error
+	}{
+		{
+			name: "canceled",
+			makeCtx: func(t *testing.T) context.Context {
+				ctx, cancel := context.WithCancel(t.Context())
+				cancel()
+				return ctx
+			},
+			want: context.Canceled,
+		},
+		{
+			name: "deadline_exceeded",
+			makeCtx: func(t *testing.T) context.Context {
+				ctx, cancel := context.WithDeadline(t.Context(), time.Now().Add(-time.Second))
+				t.Cleanup(cancel)
+				return ctx
+			},
+			want: context.DeadlineExceeded,
+		},
 	}
-	if !errors.Is(err, context.Canceled) {
-		t.Errorf("expected context.Canceled, got %v", err)
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := store.ResolveSourceRoot(tc.makeCtx(t), dir)
+			if err == nil {
+				t.Fatal("expected error from done context")
+			}
+			if !errors.Is(err, tc.want) {
+				t.Errorf("expected %v, got %v", tc.want, err)
+			}
+		})
 	}
 }
 

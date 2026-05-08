@@ -24,12 +24,12 @@ var _ SourceStore = (*FSSourceStore)(nil)
 
 const sourceOp = "source_store"
 
-// ResolveSourceRoot resolves dir as a schema source root.
-// It rejects symlinked paths and non-directory entries. Existing parent
-// components of dir are walked with Lstat and rejected if any is a symlink,
-// so a configured path like `<base>/link/schema` (where `link` is a symlink)
-// cannot redirect resolution outside the intended tree. Honors ctx
-// cancellation before any filesystem work runs.
+// ResolveSourceRoot resolves dir as a schema source root. Honors ctx
+// cancellation before any filesystem work runs. It rejects symlinked
+// paths and non-directory entries. Existing parent components of dir
+// are walked with Lstat and rejected if any is a symlink, so a
+// configured path like `<base>/link/schema` (where `link` is a symlink)
+// cannot redirect resolution outside the intended tree.
 func (s *FSSourceStore) ResolveSourceRoot(ctx context.Context, dir string) (SourceRoot, error) {
 	if err := ctx.Err(); err != nil {
 		return SourceRoot{}, err
