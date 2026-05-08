@@ -789,39 +789,45 @@ func TestMemArtifactStore_ListEnforcesDirEntryLimit(t *testing.T) {
 
 // TestFSArtifactStore_ReadRejectsHardlinkedArtifactFile verifies that
 // ReadArtifact fails with invalid_path when migration.sql or snapshot.json is
-// a hard link to another file. The artifact store contract requires rejecting
-// hard links where platform metadata exposes them so a migration directory
-// cannot alias bytes outside the configured root without using a symlink.
+// a hard link. The artifact store contract requires rejecting hard links
+// where platform metadata exposes them, regardless of where the second link
+// lives — Nlink > 1 alone is sufficient grounds for rejection. Both the
+// cross-root case (other link outside the configured root, simulating a
+// migration directory aliased from outside) and the intra-root case (both
+// links inside the configured root, simulating a copy/link mistake or
+// post-publish tampering) are exercised.
 func TestFSArtifactStore_ReadRejectsHardlinkedArtifactFile(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping filesystem test in short mode")
 	}
 
-	cases := []string{"migration.sql", "snapshot.json"}
-	for _, target := range cases {
-		t.Run(target, func(t *testing.T) {
+	const (
+		migName = "20240101000000_hl"
+		wantOp  = "artifact_store.read_artifact"
+	)
+
+	for _, target := range []string{"migration.sql", "snapshot.json"} {
+		other := "snapshot.json"
+		if target == "snapshot.json" {
+			other = "migration.sql"
+		}
+
+		t.Run(target+"/cross_root", func(t *testing.T) {
 			dir := t.TempDir()
 			outside := t.TempDir()
 
-			// Build the real artifact bytes outside the configured root.
+			// Real bytes live outside the configured root.
 			realSrc := filepath.Join(outside, target)
 			if err := os.WriteFile(realSrc, []byte("hard-linked"), 0o640); err != nil {
 				t.Fatal(err)
 			}
 
-			// Build the artifact directory under the root, with one of the
-			// expected files hard-linked from outside and the other a normal
-			// regular file.
-			artDir := filepath.Join(dir, "20240101000000_hl")
+			artDir := filepath.Join(dir, migName)
 			if err := os.Mkdir(artDir, 0o750); err != nil {
 				t.Fatal(err)
 			}
 			if err := os.Link(realSrc, filepath.Join(artDir, target)); err != nil {
 				t.Skipf("hard links not supported on this platform: %v", err)
-			}
-			other := "snapshot.json"
-			if target == "snapshot.json" {
-				other = "migration.sql"
 			}
 			if err := os.WriteFile(filepath.Join(artDir, other), []byte("{}"), 0o640); err != nil {
 				t.Fatal(err)
@@ -829,14 +835,56 @@ func TestFSArtifactStore_ReadRejectsHardlinkedArtifactFile(t *testing.T) {
 
 			store := filemigrate.NewFSArtifactStore()
 			root := mustResolveRoot(t, store, dir, filemigrate.RootReadForCheck)
-
-			_, err := store.ReadArtifact(t.Context(), root, "20240101000000_hl", filemigrate.ReadArtifactOptions{})
-			if err == nil {
-				t.Fatalf("expected error for hard-linked %s", target)
-			}
-			if !errors.Is(err, filemigrate.ErrInvalidPath) {
-				t.Errorf("expected ErrInvalidPath, got %v", err)
-			}
+			_, err := store.ReadArtifact(t.Context(), root, migName, filemigrate.ReadArtifactOptions{})
+			assertHardlinkInvalidPath(t, err, wantOp)
 		})
+
+		t.Run(target+"/intra_root", func(t *testing.T) {
+			// Both hard links live inside the configured root. Nlink > 1
+			// alone must trigger rejection — the check is per-inode, not
+			// based on link locations.
+			dir := t.TempDir()
+			artDir := filepath.Join(dir, migName)
+			if err := os.Mkdir(artDir, 0o750); err != nil {
+				t.Fatal(err)
+			}
+
+			realSrc := filepath.Join(dir, "shared_"+target)
+			if err := os.WriteFile(realSrc, []byte("hard-linked"), 0o640); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Link(realSrc, filepath.Join(artDir, target)); err != nil {
+				t.Skipf("hard links not supported on this platform: %v", err)
+			}
+			if err := os.WriteFile(filepath.Join(artDir, other), []byte("{}"), 0o640); err != nil {
+				t.Fatal(err)
+			}
+
+			store := filemigrate.NewFSArtifactStore()
+			root := mustResolveRoot(t, store, dir, filemigrate.RootReadForCheck)
+			_, err := store.ReadArtifact(t.Context(), root, migName, filemigrate.ReadArtifactOptions{})
+			assertHardlinkInvalidPath(t, err, wantOp)
+		})
+	}
+}
+
+// assertHardlinkInvalidPath checks that err is non-nil, errors.Is to
+// ErrInvalidPath, and (when err is the structured *filemigrate.Error) that
+// the Op field carries the expected store/operation tag. Op is part of the
+// observable error contract that operators and observability tooling depend
+// on, so the hardlink tests assert it explicitly.
+func assertHardlinkInvalidPath(t *testing.T, err error, wantOp string) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !errors.Is(err, filemigrate.ErrInvalidPath) {
+		t.Errorf("expected ErrInvalidPath, got %v", err)
+	}
+	var ferr *filemigrate.Error
+	if errors.As(err, &ferr) {
+		if ferr.Op != wantOp {
+			t.Errorf("Op = %q, want %q", ferr.Op, wantOp)
+		}
 	}
 }

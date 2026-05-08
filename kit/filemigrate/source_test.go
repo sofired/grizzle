@@ -664,47 +664,83 @@ func TestFSSourceStore_CurrentDirRoot(t *testing.T) {
 // TestFSSourceStore_HardlinkedFileRejected verifies that both ReadSourceFile
 // and ListSourceFiles fail with invalid_path when a .go file under the
 // configured source root has more than one hard link. The schema source
-// contract requires rejecting hard links where platform metadata exposes them
-// so a file aliased from outside the configured root cannot be ingested or
-// enumerated even when containment and symlink checks pass.
+// contract requires rejecting hard links where platform metadata exposes them.
+// Two seedings are exercised: cross_root (the second link lives outside the
+// configured root, the original threat model) and intra_root (both links are
+// inside the root, exercising the per-inode Nlink>1 invariant). Op-string
+// asserts confirm the error is reported by the right call site.
 func TestFSSourceStore_HardlinkedFileRejected(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping filesystem test in short mode")
 	}
-	dir := t.TempDir()
-	// Create the real schema file outside the configured source root, then
-	// hardlink it under the root. On POSIX, st_nlink is 2 for both entries.
-	outside := t.TempDir()
-	realFile := filepath.Join(outside, "real.go")
-	if err := os.WriteFile(realFile, []byte("package schema"), 0o640); err != nil {
-		t.Fatal(err)
-	}
-	linkedSchema := filepath.Join(dir, "schema.go")
-	if err := os.Link(realFile, linkedSchema); err != nil {
-		t.Skipf("hard links not supported on this platform: %v", err)
-	}
 
+	const (
+		readOp = "source_store.read_source_file"
+		listOp = "source_store.list_source_files"
+	)
+
+	t.Run("cross_root", func(t *testing.T) {
+		dir := t.TempDir()
+		outside := t.TempDir()
+		realFile := filepath.Join(outside, "real.go")
+		if err := os.WriteFile(realFile, []byte("package schema"), 0o640); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Link(realFile, filepath.Join(dir, "schema.go")); err != nil {
+			t.Skipf("hard links not supported on this platform: %v", err)
+		}
+		assertSourceHardlinkRejected(t, dir, "schema.go", readOp, listOp)
+	})
+
+	t.Run("intra_root", func(t *testing.T) {
+		// Both links live inside the configured source root. The store must
+		// still reject the entry because the check is per-inode.
+		dir := t.TempDir()
+		realFile := filepath.Join(dir, "real.go")
+		if err := os.WriteFile(realFile, []byte("package schema"), 0o640); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Link(realFile, filepath.Join(dir, "schema.go")); err != nil {
+			t.Skipf("hard links not supported on this platform: %v", err)
+		}
+		assertSourceHardlinkRejected(t, dir, "schema.go", readOp, listOp)
+	})
+}
+
+func assertSourceHardlinkRejected(t *testing.T, dir, relpath, readOp, listOp string) {
+	t.Helper()
 	store := filemigrate.NewFSSourceStore()
 	root, err := store.ResolveSourceRoot(t.Context(), dir)
 	if err != nil {
 		t.Fatalf("ResolveSourceRoot: %v", err)
 	}
-	_, err = store.ReadSourceFile(t.Context(), root, "schema.go", filemigrate.ReadSourceFileOptions{})
-	if err == nil {
-		t.Fatal("expected ReadSourceFile error for hard-linked source file")
-	}
-	if !errors.Is(err, filemigrate.ErrInvalidPath) {
-		t.Errorf("ReadSourceFile: expected ErrInvalidPath, got %v", err)
-	}
+
+	_, err = store.ReadSourceFile(t.Context(), root, relpath, filemigrate.ReadSourceFileOptions{})
+	assertHardlinkInvalidPathSource(t, err, readOp, "ReadSourceFile")
 
 	// ListSourceFiles must also reject the hard-linked .go entry at discovery
 	// time so a hard-linked file never reaches the caller's returned slice.
 	_, listErr := store.ListSourceFiles(t.Context(), root, filemigrate.ListSourceFilesOptions{})
-	if listErr == nil {
-		t.Fatal("expected ListSourceFiles error for hard-linked source file")
+	assertHardlinkInvalidPathSource(t, listErr, listOp, "ListSourceFiles")
+}
+
+// assertHardlinkInvalidPathSource is the source-store analogue of
+// assertHardlinkInvalidPath in artifact_test.go. It asserts ErrInvalidPath
+// and the structured Op tag so a regression that wraps the hard-link error
+// under the wrong Op is caught.
+func assertHardlinkInvalidPathSource(t *testing.T, err error, wantOp, label string) {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("%s: expected error", label)
 	}
-	if !errors.Is(listErr, filemigrate.ErrInvalidPath) {
-		t.Errorf("ListSourceFiles: expected ErrInvalidPath, got %v", listErr)
+	if !errors.Is(err, filemigrate.ErrInvalidPath) {
+		t.Errorf("%s: expected ErrInvalidPath, got %v", label, err)
+	}
+	var ferr *filemigrate.Error
+	if errors.As(err, &ferr) {
+		if ferr.Op != wantOp {
+			t.Errorf("%s: Op = %q, want %q", label, ferr.Op, wantOp)
+		}
 	}
 }
 
