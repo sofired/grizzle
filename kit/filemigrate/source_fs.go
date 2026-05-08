@@ -15,9 +15,10 @@ import (
 // schemaBuildContext is the go/build.Context used to filter discovered .go
 // schema source files. Per docs/spec/file-migrations-api.md:1417 file
 // selection delegates to go/build.Context.MatchFile for //go:build, legacy
-// // +build, and GOOS/GOARCH suffix handling. The context uses process
-// GOOS/GOARCH (or runtime defaults via build.Default), the current toolchain
-// Compiler and ReleaseTags, no custom build tags, and CgoEnabled=false until
+// // +build, and GOOS/GOARCH suffix handling. The context uses GOOS/GOARCH
+// from environment when set, otherwise runtime.GOOS/runtime.GOARCH (via
+// build.Default), the current toolchain Compiler and ReleaseTags, no custom
+// build tags, and CgoEnabled=false — matching spec line 1418 until
 // cgo-aware schema files are an explicit option.
 var schemaBuildContext = func() build.Context {
 	ctxt := build.Default
@@ -94,7 +95,9 @@ func (s *FSSourceStore) ResolveSourceRoot(ctx context.Context, dir string) (Sour
 // docs/spec/file-migrations-api.md:1417 so that _test.go files, files for
 // other GOOS/GOARCH targets, and files with unsatisfied //go:build or legacy
 // // +build constraints are skipped instead of fed to the schema parser.
-// Build-constraint parse errors fail with CodeUnsupportedSchemaConstruct.
+// Build-constraint parse errors fail with CodeUnsupportedSchemaConstruct;
+// the diagnostic uses a generic message so build-line text is not echoed
+// (spec line 1415).
 func (s *FSSourceStore) ListSourceFiles(ctx context.Context, root SourceRoot, opts ListSourceFilesOptions) ([]string, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err

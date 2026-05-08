@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"testing"
 	"time"
 
@@ -818,28 +819,32 @@ func TestFSSourceStore_HardlinkedNonGoFileIgnored(t *testing.T) {
 // TestFSSourceStore_ListAppliesGoBuildRules verifies that ListSourceFiles
 // excludes files the Go toolchain itself would not build into the active
 // package: _test.go files, GOOS/GOARCH-suffixed files for other targets,
-// and files with unsatisfied //go:build constraints. Without this filter
-// the schema loader could parse a test fixture or a file gated on another
-// platform and emit bogus migrations. Per
+// and files with unsatisfied //go:build and legacy // +build constraints.
+// It also asserts a matching-GOARCH-suffixed file IS included so a future
+// regression that left GOARCH blank in schemaBuildContext would fail here.
+// Without this filter the schema loader could parse a test fixture or a
+// file gated on another platform and emit bogus migrations. Per
 // docs/spec/file-migrations-api.md:1417 selection delegates to
 // go/build.Context.MatchFile.
 func TestFSSourceStore_ListAppliesGoBuildRules(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping filesystem test in short mode")
 	}
-	if runtime.GOOS != "linux" {
-		// The "users_windows.go" assertion below relies on the test process
-		// running on a non-windows GOOS so MatchFile excludes it. Pinning
-		// the test to linux keeps the fixture deterministic across CI hosts.
+	if runtime.GOOS == "windows" {
+		// The "users_windows.go" assertion below relies on the test
+		// process running on a non-windows GOOS so MatchFile excludes
+		// it. Skip on windows; all other GOOS values work.
 		t.Skip("test fixture assumes non-windows GOOS")
 	}
 	dir := t.TempDir()
+	matchedArchFile := "users_" + runtime.GOARCH + ".go"
 	files := map[string]string{
 		"users.go":           "package schema\n",
 		"users_test.go":      "package schema\n",
 		"users_windows.go":   "package schema\n",
 		"inactive.go":        "//go:build never_set_tag\n\npackage schema\n",
 		"legacy_inactive.go": "// +build never_set_tag\n\npackage schema\n",
+		matchedArchFile:      "package schema\n",
 	}
 	for name, body := range files {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o640); err != nil {
@@ -853,6 +858,51 @@ func TestFSSourceStore_ListAppliesGoBuildRules(t *testing.T) {
 		t.Fatalf("ResolveSourceRoot: %v", err)
 	}
 	got, err := store.ListSourceFiles(t.Context(), root, filemigrate.ListSourceFilesOptions{})
+	if err != nil {
+		t.Fatalf("ListSourceFiles: %v", err)
+	}
+	want := []string{matchedArchFile, "users.go"}
+	sort.Strings(want)
+	if len(got) != len(want) {
+		t.Fatalf("expected %v, got %v", want, got)
+	}
+	for i, f := range got {
+		if f != want[i] {
+			t.Errorf("got[%d] = %q, want %q", i, f, want[i])
+		}
+	}
+}
+
+// TestFSSourceStore_ListInactiveFilesDoNotConsumeLimit verifies that files
+// excluded by go/build.Context.MatchFile (inactive build constraints,
+// foreign GOOS/GOARCH, _test.go) are skipped before the MaxSchemaFiles
+// guard is consulted. A regression that moved the build-rule filter after
+// the limit check would silently trip the limit on inactive files even
+// though the schema loader never sees them.
+func TestFSSourceStore_ListInactiveFilesDoNotConsumeLimit(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping filesystem test in short mode")
+	}
+	dir := t.TempDir()
+	files := map[string]string{
+		"users.go":      "package schema\n",
+		"users_test.go": "package schema\n",
+		"inactive.go":   "//go:build never_set_tag\n\npackage schema\n",
+	}
+	for name, body := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o640); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	store := filemigrate.NewFSSourceStore()
+	root, err := store.ResolveSourceRoot(t.Context(), dir)
+	if err != nil {
+		t.Fatalf("ResolveSourceRoot: %v", err)
+	}
+	got, err := store.ListSourceFiles(t.Context(), root, filemigrate.ListSourceFilesOptions{
+		Limits: filemigrate.ResourceLimits{MaxSchemaFiles: 1},
+	})
 	if err != nil {
 		t.Fatalf("ListSourceFiles: %v", err)
 	}
