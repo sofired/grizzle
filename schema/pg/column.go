@@ -209,7 +209,16 @@ func Text() *VarcharBuilder {
 }
 
 func (b *VarcharBuilder) NotNull() *VarcharBuilder { b.setNotNull(); return b }
-func (b *VarcharBuilder) Unique() *VarcharBuilder  { b.def.Unique = true; return b }
+
+// PrimaryKey marks the column as the primary key. Varchar primary keys have no
+// implicit default; callers must supply explicit values on insert.
+func (b *VarcharBuilder) PrimaryKey() *VarcharBuilder {
+	b.setPrimaryKey()
+	b.def.HasDefault = false // varchar PKs require caller-supplied values
+	return b
+}
+// Unique adds a UNIQUE constraint to the column.
+func (b *VarcharBuilder) Unique() *VarcharBuilder { b.def.Unique = true; return b }
 
 // Default sets the DEFAULT value for the column.
 // Single quotes in val are doubled to produce valid SQL.
@@ -253,6 +262,16 @@ func Boolean() *BooleanBuilder {
 }
 
 func (b *BooleanBuilder) NotNull() *BooleanBuilder { b.setNotNull(); return b }
+
+// PrimaryKey marks the column as the primary key. Boolean primary keys have no
+// implicit default; callers must supply explicit values on insert.
+func (b *BooleanBuilder) PrimaryKey() *BooleanBuilder {
+	b.setPrimaryKey()
+	b.def.HasDefault = false // boolean PKs require caller-supplied values
+	return b
+}
+// Unique adds a UNIQUE constraint to the column.
+func (b *BooleanBuilder) Unique() *BooleanBuilder { b.def.Unique = true; return b }
 func (b *BooleanBuilder) Default(val bool) *BooleanBuilder {
 	if val {
 		b.setDefault("true")
@@ -463,11 +482,16 @@ type NumericBuilder struct{ colBuilder }
 func Numeric(precision, scale int) *NumericBuilder {
 	b := &NumericBuilder{}
 	b.def.SQLType = fmt.Sprintf("numeric(%d,%d)", precision, scale)
-	b.def.GoType = GoTypeFloat64
+	b.def.GoType = GoTypeString
 	return b
 }
 
 func (b *NumericBuilder) NotNull() *NumericBuilder { b.setNotNull(); return b }
+
+// Default sets the DEFAULT expression for a numeric column.
+// val must be a valid numeric or keyword SQL expression — e.g. "3.14", "'NaN'",
+// "CURRENT_TIMESTAMP". Quoting is intentionally omitted so that SQL keywords and
+// function calls pass through unchanged. Arbitrary strings will produce invalid DDL.
 func (b *NumericBuilder) Default(val string) *NumericBuilder {
 	b.setDefault(val)
 	return b

@@ -69,11 +69,12 @@ func TestGenerateTable_Smoke(t *testing.T) {
 		"type UserSelect struct",
 		"type UserInsert struct",
 		"type UserUpdate struct",
-		// Column handle types present in table struct
+		// Column handle types present in table struct.
+		// Note: score is pg.Numeric — mapped to expr.StringColumn (not FloatColumn)
+		// since issue #236 changed numeric(p,s) to string to avoid precision loss.
 		"expr.UUIDColumn",
 		"expr.StringColumn",
 		"expr.BoolColumn",
-		"expr.FloatColumn",
 		"expr.TimestampColumn",
 		// Field names present
 		"ID", "RealmID", "Username", "Email", "Enabled", "Score", "CreatedAt", "DeletedAt",
