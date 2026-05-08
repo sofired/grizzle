@@ -591,6 +591,38 @@ func TestMemSourceStore_ReadRejectsNonGoFile(t *testing.T) {
 	}
 }
 
+// TestMemSourceStore_ReadRejectsEscapingRelpath verifies that MemSourceStore
+// rejects a relpath that escapes the configured root (via ".." traversal or
+// an absolute path) with ErrInvalidPath, even when AddFile has been used to
+// seed a key matching the escaping path. This keeps the in-memory store's
+// containment contract aligned with FSSourceStore (which rejects the same
+// inputs) so tests cannot pass with schema inputs that production reads
+// would refuse.
+func TestMemSourceStore_ReadRejectsEscapingRelpath(t *testing.T) {
+	store := filemigrate.NewMemSourceStore()
+	// Seed a key that AddFile's raw-concat would form for "../outside.go" so
+	// the test would succeed under the pre-fix behavior.
+	store.AddFile("/schema", "../outside.go", []byte("package outside"))
+	root, _ := store.ResolveSourceRoot(t.Context(), "/schema")
+
+	cases := []string{
+		"../outside.go",
+		"sub/../../outside.go",
+		"/abs/outside.go",
+	}
+	for _, rel := range cases {
+		t.Run(rel, func(t *testing.T) {
+			_, err := store.ReadSourceFile(t.Context(), root, rel, filemigrate.ReadSourceFileOptions{})
+			if err == nil {
+				t.Fatal("expected error for escaping relpath")
+			}
+			if !errors.Is(err, filemigrate.ErrInvalidPath) {
+				t.Errorf("expected ErrInvalidPath, got %v", err)
+			}
+		})
+	}
+}
+
 // TestFSSourceStore_CurrentDirRoot verifies that "." resolves and operates as
 // a valid schema source root: filepath.Join(".", relpath) cleans to relpath
 // (no leading "./"), so the prefix-style containment check used previously

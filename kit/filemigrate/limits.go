@@ -225,8 +225,12 @@ func (l ResourceLimits) Validate(op string) error {
 
 // validate is the unexported implementation used internally.
 func (l ResourceLimits) validate(op string) error {
-	// Enumerates all public fields except MaxSecretValueBytes (intentionally
-	// excluded — secret-value usage must not appear in public LimitStatus output).
+	// Validates every public field's negative-value contract. MaxSecretValueBytes
+	// is included here even though it has no public LimitStatus output — the cap
+	// itself must reject negative values so secret-loading paths and custom
+	// stores cannot accept an invalid configuration. The error path uses an
+	// internal limit name (not exported as a ResourceLimitName constant) to
+	// avoid surfacing secret-value identifiers in public LimitStatus output.
 	checks := []struct {
 		name ResourceLimitName
 		v    int64
@@ -244,6 +248,7 @@ func (l ResourceLimits) validate(op string) error {
 		{LimitMaxSchemaSourceFileBytes, l.MaxSchemaSourceFileBytes},
 		{LimitMaxSchemaSourceBytes, l.MaxSchemaSourceBytes},
 		{LimitMaxSchemaLiteralBytes, l.MaxSchemaLiteralBytes},
+		{ResourceLimitName("max_secret_value_bytes"), l.MaxSecretValueBytes},
 	}
 	intChecks := []struct {
 		name ResourceLimitName

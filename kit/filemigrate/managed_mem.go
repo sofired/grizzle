@@ -44,13 +44,25 @@ func (s *MemManagedSourceStore) ResolveSourceRoot(ctx context.Context, dir strin
 
 // WriteManagedFile writes content to relpath under root. If a file already
 // exists at that path and does not start with opts.Header, it is rejected with
-// CodeManagedFileOverwrite. All opts.Limits fields are validated before any
+// CodeManagedFileOverwrite. opts.Header must be non-empty: the
+// ManagedSourceStore contract permits overwriting only files carrying the
+// recognized managed header, so an empty header (which would treat every
+// existing file as managed) is rejected with CodeInvalidConfig before any
+// overwrite decision runs. All opts.Limits fields are validated before any
 // size comparison runs; any negative value is rejected with CodeInvalidConfig.
 // Limits.MaxRenderedSourceFileBytes is enforced per file. Written is true
 // when the stored content differs from the incoming content.
 func (s *MemManagedSourceStore) WriteManagedFile(ctx context.Context, root SourceRoot, relpath string, content []byte, opts ManagedWriteOptions) (ManagedFile, error) {
 	if err := ctx.Err(); err != nil {
 		return ManagedFile{}, err
+	}
+	if opts.Header == "" {
+		return ManagedFile{}, &Error{
+			Code: CodeInvalidConfig,
+			Op:   "mem_managed_source_store.write_managed_file",
+			Path: safeRenderPath(relpath),
+			Err:  fmt.Errorf("ManagedWriteOptions.Header must not be empty"),
+		}
 	}
 	lim := opts.Limits.resolve()
 	if err := lim.Validate("mem_managed_source_store.write_managed_file"); err != nil {
@@ -70,7 +82,7 @@ func (s *MemManagedSourceStore) WriteManagedFile(ctx context.Context, root Sourc
 	defer s.mu.Unlock()
 
 	existing, exists := s.files[key]
-	if exists && opts.Header != "" && !strings.HasPrefix(string(existing), opts.Header) {
+	if exists && !strings.HasPrefix(string(existing), opts.Header) {
 		return ManagedFile{}, &Error{
 			Code: CodeManagedFileOverwrite,
 			Op:   "mem_managed_source_store.write_managed_file",

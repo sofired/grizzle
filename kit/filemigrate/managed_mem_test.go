@@ -100,6 +100,45 @@ func TestMemManagedSourceStore_WrittenFalseWhenContentUnchanged(t *testing.T) {
 	}
 }
 
+// TestMemManagedSourceStore_EmptyHeaderRejected verifies that an empty
+// ManagedWriteOptions.Header is rejected with ErrInvalidConfig before any
+// overwrite decision runs. The ManagedSourceStore contract permits
+// overwriting only files carrying the recognized managed header, so an
+// empty header (which would treat every existing file as managed) must not
+// be accepted — otherwise tests or custom callers could silently clobber
+// hand-written schema files instead of returning ErrManagedFileOverwrite.
+func TestMemManagedSourceStore_EmptyHeaderRejected(t *testing.T) {
+	store := filemigrate.NewMemManagedSourceStore()
+	root, _ := store.ResolveSourceRoot(t.Context(), "/out")
+
+	// Seed a hand-written file that does NOT carry any managed header.
+	store.AddFile("/out", "handwritten.go", []byte("package schema // human-written\n"))
+
+	// Empty header must be rejected even with no preexisting file at the path,
+	// to enforce the contract uniformly regardless of overwrite state.
+	_, err := store.WriteManagedFile(t.Context(), root, "fresh.go",
+		[]byte("package schema\n"),
+		filemigrate.ManagedWriteOptions{Header: ""})
+	if err == nil {
+		t.Fatal("expected error for empty header on fresh write")
+	}
+	if !errors.Is(err, filemigrate.ErrInvalidConfig) {
+		t.Errorf("fresh write: expected ErrInvalidConfig, got %v", err)
+	}
+
+	// Empty header must also be rejected when a hand-written file exists at
+	// the path — the pre-fix code would silently overwrite it.
+	_, err = store.WriteManagedFile(t.Context(), root, "handwritten.go",
+		[]byte("package schema // overwritten by buggy header\n"),
+		filemigrate.ManagedWriteOptions{Header: ""})
+	if err == nil {
+		t.Fatal("expected error for empty header over hand-written file")
+	}
+	if !errors.Is(err, filemigrate.ErrInvalidConfig) {
+		t.Errorf("overwrite hand-written: expected ErrInvalidConfig, got %v", err)
+	}
+}
+
 func TestMemManagedSourceStore_UnownedFileRejected(t *testing.T) {
 	store := filemigrate.NewMemManagedSourceStore()
 	root, _ := store.ResolveSourceRoot(t.Context(), "/out")

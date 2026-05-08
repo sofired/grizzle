@@ -122,3 +122,19 @@ func TestNegativeLimitsFailsValidation(t *testing.T) {
 		t.Errorf("expected ErrInvalidConfig, got %v", err)
 	}
 }
+
+// TestNegativeMaxSecretValueBytesFailsValidation verifies that a negative
+// MaxSecretValueBytes is rejected by Validate even though the limit is
+// intentionally absent from the public ResourceLimitName constants and from
+// LimitStatus output. The configured cap itself must be rejected so secret
+// loading paths and custom stores cannot accept an invalid negative cap.
+func TestNegativeMaxSecretValueBytesFailsValidation(t *testing.T) {
+	lim := filemigrate.ResourceLimits{MaxSecretValueBytes: -1}
+	err := lim.Validate("test_op")
+	if err == nil {
+		t.Fatal("expected error for negative MaxSecretValueBytes")
+	}
+	if !errors.Is(err, filemigrate.ErrInvalidConfig) {
+		t.Errorf("expected ErrInvalidConfig, got %v", err)
+	}
+}
