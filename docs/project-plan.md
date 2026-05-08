@@ -72,12 +72,12 @@ This order is about dependency safety, not exclusivity. Independent query/schema
 
 Each slice has its own GitHub Milestone. Live child-issue tracking, open/closed counts, and progress live there. The slice parent issues that previously served this role were retired on 2026-05-08 with redirect comments.
 
-The Grizzle repo uses **two milestone axes** that coexist:
+The Grizzle repo uses **two milestone axes**:
 
 - **Slice milestones** (this section) — implementation sequence for the file-migration workflow, one per slice 0-8. Granular, ordered, time-bounded.
 - **Release/capability milestones** (`M1: Clean house`, `M4: Query builder parity`, `M5: Schema DSL + codegen completeness`, `M6: Advanced features`) — what ships when, across all workstreams. `M2: Dialect foundation` and `M3: Kit workflow` are now closed; M3's scope was absorbed into the slice milestones.
 
-A single issue may carry both: e.g., a Slice 3 issue can also be in M5 if it ships toward Schema DSL completeness.
+Both axes are GitHub Milestones, and a GitHub issue can only carry **one milestone**, so the axes are mutually exclusive per issue. Assignment rule: if the issue is part of a file-migration slice, it goes on the slice milestone (the slice progress rollup depends on this being complete); otherwise it goes on the relevant M-milestone. Cross-axis association (e.g., a Slice 3 issue that also serves M5 capability completeness) is captured in the issue body, not by a second milestone.
 
 | Slice | Status | Milestone | Spec | Code involvement |
 | --- | --- | --- | --- | --- |
