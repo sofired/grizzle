@@ -44,8 +44,10 @@ func (s *MemManagedSourceStore) ResolveSourceRoot(ctx context.Context, dir strin
 
 // WriteManagedFile writes content to relpath under root. If a file already
 // exists at that path and does not start with opts.Header, it is rejected with
-// CodeManagedFileOverwrite. Limits.MaxRenderedSourceFileBytes is enforced.
-// Written is true when the stored content differs from the incoming content.
+// CodeManagedFileOverwrite. All opts.Limits fields are validated before any
+// size comparison runs; any negative value is rejected with CodeInvalidConfig.
+// Limits.MaxRenderedSourceFileBytes is enforced per file. Written is true
+// when the stored content differs from the incoming content.
 func (s *MemManagedSourceStore) WriteManagedFile(ctx context.Context, root SourceRoot, relpath string, content []byte, opts ManagedWriteOptions) (ManagedFile, error) {
 	if err := ctx.Err(); err != nil {
 		return ManagedFile{}, err
