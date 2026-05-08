@@ -919,6 +919,11 @@ func TestArtifactStore_ManagedIntrospectionDetection(t *testing.T) {
 		{"header_with_trailing_text", header + " trailing\n", false},
 		{"bom_only", bom, false},
 		{"only_blank_lines", "\n\n\n", false},
+		// Bare CR (old Mac) is not a recognized terminator: the spec
+		// normalizes CRLF/CR to LF on write, so a CR-only-terminated header
+		// must not be silently accepted as managed-introspection.
+		{"header_cr_only_terminator", header + "\r", false},
+		{"header_cr_then_payload", header + "\r-- payload", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -951,12 +956,20 @@ func TestFSArtifactStore_ManagedIntrospectionRoundtrip(t *testing.T) {
 	root := mustResolveRoot(t, store, dir, filemigrate.RootEnsureForWrite)
 
 	managed := []byte("-- grizzle:managed-introspection v1\n-- inert payload line\n")
+	// BOM + blank lines + header is the most footgun-prone shape if the
+	// detection is ever re-implemented inside the FS store independently
+	// of the shared helper, so exercise it here.
+	managedBOM := []byte("\xef\xbb\xbf\n\n-- grizzle:managed-introspection v1\n-- inert payload\n")
 	plain := []byte("CREATE TABLE t (id INT);\n")
 	snap := []byte(`{"v":"1"}`)
 
 	loaded := mustCreateArtifact(t, store, root, "20240101000000_managed", managed, snap)
 	if !loaded.ManagedIntrospection {
 		t.Error("CreateArtifact (managed): ManagedIntrospection = false, want true")
+	}
+	loadedBOM := mustCreateArtifact(t, store, root, "20240101000002_managedbom", managedBOM, snap)
+	if !loadedBOM.ManagedIntrospection {
+		t.Error("CreateArtifact (managed+BOM): ManagedIntrospection = false, want true")
 	}
 	plainLoaded := mustCreateArtifact(t, store, root, "20240101000001_plain", plain, snap)
 	if plainLoaded.ManagedIntrospection {
@@ -969,6 +982,13 @@ func TestFSArtifactStore_ManagedIntrospectionRoundtrip(t *testing.T) {
 	}
 	if !got.ManagedIntrospection {
 		t.Error("ReadArtifact (managed): ManagedIntrospection = false, want true")
+	}
+	gotBOM, err := store.ReadArtifact(t.Context(), root, "20240101000002_managedbom", filemigrate.ReadArtifactOptions{})
+	if err != nil {
+		t.Fatalf("ReadArtifact (managed+BOM): %v", err)
+	}
+	if !gotBOM.ManagedIntrospection {
+		t.Error("ReadArtifact (managed+BOM): ManagedIntrospection = false, want true")
 	}
 	gotPlain, err := store.ReadArtifact(t.Context(), root, "20240101000001_plain", filemigrate.ReadArtifactOptions{})
 	if err != nil {

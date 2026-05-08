@@ -20,7 +20,11 @@ var utf8BOM = []byte{0xEF, 0xBB, 0xBF}
 // hasManagedIntrospectionHeader reports whether sql is a managed-introspection
 // migration: its first non-empty physical line, after an optional UTF-8 BOM,
 // is exactly managedIntrospectionHeader. Physical lines are split on LF; a
-// trailing CR (CRLF input) is tolerated for the matched header line.
+// trailing CR is tolerated only for CRLF-terminated lines, not for bare CR.
+// The spec normalizes CRLF/CR to LF on write (docs/spec/pull.md:499), so a
+// bare CR ("old Mac" line ending) is not a recognized terminator and any
+// content containing one is not classified as managed-introspection. Returns
+// false for empty input and for content that is only blank lines.
 func hasManagedIntrospectionHeader(sql []byte) bool {
 	b := bytes.TrimPrefix(sql, utf8BOM)
 	for {
@@ -30,10 +34,12 @@ func hasManagedIntrospectionHeader(sql []byte) bool {
 			line = b
 		} else {
 			line = b[:nl]
-		}
-		// Tolerate CRLF: drop a trailing CR before comparison.
-		if n := len(line); n > 0 && line[n-1] == '\r' {
-			line = line[:n-1]
+			// Strip a single trailing CR only when it pairs with the LF we
+			// just found (i.e., a CRLF terminator). A bare CR-terminated
+			// header (no LF anywhere) must not be silently accepted.
+			if n := len(line); n > 0 && line[n-1] == '\r' {
+				line = line[:n-1]
+			}
 		}
 		if len(line) > 0 {
 			return string(line) == managedIntrospectionHeader
@@ -91,19 +97,18 @@ func computeArtifactDigest(migrationSQL, snapshotJSON []byte) ArtifactDigest {
 
 // LoadedArtifact holds the validated, caller-owned bytes of a migration artifact.
 // Byte slices are defensive copies — the store does not retain them after return.
-//
-// ManagedIntrospection is true when MigrationSQL carries the managed
-// introspection header — i.e., its first non-empty physical line, after an
-// optional UTF-8 BOM, is exactly "-- grizzle:managed-introspection v1". See
-// docs/spec/file-migrations-artifacts.md:128 and docs/spec/pull.md:504. The
-// downstream `migrate` flow uses this flag to reject pending/unrecorded
-// bootstrap artifacts with bootstrap_init_required.
 type LoadedArtifact struct {
-	Name                 string
-	Dir                  string
-	MigrationSQL         []byte
-	SnapshotJSON         []byte
-	Digests              ArtifactDigest
+	Name         string
+	Dir          string
+	MigrationSQL []byte
+	SnapshotJSON []byte
+	Digests      ArtifactDigest
+	// ManagedIntrospection is true when MigrationSQL carries the managed
+	// introspection header — first non-empty physical line, after an optional
+	// UTF-8 BOM, is exactly "-- grizzle:managed-introspection v1". See
+	// docs/spec/file-migrations-artifacts.md:128 and docs/spec/pull.md:504.
+	// The migrate flow uses this flag to reject pending/unrecorded bootstrap
+	// artifacts with bootstrap_init_required.
 	ManagedIntrospection bool
 }
 
