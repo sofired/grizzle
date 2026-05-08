@@ -86,7 +86,7 @@ Both axes are GitHub Milestones, and a GitHub issue can only carry **one milesto
 | Slice 2: snapshot and schema input planning | Upcoming | [Slice 2](https://github.com/sofired/grizzle/milestone/9) | `file-migrations-implementation-sequence.md` §Slice 2 | Adapt `schema/*`, `gen/parser/*`, `kit/snapshot.go` concepts into RC.1 snapshot planning. |
 | Slice 3: `check` | Upcoming | [Slice 3](https://github.com/sofired/grizzle/milestone/10) | `file-migrations-check.md` | Adapt `kit/diff.go` graph/diff logic. |
 | Slice 4: `generate` | Upcoming | [Slice 4](https://github.com/sofired/grizzle/milestone/11) | `file-migrations-generate.md`, `file-migrations-artifacts.md` | `kit/diff.go`, `kit/sqlgen*.go`, `schema/*`, `gen/parser`. |
-| Slice 5: history, locking, sessions | Upcoming | [Slice 5](https://github.com/sofired/grizzle/milestone/12) | `file-migrations-history.md`, `file-migrations-execution.md` | New session/history/locking under `kit/filemigrate`; `driver/*`, `dialect/`. |
+| Slice 5: history, locking, sessions | Upcoming (no child issues yet) | [Slice 5](https://github.com/sofired/grizzle/milestone/12) | `file-migrations-history.md`, `file-migrations-execution.md` | New session/history/locking under `kit/filemigrate`; `driver/*`, `dialect/`. |
 | Slice 6: `migrate` | Upcoming | [Slice 6](https://github.com/sofired/grizzle/milestone/13) | `file-migrations-execution.md` | Implement artifact execution; quarantine `kit/migrate*.go`. |
 | Slice 7: `pull` and `pull --init` | Upcoming | [Slice 7](https://github.com/sofired/grizzle/milestone/14) | `pull.md` | Adapt `kit/introspect/`, `schema/*`, `gen/codegen`. |
 | Slice 8: CLI cutover and cleanup | Upcoming | [Slice 8](https://github.com/sofired/grizzle/milestone/15) | `file-migrations-api.md`, `kit.md` | Rewire `cmd/grizzle/main.go`; remove legacy `kit/migrate*.go`, `kit/apply.go`, snapshot/diff CLI commands. |
@@ -99,6 +99,8 @@ Code-area follow-up tracking issues hang off the milestones above:
 - [#299](https://github.com/sofired/grizzle/issues/299) — Adapt schema definitions and static loader for strict file migrations (slice:2)
 - [#300](https://github.com/sofired/grizzle/issues/300) — Adapt diff and SQL rendering to RC.1 DDL entities (slice:4)
 - [#301](https://github.com/sofired/grizzle/issues/301) — Adapt introspection for `pull` and `pull --init` (slice:7)
+
+The Slice 5 milestone has no child issues yet; the closed umbrella (#293) was the only assigned issue, so the GitHub progress rollup currently shows 100% but reflects no real work. Treat the milestone as a placeholder for now: child work items (history table creation/validation, DB-backed locking, migration session interfaces, dialect capability checks) are authored as Slice 5 starts. Until then, rely on `file-migrations-history.md` and the Slice 5 spec section, not the milestone rollup, for Slice 5 status.
 
 ### Parallel Work Guidance
 
