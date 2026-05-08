@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -811,5 +812,82 @@ func TestFSSourceStore_HardlinkedNonGoFileIgnored(t *testing.T) {
 	}
 	if len(files) != 1 || files[0] != "schema.go" {
 		t.Errorf("expected [schema.go], got %v", files)
+	}
+}
+
+// TestFSSourceStore_ListAppliesGoBuildRules verifies that ListSourceFiles
+// excludes files the Go toolchain itself would not build into the active
+// package: _test.go files, GOOS/GOARCH-suffixed files for other targets,
+// and files with unsatisfied //go:build constraints. Without this filter
+// the schema loader could parse a test fixture or a file gated on another
+// platform and emit bogus migrations. Per
+// docs/spec/file-migrations-api.md:1417 selection delegates to
+// go/build.Context.MatchFile.
+func TestFSSourceStore_ListAppliesGoBuildRules(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping filesystem test in short mode")
+	}
+	if runtime.GOOS != "linux" {
+		// The "users_windows.go" assertion below relies on the test process
+		// running on a non-windows GOOS so MatchFile excludes it. Pinning
+		// the test to linux keeps the fixture deterministic across CI hosts.
+		t.Skip("test fixture assumes non-windows GOOS")
+	}
+	dir := t.TempDir()
+	files := map[string]string{
+		"users.go":           "package schema\n",
+		"users_test.go":      "package schema\n",
+		"users_windows.go":   "package schema\n",
+		"inactive.go":        "//go:build never_set_tag\n\npackage schema\n",
+		"legacy_inactive.go": "// +build never_set_tag\n\npackage schema\n",
+	}
+	for name, body := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o640); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	store := filemigrate.NewFSSourceStore()
+	root, err := store.ResolveSourceRoot(t.Context(), dir)
+	if err != nil {
+		t.Fatalf("ResolveSourceRoot: %v", err)
+	}
+	got, err := store.ListSourceFiles(t.Context(), root, filemigrate.ListSourceFilesOptions{})
+	if err != nil {
+		t.Fatalf("ListSourceFiles: %v", err)
+	}
+	if len(got) != 1 || got[0] != "users.go" {
+		t.Errorf("expected only [users.go], got %v", got)
+	}
+}
+
+// TestFSSourceStore_ListRejectsBadBuildConstraint verifies that a .go file
+// with a malformed //go:build expression fails with
+// CodeUnsupportedSchemaConstruct rather than being silently included or
+// surfacing the raw build-line text in diagnostics. Per
+// docs/spec/file-migrations-api.md:1420 build-constraint parse errors fail
+// with unsupported_schema_construct, and per spec line 1415 diagnostics
+// must not echo arbitrary source text.
+func TestFSSourceStore_ListRejectsBadBuildConstraint(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping filesystem test in short mode")
+	}
+	dir := t.TempDir()
+	// "&&" is not a valid build expression; the parser rejects it.
+	if err := os.WriteFile(filepath.Join(dir, "bad.go"), []byte("//go:build &&\n\npackage schema\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	store := filemigrate.NewFSSourceStore()
+	root, err := store.ResolveSourceRoot(t.Context(), dir)
+	if err != nil {
+		t.Fatalf("ResolveSourceRoot: %v", err)
+	}
+	_, err = store.ListSourceFiles(t.Context(), root, filemigrate.ListSourceFilesOptions{})
+	if err == nil {
+		t.Fatal("expected error for invalid build constraint")
+	}
+	if !errors.Is(err, filemigrate.ErrUnsupportedSchemaConstruct) {
+		t.Errorf("expected ErrUnsupportedSchemaConstruct, got %v", err)
 	}
 }

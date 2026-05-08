@@ -3,6 +3,7 @@ package filemigrate
 import (
 	"context"
 	"fmt"
+	"go/build"
 	"io"
 	"io/fs"
 	"os"
@@ -10,6 +11,20 @@ import (
 	"sort"
 	"strings"
 )
+
+// schemaBuildContext is the go/build.Context used to filter discovered .go
+// schema source files. Per docs/spec/file-migrations-api.md:1417 file
+// selection delegates to go/build.Context.MatchFile for //go:build, legacy
+// // +build, and GOOS/GOARCH suffix handling. The context uses process
+// GOOS/GOARCH (or runtime defaults via build.Default), the current toolchain
+// Compiler and ReleaseTags, no custom build tags, and CgoEnabled=false until
+// cgo-aware schema files are an explicit option.
+var schemaBuildContext = func() build.Context {
+	ctxt := build.Default
+	ctxt.CgoEnabled = false
+	ctxt.BuildTags = nil
+	return ctxt
+}()
 
 // FSSourceStore is the production SourceStore backed by the real filesystem.
 // All metadata checks use Lstat so symlinks are never followed.
@@ -74,6 +89,12 @@ func (s *FSSourceStore) ResolveSourceRoot(ctx context.Context, dir string) (Sour
 
 // ListSourceFiles returns relative paths of .go source files under root.
 // It rejects symlinked directories and files, and enforces MaxSchemaFiles.
+//
+// Discovered .go files are passed through go/build.Context.MatchFile per
+// docs/spec/file-migrations-api.md:1417 so that _test.go files, files for
+// other GOOS/GOARCH targets, and files with unsatisfied //go:build or legacy
+// // +build constraints are skipped instead of fed to the schema parser.
+// Build-constraint parse errors fail with CodeUnsupportedSchemaConstruct.
 func (s *FSSourceStore) ListSourceFiles(ctx context.Context, root SourceRoot, opts ListSourceFilesOptions) ([]string, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -136,6 +157,35 @@ func (s *FSSourceStore) ListSourceFiles(ctx context.Context, root SourceRoot, op
 				Path: safeRenderPath(path),
 				Err:  fmt.Errorf("hard links are not supported"),
 			}
+		}
+		// Apply Go build rules to skip files the Go toolchain itself would
+		// not include in this build: _test.go (MatchFile does not exclude
+		// test files), GOOS/GOARCH suffixes for other targets, and .go files
+		// with unsatisfied //go:build or legacy // +build constraints. Per
+		// docs/spec/file-migrations-api.md:1417 the static schema loader
+		// must delegate file selection to go/build.Context.MatchFile, so the
+		// hardlink check above still fires for every discovered .go file
+		// (per spec line 1409) before inactive files are dropped here.
+		base := filepath.Base(path)
+		if strings.HasSuffix(base, "_test.go") {
+			return nil
+		}
+		match, matchErr := schemaBuildContext.MatchFile(filepath.Dir(path), base)
+		if matchErr != nil {
+			// Per spec line 1420, build-constraint parse errors fail with
+			// unsupported_schema_construct. The underlying error message
+			// can include source text from the build line, so we wrap it
+			// with a generic diagnostic to satisfy the redaction rule
+			// (spec line 1415) rather than surfacing matchErr directly.
+			return &Error{
+				Code: CodeUnsupportedSchemaConstruct,
+				Op:   sourceOp + ".list_source_files",
+				Path: safeRenderPath(path),
+				Err:  fmt.Errorf("invalid build constraint"),
+			}
+		}
+		if !match {
+			return nil
 		}
 		rel, relErr := filepath.Rel(root.RealPath, path)
 		if relErr != nil {
