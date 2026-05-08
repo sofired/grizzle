@@ -2,6 +2,7 @@ package filemigrate_test
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -380,6 +381,35 @@ func TestFSSourceStore_NegativeLimitRejected(t *testing.T) {
 	})
 	if !errors.Is(err, filemigrate.ErrInvalidConfig) {
 		t.Errorf("ReadSourceFile: expected ErrInvalidConfig, got %v", err)
+	}
+}
+
+// TestFSSourceStore_ReadHonorsCancelledContext verifies that ReadSourceFile
+// returns immediately when given an already-cancelled context, before doing
+// any filesystem work — matching the cancellation contract documented in the
+// schema-loader spec and matching the existing context check in ListSourceFiles.
+func TestFSSourceStore_ReadHonorsCancelledContext(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping filesystem test in short mode")
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "schema.go"), []byte("package x"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	store := filemigrate.NewFSSourceStore()
+	root, err := store.ResolveSourceRoot(t.Context(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err = store.ReadSourceFile(ctx, root, "schema.go", filemigrate.ReadSourceFileOptions{})
+	if err == nil {
+		t.Fatal("expected error from cancelled context")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("expected context.Canceled, got %v", err)
 	}
 }
 

@@ -142,8 +142,11 @@ func (s *FSSourceStore) ListSourceFiles(ctx context.Context, root SourceRoot, op
 
 // ReadSourceFile reads the file at relpath under root using Lstat (no follow),
 // validates it is a regular .go file, enforces byte caps, and returns a
-// caller-owned copy.
-func (s *FSSourceStore) ReadSourceFile(_ context.Context, root SourceRoot, relpath string, opts ReadSourceFileOptions) (*SourceFile, error) {
+// caller-owned copy. Honors ctx cancellation before any filesystem work runs.
+func (s *FSSourceStore) ReadSourceFile(ctx context.Context, root SourceRoot, relpath string, opts ReadSourceFileOptions) (*SourceFile, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if err := assertSourceContained(root.RealPath, relpath); err != nil {
 		return nil, &Error{Code: CodeInvalidPath, Op: sourceOp + ".read_source_file", Path: safeRenderPath(relpath), Err: err}
 	}
