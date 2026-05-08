@@ -28,8 +28,12 @@ const sourceOp = "source_store"
 // It rejects symlinked paths and non-directory entries. Existing parent
 // components of dir are walked with Lstat and rejected if any is a symlink,
 // so a configured path like `<base>/link/schema` (where `link` is a symlink)
-// cannot redirect resolution outside the intended tree.
-func (s *FSSourceStore) ResolveSourceRoot(_ context.Context, dir string) (SourceRoot, error) {
+// cannot redirect resolution outside the intended tree. Honors ctx
+// cancellation before any filesystem work runs.
+func (s *FSSourceStore) ResolveSourceRoot(ctx context.Context, dir string) (SourceRoot, error) {
+	if err := ctx.Err(); err != nil {
+		return SourceRoot{}, err
+	}
 	if dir == "" {
 		return SourceRoot{}, newInvalidConfigError(sourceOp + ".resolve_source_root")
 	}

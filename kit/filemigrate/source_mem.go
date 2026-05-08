@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 )
 
@@ -40,8 +41,10 @@ func (s *MemSourceStore) ResolveSourceRoot(ctx context.Context, dir string) (Sou
 	return SourceRoot{Configured: dir, RealPath: dir}, nil
 }
 
-// ListSourceFiles returns the relative paths of files stored under root,
-// enforcing MaxSchemaFiles.
+// ListSourceFiles returns the relative paths of .go schema source files
+// stored under root, enforcing MaxSchemaFiles. Non-Go files (sidecars such
+// as README.md or generated output) are skipped to match the production
+// FSSourceStore, which only returns .go inputs from the schema root.
 func (s *MemSourceStore) ListSourceFiles(ctx context.Context, root SourceRoot, opts ListSourceFilesOptions) ([]string, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -60,6 +63,9 @@ func (s *MemSourceStore) ListSourceFiles(ctx context.Context, root SourceRoot, o
 			continue
 		}
 		rel := k[len(prefix):]
+		if !strings.HasSuffix(rel, ".go") {
+			continue
+		}
 		if len(out)+1 > lim.MaxSchemaFiles {
 			return nil, &Error{
 				Code: CodeResourceLimit,

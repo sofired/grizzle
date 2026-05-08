@@ -148,6 +148,56 @@ func TestMemSourceStore_EmptyDirRejected(t *testing.T) {
 	}
 }
 
+// TestMemSourceStore_ListFiltersNonGoFiles verifies that ListSourceFiles
+// returns only .go files even when callers seed the store with sidecars
+// such as README.md or generated output. This keeps the in-memory store's
+// listing semantics aligned with FSSourceStore so tests using the memory
+// fixture do not feed non-Go content into schema parsing.
+func TestMemSourceStore_ListFiltersNonGoFiles(t *testing.T) {
+	store := filemigrate.NewMemSourceStore()
+	store.AddFile("/schema", "users.go", []byte("package schema"))
+	store.AddFile("/schema", "README.md", []byte("# docs"))
+	store.AddFile("/schema", "generated.txt", []byte("ignore me"))
+	store.AddFile("/schema", "posts.go", []byte("package schema"))
+	root, _ := store.ResolveSourceRoot(t.Context(), "/schema")
+
+	files, err := store.ListSourceFiles(t.Context(), root, filemigrate.ListSourceFilesOptions{})
+	if err != nil {
+		t.Fatalf("ListSourceFiles: %v", err)
+	}
+	want := []string{"posts.go", "users.go"}
+	if len(files) != len(want) {
+		t.Fatalf("expected %v, got %v", want, files)
+	}
+	for i, f := range files {
+		if f != want[i] {
+			t.Errorf("files[%d] = %q, want %q", i, f, want[i])
+		}
+	}
+}
+
+// TestMemSourceStore_ListNonGoFilesNotCountedAgainstLimit verifies that
+// non-Go sidecars do not consume MaxSchemaFiles budget — they are skipped
+// before the limit check, so a store seeded with sidecars plus a small
+// number of .go files lists successfully under a tight limit.
+func TestMemSourceStore_ListNonGoFilesNotCountedAgainstLimit(t *testing.T) {
+	store := filemigrate.NewMemSourceStore()
+	store.AddFile("/schema", "a.go", []byte("package schema"))
+	store.AddFile("/schema", "README.md", []byte("# docs"))
+	store.AddFile("/schema", "b.go", []byte("package schema"))
+	root, _ := store.ResolveSourceRoot(t.Context(), "/schema")
+
+	files, err := store.ListSourceFiles(t.Context(), root, filemigrate.ListSourceFilesOptions{
+		Limits: filemigrate.ResourceLimits{MaxSchemaFiles: 2},
+	})
+	if err != nil {
+		t.Fatalf("ListSourceFiles: %v", err)
+	}
+	if len(files) != 2 {
+		t.Errorf("expected 2 .go files, got %v", files)
+	}
+}
+
 // --- FSSourceStore ---
 
 func TestFSSourceStore_ResolveAndList(t *testing.T) {
@@ -381,6 +431,29 @@ func TestFSSourceStore_NegativeLimitRejected(t *testing.T) {
 	})
 	if !errors.Is(err, filemigrate.ErrInvalidConfig) {
 		t.Errorf("ReadSourceFile: expected ErrInvalidConfig, got %v", err)
+	}
+}
+
+// TestFSSourceStore_ResolveHonorsCancelledContext verifies that
+// ResolveSourceRoot returns immediately when given an already-cancelled
+// context, before doing any filesystem work — matching the cancellation
+// behavior of MemSourceStore.ResolveSourceRoot and the entry-time checks
+// in ListSourceFiles/ReadSourceFile.
+func TestFSSourceStore_ResolveHonorsCancelledContext(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping filesystem test in short mode")
+	}
+	dir := t.TempDir()
+	store := filemigrate.NewFSSourceStore()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err := store.ResolveSourceRoot(ctx, dir)
+	if err == nil {
+		t.Fatal("expected error from cancelled context")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("expected context.Canceled, got %v", err)
 	}
 }
 
