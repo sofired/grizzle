@@ -151,7 +151,7 @@ GitHub labels with project-defined semantics:
 
 | Family | Members | Semantics |
 | --- | --- | --- |
-| `area:*` | `area:schema`, `area:query`, `area:codegen`, `area:driver`, `area:dialect`, `area:kit`, `area:file-migrations`, `area:pull` | Primary code area the issue affects. One per issue, with the explicit exception that `area:kit` and `area:file-migrations` may co-occur per the `area:kit` vs `area:file-migrations` row below. |
+| `area:*` | `area:schema`, `area:query`, `area:codegen`, `area:driver`, `area:dialect`, `area:kit`, `area:file-migrations`, `area:pull`, `area:docs` | Primary code area the issue affects. One per issue, with the explicit exception that `area:kit` and `area:file-migrations` may co-occur per the `area:kit` vs `area:file-migrations` row below. `area:docs` covers documentation, repo hygiene, CI, and release policy. |
 | `slice:*` | `slice:0` through `slice:8` | **Issue is delivered as part of Slice N** — authored, reviewed, merged within that slice's PR. **One slice tag per issue.** Cross-slice dependencies belong in the issue body, not as additional slice tags. |
 | `priority:*` | `priority:critical`, `priority:high`, `priority:medium`, `priority:low` | Scheduling priority. (Renamed from `P0`-`P3` on 2026-05-08.) |
 | `phase:implementation` | — | Implementation work (code/tests). Spec-only work uses `blocked-by-spec` instead. |
