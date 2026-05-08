@@ -123,26 +123,36 @@ func (s *FSArtifactStore) ListArtifacts(ctx context.Context, root ArtifactRoot, 
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		// Reject non-directories and hidden/special entries.
-		if !e.IsDir() {
+		entryPath := filepath.Join(root.RealPath, e.Name())
+		fi, statErr := os.Lstat(entryPath)
+		if statErr != nil {
+			return nil, newPathError(fsOp+".list_artifacts", entryPath, statErr)
+		}
+		if !fi.IsDir() {
+			if err := classifyArtifactRootSidecar(e.Name(), fi); err != nil {
+				err.Op = fsOp + ".list_artifacts"
+				err.Path = safeRenderPath(entryPath)
+				return nil, err
+			}
+			continue
+		}
+		// Reserved staging directories from interrupted CreateArtifact runs are
+		// ignored so they do not pollute discovery or trigger validation errors.
+		if isReservedStagingDir(e.Name()) {
 			continue
 		}
 		// Reject symlinked directories using Lstat.
-		fi, statErr := os.Lstat(filepath.Join(root.RealPath, e.Name()))
-		if statErr != nil {
-			return nil, newPathError(fsOp+".list_artifacts", filepath.Join(root.RealPath, e.Name()), statErr)
-		}
 		if fi.Mode()&fs.ModeSymlink != 0 {
 			return nil, &Error{
 				Code: CodeInvalidPath,
 				Op:   fsOp + ".list_artifacts",
-				Path: safeRenderPath(filepath.Join(root.RealPath, e.Name())),
+				Path: safeRenderPath(entryPath),
 				Err:  fmt.Errorf("symlink artifact directories are not supported"),
 			}
 		}
 		out = append(out, ArtifactEntry{
 			Name: e.Name(),
-			Path: filepath.Join(root.RealPath, e.Name()),
+			Path: entryPath,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
@@ -173,6 +183,32 @@ func (s *FSArtifactStore) ReadArtifact(ctx context.Context, root ArtifactRoot, n
 
 	lim := opts.Limits.resolve()
 	dir := filepath.Join(root.RealPath, name)
+
+	// Lstat the artifact directory itself before reading children. readArtifactFile
+	// only Lstats the final file path, which would follow a symlinked parent and
+	// accept files outside the configured root.
+	dirInfo, err := os.Lstat(dir)
+	if err != nil {
+		return nil, &Error{Code: CodeInvalidPath, Op: fsOp + ".read_artifact", Migration: name, Path: safeRenderPath(dir), Err: err}
+	}
+	if dirInfo.Mode()&fs.ModeSymlink != 0 {
+		return nil, &Error{
+			Code:      CodeInvalidPath,
+			Op:        fsOp + ".read_artifact",
+			Migration: name,
+			Path:      safeRenderPath(dir),
+			Err:       fmt.Errorf("symlink artifact directories are not supported"),
+		}
+	}
+	if !dirInfo.IsDir() {
+		return nil, &Error{
+			Code:      CodeInvalidPath,
+			Op:        fsOp + ".read_artifact",
+			Migration: name,
+			Path:      safeRenderPath(dir),
+			Err:       fmt.Errorf("not a directory"),
+		}
+	}
 
 	sql, err := readArtifactFile(ctx, dir, "migration.sql", lim.MaxMigrationSQLBytes)
 	if err != nil {
@@ -306,6 +342,44 @@ func writeFile(path string, data []byte) error {
 		return werr
 	}
 	return cerr
+}
+
+// allowedRootSidecars lists the only root-level sidecar regular files that are
+// silently ignored during artifact discovery, per the artifacts spec.
+var allowedRootSidecars = map[string]struct{}{
+	".gitkeep":  {},
+	".DS_Store": {},
+	"README":    {},
+	"README.md": {},
+}
+
+// classifyArtifactRootSidecar returns nil if name is an explicitly allowed
+// root-level sidecar that should be silently ignored. Otherwise it returns an
+// *Error with the appropriate spec-mandated code (Op and Path are filled in by
+// the caller). fi describes the entry as observed via Lstat.
+func classifyArtifactRootSidecar(name string, fi fs.FileInfo) *Error {
+	// Non-regular non-directory entries (symlinks, sockets, fifos, devices)
+	// fail with invalid_path before any allowlist check.
+	if !fi.Mode().IsRegular() {
+		return &Error{
+			Code: CodeInvalidPath,
+			Err:  fmt.Errorf("not a regular file"),
+		}
+	}
+	if _, ok := allowedRootSidecars[name]; ok {
+		return nil
+	}
+	return &Error{
+		Code: CodeUnsupportedArtifactFormat,
+		Err:  fmt.Errorf("unexpected root-level file %q", name),
+	}
+}
+
+// isReservedStagingDir reports whether name matches the reserved staging-dir
+// pattern used by CreateArtifact (.grizzle-staging-*). Such directories may
+// be left over from interrupted writes and must not be treated as artifacts.
+func isReservedStagingDir(name string) bool {
+	return strings.HasPrefix(name, ".grizzle-staging-")
 }
 
 // validateArtifactName returns an error if name is not a valid single-component

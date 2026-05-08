@@ -136,6 +136,18 @@ func (s *FSSourceStore) ReadSourceFile(_ context.Context, root SourceRoot, relpa
 	lim := opts.Limits.resolve()
 	path := filepath.Join(root.RealPath, relpath)
 
+	// Lstat each path component under root so we reject parent-directory
+	// symlinks. A bare Lstat of the final path follows parent symlinks and
+	// would accept files outside the configured source root.
+	if err := assertNoSymlinkInChain(root.RealPath, relpath); err != nil {
+		return nil, &Error{
+			Code: CodeInvalidPath,
+			Op:   sourceOp + ".read_source_file",
+			Path: safeRenderPath(relpath),
+			Err:  err,
+		}
+	}
+
 	fi, err := os.Lstat(path)
 	if err != nil {
 		return nil, newPathError(sourceOp+".read_source_file", relpath, err)
@@ -174,6 +186,37 @@ func (s *FSSourceStore) ReadSourceFile(_ context.Context, root SourceRoot, relpa
 		return nil, &Error{Code: CodeResourceLimit, Op: sourceOp + ".read_source_file", Path: safeRenderPath(relpath)}
 	}
 	return &SourceFile{RelPath: relpath, Content: data}, nil
+}
+
+// assertNoSymlinkInChain Lstats each parent component of relpath under root
+// and rejects any component that is a symlink. The final component is the
+// caller's responsibility.
+func assertNoSymlinkInChain(root, relpath string) error {
+	clean := filepath.Clean(relpath)
+	if clean == "." {
+		return nil
+	}
+	parts := strings.Split(clean, string(filepath.Separator))
+	current := root
+	for i, part := range parts {
+		if part == "" {
+			continue
+		}
+		current = filepath.Join(current, part)
+		// Only check parent components here; the final component is checked by
+		// the caller (which also enforces regular-file semantics).
+		if i == len(parts)-1 {
+			return nil
+		}
+		fi, err := os.Lstat(current)
+		if err != nil {
+			return err
+		}
+		if fi.Mode()&fs.ModeSymlink != 0 {
+			return fmt.Errorf("symlinks are not supported")
+		}
+	}
+	return nil
 }
 
 // assertSourceContained verifies that relpath, when joined with root, stays

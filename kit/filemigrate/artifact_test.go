@@ -334,6 +334,127 @@ func TestFSArtifactStore_SymlinkArtifactFileRejected(t *testing.T) {
 	}
 }
 
+func TestFSArtifactStore_SymlinkedArtifactDirRejected(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping filesystem test in short mode")
+	}
+	dir := t.TempDir()
+	// Build a fully-formed migration directory outside the configured root.
+	outside := t.TempDir()
+	realArt := filepath.Join(outside, "realart")
+	if err := os.Mkdir(realArt, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(realArt, "migration.sql"), []byte("SELECT 1;"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(realArt, "snapshot.json"), []byte(`{}`), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	// Symlink the artifact dir name under the configured root to the outside dir.
+	linkArt := filepath.Join(dir, "20240101000000_link")
+	if err := os.Symlink(realArt, linkArt); err != nil {
+		t.Skip("symlinks not supported on this platform")
+	}
+
+	store := filemigrate.NewFSArtifactStore()
+	root := mustResolveRoot(t, store, dir, filemigrate.RootReadForCheck)
+
+	_, err := store.ReadArtifact(t.Context(), root, "20240101000000_link", filemigrate.ReadArtifactOptions{})
+	if err == nil {
+		t.Fatal("expected error for symlinked artifact directory")
+	}
+	if !errors.Is(err, filemigrate.ErrInvalidPath) {
+		t.Errorf("expected ErrInvalidPath, got %v", err)
+	}
+
+	// ListArtifacts must also reject the symlinked directory at discovery time.
+	_, listErr := store.ListArtifacts(t.Context(), root, filemigrate.ListArtifactsOptions{})
+	if listErr == nil {
+		t.Fatal("expected ListArtifacts error for symlinked artifact directory")
+	}
+	if !errors.Is(listErr, filemigrate.ErrInvalidPath) {
+		t.Errorf("expected ErrInvalidPath from ListArtifacts, got %v", listErr)
+	}
+}
+
+func TestFSArtifactStore_ListRejectsStrayFiles(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping filesystem test in short mode")
+	}
+	store := filemigrate.NewFSArtifactStore()
+
+	cases := []struct {
+		name     string
+		filename string
+	}{
+		{"sql file", "001.sql"},
+		{"migrations bundle js", "migrations.js"},
+		{"migrations bundle ts", "migrations.ts"},
+		{"migrations bundle mjs", "migrations.mjs"},
+		{"migrations bundle cjs", "migrations.cjs"},
+		{"unknown regular file", "extra.txt"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, tc.filename), []byte("x"), 0o640); err != nil {
+				t.Fatal(err)
+			}
+			root := mustResolveRoot(t, store, dir, filemigrate.RootReadForCheck)
+			_, err := store.ListArtifacts(t.Context(), root, filemigrate.ListArtifactsOptions{})
+			if err == nil {
+				t.Fatalf("expected error for stray %s", tc.filename)
+			}
+			if !errors.Is(err, filemigrate.ErrUnsupportedArtifactFormat) {
+				t.Errorf("expected ErrUnsupportedArtifactFormat for %s, got %v", tc.filename, err)
+			}
+		})
+	}
+}
+
+func TestFSArtifactStore_ListIgnoresAllowedSidecars(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping filesystem test in short mode")
+	}
+	dir := t.TempDir()
+	for _, name := range []string{".gitkeep", ".DS_Store", "README", "README.md"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("x"), 0o640); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store := filemigrate.NewFSArtifactStore()
+	root := mustResolveRoot(t, store, dir, filemigrate.RootEnsureForWrite)
+	mustCreateArtifact(t, store, root, "20240101000000_x", []byte("SELECT 1;"), []byte(`{}`))
+
+	entries, err := store.ListArtifacts(t.Context(), root, filemigrate.ListArtifactsOptions{})
+	if err != nil {
+		t.Fatalf("ListArtifacts: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Name != "20240101000000_x" {
+		t.Errorf("unexpected entries with allowed sidecars: %+v", entries)
+	}
+}
+
+func TestFSArtifactStore_ListIgnoresReservedStagingDir(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping filesystem test in short mode")
+	}
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, ".grizzle-staging-abc"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	store := filemigrate.NewFSArtifactStore()
+	root := mustResolveRoot(t, store, dir, filemigrate.RootReadForCheck)
+	entries, err := store.ListArtifacts(t.Context(), root, filemigrate.ListArtifactsOptions{})
+	if err != nil {
+		t.Fatalf("ListArtifacts: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("expected reserved staging dir to be skipped, got %+v", entries)
+	}
+}
+
 func TestFSArtifactStore_ByteCapEnforced(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping filesystem test in short mode")

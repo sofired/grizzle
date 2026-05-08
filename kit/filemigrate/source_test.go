@@ -281,6 +281,42 @@ func TestFSSourceStore_SymlinkedSubdirRejected(t *testing.T) {
 	}
 }
 
+func TestFSSourceStore_ReadRejectsSymlinkedParent(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping filesystem test in short mode")
+	}
+	dir := t.TempDir()
+	// Create a real subdirectory containing schema.go OUTSIDE the source root.
+	outside := t.TempDir()
+	realSub := filepath.Join(outside, "real")
+	if err := os.Mkdir(realSub, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(realSub, "schema.go"), []byte("package schema"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	// Symlink "linked" under the source root to the outside subdirectory.
+	linked := filepath.Join(dir, "linked")
+	if err := os.Symlink(realSub, linked); err != nil {
+		t.Skip("symlinks not supported on this platform")
+	}
+
+	store := filemigrate.NewFSSourceStore()
+	root, err := store.ResolveSourceRoot(t.Context(), dir)
+	if err != nil {
+		t.Fatalf("ResolveSourceRoot: %v", err)
+	}
+	// ReadSourceFile must reject the parent symlink even though the final
+	// component (schema.go) is a regular file that Lstat alone would accept.
+	_, err = store.ReadSourceFile(t.Context(), root, "linked/schema.go", filemigrate.ReadSourceFileOptions{})
+	if err == nil {
+		t.Fatal("expected error for symlinked parent component")
+	}
+	if !errors.Is(err, filemigrate.ErrInvalidPath) {
+		t.Errorf("expected ErrInvalidPath, got %v", err)
+	}
+}
+
 func TestFSSourceStore_ReadByteCap(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping filesystem test in short mode")
