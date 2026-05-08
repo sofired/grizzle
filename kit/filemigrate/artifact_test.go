@@ -786,3 +786,57 @@ func TestMemArtifactStore_ListEnforcesDirEntryLimit(t *testing.T) {
 		t.Errorf("expected ErrResourceLimit, got %v", err)
 	}
 }
+
+// TestFSArtifactStore_ReadRejectsHardlinkedArtifactFile verifies that
+// ReadArtifact fails with invalid_path when migration.sql or snapshot.json is
+// a hard link to another file. The artifact store contract requires rejecting
+// hardlinks where platform metadata exposes them so a migration directory
+// cannot alias bytes outside the configured root without using a symlink.
+func TestFSArtifactStore_ReadRejectsHardlinkedArtifactFile(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping filesystem test in short mode")
+	}
+
+	cases := []string{"migration.sql", "snapshot.json"}
+	for _, target := range cases {
+		t.Run(target, func(t *testing.T) {
+			dir := t.TempDir()
+			outside := t.TempDir()
+
+			// Build the real artifact bytes outside the configured root.
+			realSrc := filepath.Join(outside, target)
+			if err := os.WriteFile(realSrc, []byte("hardlinked"), 0o640); err != nil {
+				t.Fatal(err)
+			}
+
+			// Build the artifact directory under the root, with one of the
+			// expected files hardlinked from outside and the other a normal
+			// regular file.
+			artDir := filepath.Join(dir, "20240101000000_hl")
+			if err := os.Mkdir(artDir, 0o750); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Link(realSrc, filepath.Join(artDir, target)); err != nil {
+				t.Skipf("hard links not supported on this platform: %v", err)
+			}
+			other := "snapshot.json"
+			if target == "snapshot.json" {
+				other = "migration.sql"
+			}
+			if err := os.WriteFile(filepath.Join(artDir, other), []byte("{}"), 0o640); err != nil {
+				t.Fatal(err)
+			}
+
+			store := filemigrate.NewFSArtifactStore()
+			root := mustResolveRoot(t, store, dir, filemigrate.RootReadForCheck)
+
+			_, err := store.ReadArtifact(t.Context(), root, "20240101000000_hl", filemigrate.ReadArtifactOptions{})
+			if err == nil {
+				t.Fatalf("expected error for hardlinked %s", target)
+			}
+			if !errors.Is(err, filemigrate.ErrInvalidPath) {
+				t.Errorf("expected ErrInvalidPath, got %v", err)
+			}
+		})
+	}
+}

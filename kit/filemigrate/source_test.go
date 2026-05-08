@@ -660,3 +660,39 @@ func TestFSSourceStore_CurrentDirRoot(t *testing.T) {
 		t.Errorf("unexpected content: %q", sf.Content)
 	}
 }
+
+// TestFSSourceStore_HardlinkedFileRejected verifies that ReadSourceFile fails
+// with invalid_path when the requested .go file has more than one hard link.
+// The schema source contract requires rejecting hardlinks where platform
+// metadata exposes them so a file aliased from outside the configured root
+// cannot be ingested even when containment and symlink checks pass.
+func TestFSSourceStore_HardlinkedFileRejected(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping filesystem test in short mode")
+	}
+	dir := t.TempDir()
+	// Create the real schema file outside the configured source root, then
+	// hardlink it under the root. On POSIX, st_nlink is 2 for both entries.
+	outside := t.TempDir()
+	realFile := filepath.Join(outside, "real.go")
+	if err := os.WriteFile(realFile, []byte("package schema"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	hardlinked := filepath.Join(dir, "schema.go")
+	if err := os.Link(realFile, hardlinked); err != nil {
+		t.Skipf("hard links not supported on this platform: %v", err)
+	}
+
+	store := filemigrate.NewFSSourceStore()
+	root, err := store.ResolveSourceRoot(t.Context(), dir)
+	if err != nil {
+		t.Fatalf("ResolveSourceRoot: %v", err)
+	}
+	_, err = store.ReadSourceFile(t.Context(), root, "schema.go", filemigrate.ReadSourceFileOptions{})
+	if err == nil {
+		t.Fatal("expected error for hardlinked source file")
+	}
+	if !errors.Is(err, filemigrate.ErrInvalidPath) {
+		t.Errorf("expected ErrInvalidPath, got %v", err)
+	}
+}

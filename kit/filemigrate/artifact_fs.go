@@ -335,6 +335,9 @@ func readArtifactFile(ctx context.Context, dir, name string, maxBytes int64) ([]
 	if !fi.Mode().IsRegular() {
 		return nil, fmt.Errorf("%s: not a regular file", name)
 	}
+	if hasExtraHardLinks(fi) {
+		return nil, fmt.Errorf("%s: hardlinks are not supported", name)
+	}
 	if fi.Size() > maxBytes {
 		return nil, fmt.Errorf("%s: file size %d exceeds limit %d: %w", name, fi.Size(), maxBytes, ErrResourceLimit)
 	}

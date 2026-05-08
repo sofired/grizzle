@@ -206,6 +206,14 @@ func (s *FSSourceStore) ReadSourceFile(ctx context.Context, root SourceRoot, rel
 			Err:  fmt.Errorf("not a regular file"),
 		}
 	}
+	if hasExtraHardLinks(fi) {
+		return nil, &Error{
+			Code: CodeInvalidPath,
+			Op:   sourceOp + ".read_source_file",
+			Path: safeRenderPath(relpath),
+			Err:  fmt.Errorf("hardlinks are not supported"),
+		}
+	}
 	if fi.Size() > lim.MaxSchemaSourceFileBytes {
 		return nil, &Error{Code: CodeResourceLimit, Op: sourceOp + ".read_source_file", Path: safeRenderPath(relpath)}
 	}
