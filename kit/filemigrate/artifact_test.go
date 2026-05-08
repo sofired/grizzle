@@ -8,6 +8,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 
 	"github.com/sofired/grizzle/kit/filemigrate"
@@ -378,6 +379,26 @@ func TestFSArtifactStore_SymlinkedArtifactDirRejected(t *testing.T) {
 	}
 }
 
+func TestFSArtifactStore_ReadRejectsRegularFileAtArtifactPath(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping filesystem test in short mode")
+	}
+	dir := t.TempDir()
+	// Create a regular file (not a directory) at the would-be artifact path.
+	if err := os.WriteFile(filepath.Join(dir, "20240101000000_file"), []byte("x"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	store := filemigrate.NewFSArtifactStore()
+	root := mustResolveRoot(t, store, dir, filemigrate.RootReadForCheck)
+	_, err := store.ReadArtifact(t.Context(), root, "20240101000000_file", filemigrate.ReadArtifactOptions{})
+	if err == nil {
+		t.Fatal("expected error when artifact path is a regular file")
+	}
+	if !errors.Is(err, filemigrate.ErrInvalidPath) {
+		t.Errorf("expected ErrInvalidPath, got %v", err)
+	}
+}
+
 func TestFSArtifactStore_ListRejectsStrayFiles(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping filesystem test in short mode")
@@ -410,6 +431,32 @@ func TestFSArtifactStore_ListRejectsStrayFiles(t *testing.T) {
 				t.Errorf("expected ErrUnsupportedArtifactFormat for %s, got %v", tc.filename, err)
 			}
 		})
+	}
+}
+
+func TestFSArtifactStore_ListRejectsNonRegularSidecar(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping filesystem test in short mode")
+	}
+	dir := t.TempDir()
+	fifoPath := filepath.Join(dir, "fifo")
+	if err := syscall.Mkfifo(fifoPath, 0o640); err != nil {
+		// Mkfifo is not portable to Windows; skip if unsupported.
+		t.Skipf("mkfifo not supported on this platform: %v", err)
+	}
+	store := filemigrate.NewFSArtifactStore()
+	root := mustResolveRoot(t, store, dir, filemigrate.RootReadForCheck)
+	_, err := store.ListArtifacts(t.Context(), root, filemigrate.ListArtifactsOptions{})
+	if err == nil {
+		t.Fatal("expected error for non-regular sidecar (FIFO)")
+	}
+	// Spec: non-regular non-directory entries fail with invalid_path,
+	// distinct from the unsupported_artifact_format used for unknown regular files.
+	if !errors.Is(err, filemigrate.ErrInvalidPath) {
+		t.Errorf("expected ErrInvalidPath, got %v", err)
+	}
+	if errors.Is(err, filemigrate.ErrUnsupportedArtifactFormat) {
+		t.Errorf("FIFO must not be classified as ErrUnsupportedArtifactFormat: %v", err)
 	}
 }
 

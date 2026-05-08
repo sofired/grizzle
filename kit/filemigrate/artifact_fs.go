@@ -128,6 +128,16 @@ func (s *FSArtifactStore) ListArtifacts(ctx context.Context, root ArtifactRoot, 
 		if statErr != nil {
 			return nil, newPathError(fsOp+".list_artifacts", entryPath, statErr)
 		}
+		// Symlinks (whether they target a file or directory) are rejected with
+		// an explicit message so the failure mode is clear to operators.
+		if fi.Mode()&fs.ModeSymlink != 0 {
+			return nil, &Error{
+				Code: CodeInvalidPath,
+				Op:   fsOp + ".list_artifacts",
+				Path: safeRenderPath(entryPath),
+				Err:  fmt.Errorf("symlinks are not supported"),
+			}
+		}
 		if !fi.IsDir() {
 			if err := classifyArtifactRootSidecar(e.Name(), fi); err != nil {
 				err.Op = fsOp + ".list_artifacts"
@@ -140,15 +150,6 @@ func (s *FSArtifactStore) ListArtifacts(ctx context.Context, root ArtifactRoot, 
 		// ignored so they do not pollute discovery or trigger validation errors.
 		if isReservedStagingDir(e.Name()) {
 			continue
-		}
-		// Reject symlinked directories using Lstat.
-		if fi.Mode()&fs.ModeSymlink != 0 {
-			return nil, &Error{
-				Code: CodeInvalidPath,
-				Op:   fsOp + ".list_artifacts",
-				Path: safeRenderPath(entryPath),
-				Err:  fmt.Errorf("symlink artifact directories are not supported"),
-			}
 		}
 		out = append(out, ArtifactEntry{
 			Name: e.Name(),
@@ -184,9 +185,10 @@ func (s *FSArtifactStore) ReadArtifact(ctx context.Context, root ArtifactRoot, n
 	lim := opts.Limits.resolve()
 	dir := filepath.Join(root.RealPath, name)
 
-	// Lstat the artifact directory itself before reading children. readArtifactFile
-	// only Lstats the final file path, which would follow a symlinked parent and
-	// accept files outside the configured root.
+	// Lstat the artifact directory entry itself before reading children.
+	// readArtifactFile only Lstats the final file path, so a directory entry
+	// that is a symlink (pointing outside the configured root) would be
+	// silently followed when opening migration.sql / snapshot.json.
 	dirInfo, err := os.Lstat(dir)
 	if err != nil {
 		return nil, &Error{Code: CodeInvalidPath, Op: fsOp + ".read_artifact", Migration: name, Path: safeRenderPath(dir), Err: err}
@@ -356,10 +358,12 @@ var allowedRootSidecars = map[string]struct{}{
 // classifyArtifactRootSidecar returns nil if name is an explicitly allowed
 // root-level sidecar that should be silently ignored. Otherwise it returns an
 // *Error with the appropriate spec-mandated code (Op and Path are filled in by
-// the caller). fi describes the entry as observed via Lstat.
+// the caller). fi describes the entry as observed via Lstat. Callers must
+// have already filtered out symlinks; the remaining non-regular cases here
+// are sockets, FIFOs, and device nodes.
 func classifyArtifactRootSidecar(name string, fi fs.FileInfo) *Error {
-	// Non-regular non-directory entries (symlinks, sockets, fifos, devices)
-	// fail with invalid_path before any allowlist check.
+	// Non-regular non-directory entries (sockets, fifos, devices) fail with
+	// invalid_path before any allowlist check.
 	if !fi.Mode().IsRegular() {
 		return &Error{
 			Code: CodeInvalidPath,

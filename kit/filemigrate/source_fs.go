@@ -188,9 +188,10 @@ func (s *FSSourceStore) ReadSourceFile(_ context.Context, root SourceRoot, relpa
 	return &SourceFile{RelPath: relpath, Content: data}, nil
 }
 
-// assertNoSymlinkInChain Lstats each parent component of relpath under root
-// and rejects any component that is a symlink. The final component is the
-// caller's responsibility.
+// assertNoSymlinkInChain Lstats every component of relpath under root except
+// the final one and returns an error if any is a symlink. The caller is
+// responsible for Lstating the final component (and rejecting it if it is
+// itself a symlink).
 func assertNoSymlinkInChain(root, relpath string) error {
 	clean := filepath.Clean(relpath)
 	if clean == "." {
@@ -199,8 +200,10 @@ func assertNoSymlinkInChain(root, relpath string) error {
 	parts := strings.Split(clean, string(filepath.Separator))
 	current := root
 	for i, part := range parts {
+		// filepath.Clean must not produce empty components from a non-absolute
+		// relpath; if one appears we fail closed rather than skip silently.
 		if part == "" {
-			continue
+			return fmt.Errorf("invalid empty path component")
 		}
 		current = filepath.Join(current, part)
 		// Only check parent components here; the final component is checked by
