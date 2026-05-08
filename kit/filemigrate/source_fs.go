@@ -142,10 +142,13 @@ func (s *FSSourceStore) ListSourceFiles(ctx context.Context, root SourceRoot, op
 			// §static schema loader) only treats unsafe metadata as fatal
 			// for discovered .go files; a non-.go sidecar that happens to
 			// be a FIFO, socket, or device entry must not break discovery
-			// of the schema root. The hard-link check MUST also come
-			// after this return so that a hard-linked sidecar (README.md,
-			// .gitkeep, lockfiles) does not fail discovery; moving the
-			// hasExtraHardLinks call above this guard would break
+			// of the schema root. The IsRegular() check below therefore
+			// runs only for .go files — covered by
+			// TestFSSourceStore_NonRegularNonGoSidecarIgnored. The
+			// hardlink check also comes after this return so that a
+			// hard-linked sidecar (README.md, .gitkeep, lockfiles) does
+			// not fail discovery; moving the hasExtraHardLinks call above
+			// this guard would break
 			// TestFSSourceStore_HardlinkedNonGoFileIgnored.
 			return nil
 		}

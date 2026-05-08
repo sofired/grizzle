@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"io/fs"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -62,8 +63,9 @@ func (s *MemSourceStore) ResolveSourceRoot(ctx context.Context, dir string) (Sou
 // The build context uses a custom OpenFile that reads seeded bytes from the
 // in-memory map, so constraints declared inside file bodies are evaluated
 // the same way the production filesystem store evaluates them.
-// Build-constraint parse errors fail with CodeUnsupportedSchemaConstruct;
-// the diagnostic uses a generic message so build-line text is not echoed.
+// Build-constraint parse errors fail with CodeUnsupportedSchemaConstruct
+// per spec line 1420; the diagnostic uses a generic message so build-line
+// text is not echoed (spec line 1415).
 func (s *MemSourceStore) ListSourceFiles(ctx context.Context, root SourceRoot, opts ListSourceFilesOptions) ([]string, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -76,7 +78,10 @@ func (s *MemSourceStore) ListSourceFiles(ctx context.Context, root SourceRoot, o
 
 	// Snapshot files matching the prefix under the lock so MatchFile (which
 	// invokes OpenFile during constraint evaluation) does not need to
-	// re-acquire s.mu — re-entrancy on a sync.Mutex would deadlock.
+	// re-acquire s.mu — re-entrancy on a sync.Mutex would deadlock. The
+	// map values are []byte slice headers; AddFile stores bytes.Clone'd
+	// slices and never mutates an existing slice in place, so reading from
+	// the snapshot after the lock is released is safe.
 	s.mu.Lock()
 	snapshot := make(map[string][]byte, len(s.files))
 	for k, v := range s.files {
@@ -90,16 +95,18 @@ func (s *MemSourceStore) ListSourceFiles(ctx context.Context, root SourceRoot, o
 	ctxt.OpenFile = func(path string) (io.ReadCloser, error) {
 		// MatchFile passes filepath.Join(dir, name) here. We always invoke
 		// MatchFile with dir under root.RealPath, so resolve back to a key
-		// in our prefix-bounded snapshot.
+		// in our prefix-bounded snapshot. Use the standard *fs.PathError /
+		// fs.ErrNotExist sentinel so go/build can distinguish "file absent"
+		// from a real I/O error.
 		rel, err := filepath.Rel(root.RealPath, path)
 		if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			return nil, fmt.Errorf("file not found")
+			return nil, &fs.PathError{Op: "open", Path: path, Err: fs.ErrNotExist}
 		}
 		key := root.RealPath + "/" + filepath.ToSlash(rel)
 		if data, ok := snapshot[key]; ok {
 			return io.NopCloser(bytes.NewReader(data)), nil
 		}
-		return nil, fmt.Errorf("file not found")
+		return nil, &fs.PathError{Op: "open", Path: path, Err: fs.ErrNotExist}
 	}
 
 	var out []string

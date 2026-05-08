@@ -895,6 +895,40 @@ func TestFSSourceStore_NonRegularNonGoSidecarIgnored(t *testing.T) {
 	}
 }
 
+// TestFSSourceStore_GoNamedFifoRejected verifies that the regular-file
+// check still fires for .go-suffixed entries even after the reorder that
+// allowed non-.go FIFO sidecars to be skipped silently. A .go file that
+// is actually a FIFO (or any other non-regular kind) must still surface
+// CodeInvalidPath so a future refactor that bypassed the regular-file
+// check for .go inputs would be caught here.
+func TestFSSourceStore_GoNamedFifoRejected(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping filesystem test in short mode")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("FIFOs not supported on this platform")
+	}
+
+	dir := t.TempDir()
+	fifoPath := filepath.Join(dir, "schema.go")
+	if err := makeFIFO(fifoPath); err != nil {
+		t.Skipf("FIFO creation not supported: %v", err)
+	}
+
+	store := filemigrate.NewFSSourceStore()
+	root, err := store.ResolveSourceRoot(t.Context(), dir)
+	if err != nil {
+		t.Fatalf("ResolveSourceRoot: %v", err)
+	}
+	_, err = store.ListSourceFiles(t.Context(), root, filemigrate.ListSourceFilesOptions{})
+	if err == nil {
+		t.Fatal("expected error for FIFO at .go path")
+	}
+	if !errors.Is(err, filemigrate.ErrInvalidPath) {
+		t.Errorf("expected ErrInvalidPath, got %v", err)
+	}
+}
+
 // TestFSSourceStore_HardlinkedNonGoFileIgnored verifies that hard-linked
 // non-.go sidecar files (e.g. README.md, .gitkeep) under the source root do
 // NOT fail listing. Non-.go files are silently skipped by ListSourceFiles, so

@@ -138,8 +138,8 @@ func TestErrorString(t *testing.T) {
 	// migration field is rendered with bounded length and control-char
 	// escaping so a caller-supplied attacker-controlled name cannot inject
 	// newlines, terminal controls, or unbounded text into CLI logs. The
-	// raw value remains accessible via errors.As (covered in TestErrorIs);
-	// only the Error() output is sanitized.
+	// raw value remains accessible via errors.As; only the Error() output
+	// is sanitized — the subtest below also asserts that contract.
 	t.Run("migration is escaped and bounded", func(t *testing.T) {
 		// Control character must not appear literally in the rendered string.
 		err := &filemigrate.Error{
@@ -153,6 +153,30 @@ func TestErrorString(t *testing.T) {
 		}
 		if !strings.Contains(s, `migration="20240101_init\nINJECTED"`) {
 			t.Errorf("expected escaped migration field, got %q", s)
+		}
+		// errors.As must still surface the raw, unescaped value so callers
+		// classifying errors programmatically see exactly what was passed in.
+		var recovered *filemigrate.Error
+		if !errors.As(err, &recovered) {
+			t.Fatal("errors.As failed to recover *Error")
+		}
+		if recovered.Migration != "20240101_init\nINJECTED" {
+			t.Errorf("errors.As Migration: got %q, want raw unescaped value", recovered.Migration)
+		}
+	})
+
+	// Carriage-return overwrite and ANSI CSI sequences are well-known
+	// log-injection vectors. Verify they are rendered as escape sequences,
+	// never as literal control bytes.
+	t.Run("migration carriage return and ANSI escape are rendered safe", func(t *testing.T) {
+		err := &filemigrate.Error{
+			Code:      filemigrate.CodeDuplicateMigration,
+			Op:        "op",
+			Migration: "name\r\x1b[2J\x00null",
+		}
+		s := err.Error()
+		if strings.ContainsAny(s, "\r\x1b\x00") {
+			t.Errorf("rendered error contains a literal control byte: %q", s)
 		}
 	})
 
@@ -174,6 +198,27 @@ func TestErrorString(t *testing.T) {
 		// must be far shorter than the raw 2000+ chars input.
 		if len(s) > 1024 {
 			t.Errorf("rendered error length %d exceeds reasonable cap", len(s))
+		}
+	})
+
+	// Multibyte UTF-8 truncation must walk back to a rune boundary, not split
+	// a codepoint mid-sequence. The CJK character below is 3 bytes in UTF-8;
+	// when it is positioned to straddle the byte cap, the truncated string
+	// must remain valid UTF-8.
+	t.Run("migration with multibyte runes truncates at rune boundary", func(t *testing.T) {
+		// 3-byte CJK character; 90 of them = 270 bytes (exceeds the 256-byte cap).
+		long := strings.Repeat("中", 90)
+		err := &filemigrate.Error{
+			Code:      filemigrate.CodeDuplicateMigration,
+			Op:        "op",
+			Migration: long,
+		}
+		s := err.Error()
+		// %q emits invalid UTF-8 bytes as \xNN escapes. If truncation split
+		// a codepoint, the rendered output would contain \x escape sequences
+		// rather than the literal CJK character.
+		if strings.Contains(s, `\x`) {
+			t.Errorf("rendered output contains \\x escape — truncation split a UTF-8 codepoint: %q", s)
 		}
 	})
 }

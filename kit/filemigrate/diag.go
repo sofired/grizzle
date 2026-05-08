@@ -3,6 +3,7 @@ package filemigrate
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
 )
 
 // ErrorCode is a stable string code that classifies a filemigrate error.
@@ -129,8 +130,8 @@ type Error struct {
 	Op   string
 	Path string // safe-rendered, bounded, control chars escaped
 	// Migration holds the raw caller-supplied identifier so errors.As
-	// consumers see the value they passed in. It is bounded and
-	// control-char-escaped at Error() rendering time via safeRenderName,
+	// consumers see the value they passed in. It is control-char-escaped
+	// and length-bounded at Error() rendering time via safeRenderName,
 	// so attacker-controlled names cannot inject newlines or terminal
 	// controls into CLI logs.
 	Migration string
@@ -268,12 +269,13 @@ func newPathError(op, path string, cause error) *Error {
 // safeRenderPath returns a version of p safe for inclusion in Error.Path or
 // Diagnostic.Path. It escapes control characters and truncates overly long
 // values so they cannot be used as terminal-control injection vectors.
+//
+// The cap is applied at a UTF-8 rune boundary so multibyte sequences are not
+// split mid-codepoint; %q would render any orphaned bytes as \xNN escapes
+// (still safe), but truncating cleanly produces a more readable diagnostic.
 func safeRenderPath(p string) string {
 	const maxLen = 512
-	if len(p) > maxLen {
-		p = p[:maxLen] + "…"
-	}
-	return fmt.Sprintf("%q", p)
+	return fmt.Sprintf("%q", truncateAtRuneBoundary(p, maxLen))
 }
 
 // safeRenderName returns a version of n safe for inclusion in rendered
@@ -283,8 +285,20 @@ func safeRenderPath(p string) string {
 // newlines, terminal controls, or unbounded text into CLI logs.
 func safeRenderName(n string) string {
 	const maxLen = 256
-	if len(n) > maxLen {
-		n = n[:maxLen] + "…"
+	return fmt.Sprintf("%q", truncateAtRuneBoundary(n, maxLen))
+}
+
+// truncateAtRuneBoundary returns s capped at maxBytes bytes, walked back to
+// the nearest rune boundary so a multibyte UTF-8 sequence is never split,
+// with a trailing horizontal ellipsis appended when truncation occurred.
+// Inputs at or under maxBytes are returned unchanged.
+func truncateAtRuneBoundary(s string, maxBytes int) string {
+	if len(s) <= maxBytes {
+		return s
 	}
-	return fmt.Sprintf("%q", n)
+	end := maxBytes
+	for end > 0 && !utf8.RuneStart(s[end]) {
+		end--
+	}
+	return s[:end] + "…"
 }
