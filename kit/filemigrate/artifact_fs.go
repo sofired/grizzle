@@ -1,0 +1,341 @@
+package filemigrate
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"io"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+)
+
+// FSArtifactStore is the production ArtifactStore backed by the real filesystem.
+// All metadata checks use Lstat so symlinks are never followed.
+type FSArtifactStore struct{}
+
+// NewFSArtifactStore returns the production filesystem-backed ArtifactStore.
+func NewFSArtifactStore() *FSArtifactStore {
+	return &FSArtifactStore{}
+}
+
+var _ ArtifactStore = (*FSArtifactStore)(nil)
+
+const fsOp = "artifact_store"
+
+// ResolveRoot resolves dir against the real filesystem.
+// It rejects symlinks, non-directory entries, and paths with unsafe components.
+func (s *FSArtifactStore) ResolveRoot(ctx context.Context, dir string, opts ResolveArtifactRootOptions) (ArtifactRoot, error) {
+	if err := ctx.Err(); err != nil {
+		return ArtifactRoot{}, err
+	}
+	if dir == "" {
+		return ArtifactRoot{}, newError(CodeInvalidConfig, fsOp+".resolve_root")
+	}
+
+	fi, err := os.Lstat(dir)
+	if os.IsNotExist(err) {
+		switch opts.Mode {
+		case RootReadForCheck:
+			return ArtifactRoot{Configured: dir, RealPath: dir, State: RootAbsent}, nil
+		case RootReadForMigrate:
+			return ArtifactRoot{}, &Error{
+				Code: CodeEmptyMigrationsDir,
+				Op:   fsOp + ".resolve_root",
+				Path: safeRenderPath(dir),
+			}
+		case RootEnsureForWrite:
+			if mkErr := os.MkdirAll(dir, 0o750); mkErr != nil {
+				return ArtifactRoot{}, &Error{
+					Code: CodeInvalidPath,
+					Op:   fsOp + ".resolve_root",
+					Path: safeRenderPath(dir),
+					Err:  fmt.Errorf("mkdir: %w", mkErr),
+				}
+			}
+			real, realErr := filepath.EvalSymlinks(dir)
+			if realErr != nil {
+				return ArtifactRoot{}, newPathError(fsOp+".resolve_root", dir, realErr)
+			}
+			return ArtifactRoot{Configured: dir, RealPath: real, State: RootCreated}, nil
+		default:
+			return ArtifactRoot{}, newError(CodeInvalidConfig, fsOp+".resolve_root")
+		}
+	}
+	if err != nil {
+		return ArtifactRoot{}, newPathError(fsOp+".resolve_root", dir, err)
+	}
+	if fi.Mode()&fs.ModeSymlink != 0 {
+		return ArtifactRoot{}, &Error{
+			Code: CodeInvalidPath,
+			Op:   fsOp + ".resolve_root",
+			Path: safeRenderPath(dir),
+			Err:  fmt.Errorf("symlink roots are not supported"),
+		}
+	}
+	if !fi.IsDir() {
+		return ArtifactRoot{}, &Error{
+			Code: CodeInvalidPath,
+			Op:   fsOp + ".resolve_root",
+			Path: safeRenderPath(dir),
+			Err:  fmt.Errorf("not a directory"),
+		}
+	}
+	real, realErr := filepath.EvalSymlinks(dir)
+	if realErr != nil {
+		return ArtifactRoot{}, newPathError(fsOp+".resolve_root", dir, realErr)
+	}
+	return ArtifactRoot{Configured: dir, RealPath: real, State: RootExisting}, nil
+}
+
+// ListArtifacts returns migration directory entries directly under root,
+// sorted lexicographically. It enforces MaxArtifactDirEntries and MaxArtifacts.
+func (s *FSArtifactStore) ListArtifacts(ctx context.Context, root ArtifactRoot, opts ListArtifactsOptions) ([]ArtifactEntry, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if root.State == RootAbsent {
+		return nil, nil
+	}
+
+	lim := opts.Limits.resolve()
+	entries, err := os.ReadDir(root.RealPath)
+	if err != nil {
+		return nil, &Error{
+			Code: CodeInvalidPath,
+			Op:   fsOp + ".list_artifacts",
+			Path: safeRenderPath(root.RealPath),
+			Err:  err,
+		}
+	}
+	if len(entries) > lim.MaxArtifactDirEntries {
+		return nil, &Error{
+			Code:      CodeResourceLimit,
+			Op:        fsOp + ".list_artifacts",
+			Migration: fmt.Sprintf("dir_entries=%d limit=%d", len(entries), lim.MaxArtifactDirEntries),
+		}
+	}
+
+	var out []ArtifactEntry
+	for _, e := range entries {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		// Reject non-directories and hidden/special entries.
+		if !e.IsDir() {
+			continue
+		}
+		// Reject symlinked directories using Lstat.
+		fi, statErr := os.Lstat(filepath.Join(root.RealPath, e.Name()))
+		if statErr != nil {
+			return nil, newPathError(fsOp+".list_artifacts", filepath.Join(root.RealPath, e.Name()), statErr)
+		}
+		if fi.Mode()&fs.ModeSymlink != 0 {
+			return nil, &Error{
+				Code: CodeInvalidPath,
+				Op:   fsOp + ".list_artifacts",
+				Path: safeRenderPath(filepath.Join(root.RealPath, e.Name())),
+				Err:  fmt.Errorf("symlink artifact directories are not supported"),
+			}
+		}
+		out = append(out, ArtifactEntry{
+			Name: e.Name(),
+			Path: filepath.Join(root.RealPath, e.Name()),
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+
+	if len(out) > lim.MaxArtifacts {
+		return nil, &Error{
+			Code:      CodeResourceLimit,
+			Op:        fsOp + ".list_artifacts",
+			Migration: fmt.Sprintf("artifacts=%d limit=%d", len(out), lim.MaxArtifacts),
+		}
+	}
+	return out, nil
+}
+
+// ReadArtifact reads migration.sql and snapshot.json from the named migration
+// directory. It uses Lstat for all metadata, rejects symlinks, enforces byte
+// caps, and returns caller-owned copies.
+func (s *FSArtifactStore) ReadArtifact(ctx context.Context, root ArtifactRoot, name string, opts ReadArtifactOptions) (*LoadedArtifact, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := validateArtifactName(name); err != nil {
+		return nil, &Error{Code: CodeInvalidMigrationName, Op: fsOp + ".read_artifact", Migration: name, Err: err}
+	}
+	if err := assertContained(root.RealPath, name); err != nil {
+		return nil, &Error{Code: CodeInvalidPath, Op: fsOp + ".read_artifact", Path: safeRenderPath(name), Err: err}
+	}
+
+	lim := opts.Limits.resolve()
+	dir := filepath.Join(root.RealPath, name)
+
+	sql, err := readArtifactFile(ctx, dir, "migration.sql", lim.MaxMigrationSQLBytes)
+	if err != nil {
+		return nil, &Error{Code: CodeInvalidPath, Op: fsOp + ".read_artifact", Migration: name, Err: err}
+	}
+	snap, err := readArtifactFile(ctx, dir, "snapshot.json", lim.MaxSnapshotJSONBytes)
+	if err != nil {
+		return nil, &Error{Code: CodeInvalidPath, Op: fsOp + ".read_artifact", Migration: name, Err: err}
+	}
+
+	digests := computeArtifactDigest(sql, snap)
+	return &LoadedArtifact{
+		Name:         name,
+		Dir:          dir,
+		MigrationSQL: sql,
+		SnapshotJSON: snap,
+		Digests:      digests,
+	}, nil
+}
+
+// CreateArtifact atomically creates a new migration artifact directory under
+// root using a temporary sibling + rename approach.
+func (s *FSArtifactStore) CreateArtifact(ctx context.Context, root ArtifactRoot, artifact NewArtifact, opts CreateArtifactOptions) (*LoadedArtifact, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := validateArtifactName(artifact.Name); err != nil {
+		return nil, &Error{Code: CodeInvalidMigrationName, Op: fsOp + ".create_artifact", Migration: artifact.Name, Err: err}
+	}
+	if err := assertContained(root.RealPath, artifact.Name); err != nil {
+		return nil, &Error{Code: CodeInvalidPath, Op: fsOp + ".create_artifact", Path: safeRenderPath(artifact.Name), Err: err}
+	}
+
+	lim := opts.Limits.resolve()
+	if int64(len(artifact.MigrationSQL)) > lim.MaxMigrationSQLBytes {
+		return nil, &Error{Code: CodeResourceLimit, Op: fsOp + ".create_artifact", Migration: artifact.Name}
+	}
+	if int64(len(artifact.SnapshotJSON)) > lim.MaxSnapshotJSONBytes {
+		return nil, &Error{Code: CodeResourceLimit, Op: fsOp + ".create_artifact", Migration: artifact.Name}
+	}
+
+	target := filepath.Join(root.RealPath, artifact.Name)
+	// Fail if a directory already exists with this name.
+	if _, err := os.Lstat(target); err == nil {
+		return nil, &Error{Code: CodeDuplicateMigration, Op: fsOp + ".create_artifact", Migration: artifact.Name}
+	}
+
+	// Stage writes in a temporary sibling directory, then rename atomically.
+	tmp, err := os.MkdirTemp(root.RealPath, ".grizzle-staging-*")
+	if err != nil {
+		return nil, &Error{Code: CodeInvalidPath, Op: fsOp + ".create_artifact", Migration: artifact.Name, Err: err}
+	}
+	// Clean up the temp dir on any failure path.
+	committed := false
+	defer func() {
+		if !committed {
+			_ = os.RemoveAll(tmp)
+		}
+	}()
+
+	if err := writeFile(filepath.Join(tmp, "migration.sql"), artifact.MigrationSQL); err != nil {
+		return nil, &Error{Code: CodeInvalidPath, Op: fsOp + ".create_artifact", Migration: artifact.Name, Err: err}
+	}
+	if err := writeFile(filepath.Join(tmp, "snapshot.json"), artifact.SnapshotJSON); err != nil {
+		return nil, &Error{Code: CodeInvalidPath, Op: fsOp + ".create_artifact", Migration: artifact.Name, Err: err}
+	}
+
+	if err := os.Rename(tmp, target); err != nil {
+		return nil, &Error{Code: CodeInvalidPath, Op: fsOp + ".create_artifact", Migration: artifact.Name, Err: err}
+	}
+	committed = true
+
+	digests := computeArtifactDigest(artifact.MigrationSQL, artifact.SnapshotJSON)
+	sql := bytes.Clone(artifact.MigrationSQL)
+	snap := bytes.Clone(artifact.SnapshotJSON)
+	return &LoadedArtifact{
+		Name:         artifact.Name,
+		Dir:          target,
+		MigrationSQL: sql,
+		SnapshotJSON: snap,
+		Digests:      digests,
+	}, nil
+}
+
+// readArtifactFile reads path using Lstat (no follow), validates it is a
+// regular file, and reads at most maxBytes bytes. Returns a caller-owned copy.
+func readArtifactFile(ctx context.Context, dir, name string, maxBytes int64) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	path := filepath.Join(dir, name)
+	fi, err := os.Lstat(path)
+	if err != nil {
+		return nil, fmt.Errorf("lstat %s: %w", name, err)
+	}
+	if fi.Mode()&fs.ModeSymlink != 0 {
+		return nil, fmt.Errorf("%s: symlinks are not supported", name)
+	}
+	if !fi.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s: not a regular file", name)
+	}
+	if fi.Size() > maxBytes {
+		return nil, fmt.Errorf("%s: file size %d exceeds limit %d", name, fi.Size(), maxBytes)
+	}
+
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("open %s: %w", name, err)
+	}
+	defer f.Close()
+
+	data, err := io.ReadAll(io.LimitReader(f, maxBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", name, err)
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, fmt.Errorf("%s: content exceeds limit %d", name, maxBytes)
+	}
+	return data, nil
+}
+
+// writeFile writes data to path, creating or truncating the file.
+func writeFile(path string, data []byte) error {
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	_, werr := f.Write(data)
+	cerr := f.Close()
+	if werr != nil {
+		return werr
+	}
+	return cerr
+}
+
+// validateArtifactName returns an error if name is not a valid single-component
+// migration directory name. It rejects empty names, path separators, dot
+// segments, absolute paths, and names that would escape the root.
+func validateArtifactName(name string) error {
+	if name == "" {
+		return fmt.Errorf("name must not be empty")
+	}
+	if filepath.IsAbs(name) {
+		return fmt.Errorf("name must not be an absolute path")
+	}
+	if strings.ContainsAny(name, `/\`) {
+		return fmt.Errorf("name must not contain path separators")
+	}
+	if name == "." || name == ".." {
+		return fmt.Errorf("name must not be a dot segment")
+	}
+	if strings.HasPrefix(name, ".") {
+		return fmt.Errorf("name must not start with a dot")
+	}
+	return nil
+}
+
+// assertContained ensures that name, when joined with root, does not escape
+// root via path traversal. name must already have passed validateArtifactName.
+func assertContained(root, name string) error {
+	full := filepath.Join(root, name)
+	if !strings.HasPrefix(full+string(filepath.Separator), root+string(filepath.Separator)) {
+		return fmt.Errorf("path escapes root")
+	}
+	return nil
+}
