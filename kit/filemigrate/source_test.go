@@ -664,7 +664,7 @@ func TestFSSourceStore_CurrentDirRoot(t *testing.T) {
 // TestFSSourceStore_HardlinkedFileRejected verifies that both ReadSourceFile
 // and ListSourceFiles fail with invalid_path when a .go file under the
 // configured source root has more than one hard link. The schema source
-// contract requires rejecting hardlinks where platform metadata exposes them
+// contract requires rejecting hard links where platform metadata exposes them
 // so a file aliased from outside the configured root cannot be ingested or
 // enumerated even when containment and symlink checks pass.
 func TestFSSourceStore_HardlinkedFileRejected(t *testing.T) {

@@ -121,9 +121,12 @@ func (s *FSSourceStore) ListSourceFiles(ctx context.Context, root SourceRoot, op
 			}
 		}
 		if !strings.HasSuffix(path, ".go") {
-			// Non-.go files are silently skipped; the hardlink check
-			// must follow the suffix filter so a hard-linked sidecar
-			// (README.md, .gitkeep, lockfiles) does not fail discovery.
+			// Non-.go files are silently skipped; the hard-link check
+			// MUST come after this return so that a hard-linked sidecar
+			// (README.md, .gitkeep, lockfiles) does not fail discovery
+			// of the entire source root. Moving the hasExtraHardLinks
+			// call above this guard would break
+			// TestFSSourceStore_HardlinkedNonGoFileIgnored.
 			return nil
 		}
 		if hasExtraHardLinks(fi) {
@@ -131,7 +134,7 @@ func (s *FSSourceStore) ListSourceFiles(ctx context.Context, root SourceRoot, op
 				Code: CodeInvalidPath,
 				Op:   sourceOp + ".list_source_files",
 				Path: safeRenderPath(path),
-				Err:  fmt.Errorf("hardlinks are not supported"),
+				Err:  fmt.Errorf("hard links are not supported"),
 			}
 		}
 		rel, relErr := filepath.Rel(root.RealPath, path)
@@ -222,7 +225,7 @@ func (s *FSSourceStore) ReadSourceFile(ctx context.Context, root SourceRoot, rel
 			Code: CodeInvalidPath,
 			Op:   sourceOp + ".read_source_file",
 			Path: safeRenderPath(relpath),
-			Err:  fmt.Errorf("hardlinks are not supported"),
+			Err:  fmt.Errorf("hard links are not supported"),
 		}
 	}
 	if fi.Size() > lim.MaxSchemaSourceFileBytes {

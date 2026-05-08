@@ -790,7 +790,7 @@ func TestMemArtifactStore_ListEnforcesDirEntryLimit(t *testing.T) {
 // TestFSArtifactStore_ReadRejectsHardlinkedArtifactFile verifies that
 // ReadArtifact fails with invalid_path when migration.sql or snapshot.json is
 // a hard link to another file. The artifact store contract requires rejecting
-// hardlinks where platform metadata exposes them so a migration directory
+// hard links where platform metadata exposes them so a migration directory
 // cannot alias bytes outside the configured root without using a symlink.
 func TestFSArtifactStore_ReadRejectsHardlinkedArtifactFile(t *testing.T) {
 	if testing.Short() {
