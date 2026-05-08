@@ -51,6 +51,9 @@ func (s *MemManagedSourceStore) WriteManagedFile(ctx context.Context, root Sourc
 		return ManagedFile{}, err
 	}
 	lim := opts.Limits.resolve()
+	if err := lim.Validate("mem_managed_source_store.write_managed_file"); err != nil {
+		return ManagedFile{}, err
+	}
 	if int64(len(content)) > lim.MaxRenderedSourceFileBytes {
 		return ManagedFile{}, &Error{
 			Code: CodeResourceLimit,
