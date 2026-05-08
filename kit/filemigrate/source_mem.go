@@ -46,11 +46,12 @@ func (s *MemSourceStore) ResolveSourceRoot(ctx context.Context, dir string) (Sou
 // as README.md or generated output) are skipped to match the production
 // FSSourceStore, which only returns .go inputs from the schema root.
 //
-// Seeded keys whose relpath escapes root (e.g. AddFile(root, "../outside.go", ...))
-// are also skipped: FSSourceStore walks the filesystem rooted at RealPath and
-// physically cannot observe such paths, so the in-memory store must not
-// surface them either. Counting them against MaxSchemaFiles or returning them
-// would let tests pass on listings the production store could never produce.
+// Keys seeded via AddFile whose relpath escapes root (e.g.
+// AddFile(root, "../outside.go", ...)) are also skipped: FSSourceStore walks
+// the filesystem rooted at RealPath and physically cannot observe such paths,
+// so the in-memory store must not surface them either. Counting them against
+// MaxSchemaFiles or returning them would let tests pass on listings the
+// production store could never produce.
 func (s *MemSourceStore) ListSourceFiles(ctx context.Context, root SourceRoot, opts ListSourceFilesOptions) ([]string, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err

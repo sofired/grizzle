@@ -635,6 +635,10 @@ func TestMemSourceStore_ListSkipsEscapingRelpath(t *testing.T) {
 	store.AddFile("/schema", "a.go", []byte("package schema"))
 	store.AddFile("/schema", "../outside.go", []byte("package outside"))
 	store.AddFile("/schema", "sub/../../also-outside.go", []byte("package outside"))
+	// Absolute relpath: AddFile raw-concats the key as "/schema//abs/outside.go",
+	// which still matches the "/schema/" prefix; assertSourceContained's
+	// IsAbs check is what skips it.
+	store.AddFile("/schema", "/abs/outside.go", []byte("package outside"))
 	root, _ := store.ResolveSourceRoot(t.Context(), "/schema")
 
 	files, err := store.ListSourceFiles(t.Context(), root, filemigrate.ListSourceFilesOptions{
