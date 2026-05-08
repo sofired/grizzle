@@ -243,11 +243,12 @@ func (s *FSArtifactStore) ReadArtifact(ctx context.Context, root ArtifactRoot, n
 
 	digests := computeArtifactDigest(sql, snap)
 	return &LoadedArtifact{
-		Name:         name,
-		Dir:          dir,
-		MigrationSQL: sql,
-		SnapshotJSON: snap,
-		Digests:      digests,
+		Name:                 name,
+		Dir:                  dir,
+		MigrationSQL:         sql,
+		SnapshotJSON:         snap,
+		Digests:              digests,
+		ManagedIntrospection: hasManagedIntrospectionHeader(sql),
 	}, nil
 }
 
@@ -310,11 +311,12 @@ func (s *FSArtifactStore) CreateArtifact(ctx context.Context, root ArtifactRoot,
 	sql := bytes.Clone(artifact.MigrationSQL)
 	snap := bytes.Clone(artifact.SnapshotJSON)
 	return &LoadedArtifact{
-		Name:         artifact.Name,
-		Dir:          target,
-		MigrationSQL: sql,
-		SnapshotJSON: snap,
-		Digests:      digests,
+		Name:                 artifact.Name,
+		Dir:                  target,
+		MigrationSQL:         sql,
+		SnapshotJSON:         snap,
+		Digests:              digests,
+		ManagedIntrospection: hasManagedIntrospectionHeader(sql),
 	}, nil
 }
 

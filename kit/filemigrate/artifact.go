@@ -1,10 +1,49 @@
 package filemigrate
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
 )
+
+// managedIntrospectionHeader is the exact line that marks an artifact as
+// managed-introspection per the file-migrations spec. The detection rule
+// requires this to be the first non-empty physical line of migration.sql,
+// after an optional UTF-8 BOM. See:
+//   - docs/spec/file-migrations-artifacts.md:128
+//   - docs/spec/pull.md:504
+const managedIntrospectionHeader = "-- grizzle:managed-introspection v1"
+
+var utf8BOM = []byte{0xEF, 0xBB, 0xBF}
+
+// hasManagedIntrospectionHeader reports whether sql is a managed-introspection
+// migration: its first non-empty physical line, after an optional UTF-8 BOM,
+// is exactly managedIntrospectionHeader. Physical lines are split on LF; a
+// trailing CR (CRLF input) is tolerated for the matched header line.
+func hasManagedIntrospectionHeader(sql []byte) bool {
+	b := bytes.TrimPrefix(sql, utf8BOM)
+	for {
+		nl := bytes.IndexByte(b, '\n')
+		var line []byte
+		if nl < 0 {
+			line = b
+		} else {
+			line = b[:nl]
+		}
+		// Tolerate CRLF: drop a trailing CR before comparison.
+		if n := len(line); n > 0 && line[n-1] == '\r' {
+			line = line[:n-1]
+		}
+		if len(line) > 0 {
+			return string(line) == managedIntrospectionHeader
+		}
+		if nl < 0 {
+			return false
+		}
+		b = b[nl+1:]
+	}
+}
 
 // Digest is a raw SHA-256 digest value.
 type Digest [32]byte
@@ -52,6 +91,13 @@ func computeArtifactDigest(migrationSQL, snapshotJSON []byte) ArtifactDigest {
 
 // LoadedArtifact holds the validated, caller-owned bytes of a migration artifact.
 // Byte slices are defensive copies — the store does not retain them after return.
+//
+// ManagedIntrospection is true when MigrationSQL carries the managed
+// introspection header — i.e., its first non-empty physical line, after an
+// optional UTF-8 BOM, is exactly "-- grizzle:managed-introspection v1". See
+// docs/spec/file-migrations-artifacts.md:128 and docs/spec/pull.md:504. The
+// downstream `migrate` flow uses this flag to reject pending/unrecorded
+// bootstrap artifacts with bootstrap_init_required.
 type LoadedArtifact struct {
 	Name                 string
 	Dir                  string

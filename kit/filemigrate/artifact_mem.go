@@ -155,11 +155,12 @@ func (s *MemArtifactStore) ReadArtifact(ctx context.Context, root ArtifactRoot, 
 	snap := bytes.Clone(a.snapshotJSON)
 	digests := computeArtifactDigest(sql, snap)
 	return &LoadedArtifact{
-		Name:         name,
-		Dir:          root.RealPath + "/" + name,
-		MigrationSQL: sql,
-		SnapshotJSON: snap,
-		Digests:      digests,
+		Name:                 name,
+		Dir:                  root.RealPath + "/" + name,
+		MigrationSQL:         sql,
+		SnapshotJSON:         snap,
+		Digests:              digests,
+		ManagedIntrospection: hasManagedIntrospectionHeader(sql),
 	}, nil
 }
 
@@ -199,10 +200,11 @@ func (s *MemArtifactStore) CreateArtifact(ctx context.Context, root ArtifactRoot
 	}
 	digests := computeArtifactDigest(sql, snap)
 	return &LoadedArtifact{
-		Name:         artifact.Name,
-		Dir:          root.RealPath + "/" + artifact.Name,
-		MigrationSQL: bytes.Clone(sql),
-		SnapshotJSON: bytes.Clone(snap),
-		Digests:      digests,
+		Name:                 artifact.Name,
+		Dir:                  root.RealPath + "/" + artifact.Name,
+		MigrationSQL:         bytes.Clone(sql),
+		SnapshotJSON:         bytes.Clone(snap),
+		Digests:              digests,
+		ManagedIntrospection: hasManagedIntrospectionHeader(sql),
 	}, nil
 }

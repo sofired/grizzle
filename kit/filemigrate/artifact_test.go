@@ -888,3 +888,93 @@ func assertHardlinkInvalidPath(t *testing.T, err error, wantOp string) {
 		}
 	}
 }
+
+// TestArtifactStore_ManagedIntrospectionDetection exercises the spec rule
+// (docs/spec/file-migrations-artifacts.md:128, docs/spec/pull.md:504): an
+// artifact is managed-introspection when the first non-empty physical line of
+// migration.sql, after an optional UTF-8 BOM, is exactly the managed header.
+//
+// The cases run against the in-memory store on both CreateArtifact and the
+// subsequent ReadArtifact return so that both code paths populate the field.
+func TestArtifactStore_ManagedIntrospectionDetection(t *testing.T) {
+	header := "-- grizzle:managed-introspection v1"
+	bom := "\xef\xbb\xbf"
+	cases := []struct {
+		name string
+		sql  string
+		want bool
+	}{
+		{"plain_sql", "CREATE TABLE t (id INT);", false},
+		{"empty", "", false},
+		{"header_only", header, true},
+		{"header_with_lf_terminator", header + "\n", true},
+		{"header_then_payload", header + "\n-- some payload\n", true},
+		{"header_with_crlf", header + "\r\n-- payload\r\n", true},
+		{"header_with_bom", bom + header + "\n", true},
+		{"header_with_bom_and_blank_lines", bom + "\n\n" + header + "\n", true},
+		{"header_after_blank_lines", "\n\n" + header + "\n-- payload\n", true},
+		{"header_in_middle_not_recognized", "-- preamble\n" + header + "\n", false},
+		{"different_first_line", "-- some other comment\n" + header + "\n", false},
+		{"header_with_leading_space", " " + header + "\n", false},
+		{"header_with_trailing_text", header + " trailing\n", false},
+		{"bom_only", bom, false},
+		{"only_blank_lines", "\n\n\n", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			store := filemigrate.NewMemArtifactStore()
+			root := mustResolveRoot(t, store, "/m", filemigrate.RootEnsureForWrite)
+			created := mustCreateArtifact(t, store, root, "20240101000000_x", []byte(tc.sql), []byte(`{"v":"1"}`))
+			if created.ManagedIntrospection != tc.want {
+				t.Errorf("CreateArtifact: ManagedIntrospection = %v, want %v", created.ManagedIntrospection, tc.want)
+			}
+			got, err := store.ReadArtifact(t.Context(), root, "20240101000000_x", filemigrate.ReadArtifactOptions{})
+			if err != nil {
+				t.Fatalf("ReadArtifact: %v", err)
+			}
+			if got.ManagedIntrospection != tc.want {
+				t.Errorf("ReadArtifact: ManagedIntrospection = %v, want %v", got.ManagedIntrospection, tc.want)
+			}
+		})
+	}
+}
+
+// TestFSArtifactStore_ManagedIntrospectionRoundtrip pins the FS implementation
+// to the same detection contract: a managed-introspection migration.sql is
+// flagged on both CreateArtifact and the subsequent ReadArtifact return.
+func TestFSArtifactStore_ManagedIntrospectionRoundtrip(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping filesystem test in short mode")
+	}
+	dir := t.TempDir()
+	store := filemigrate.NewFSArtifactStore()
+	root := mustResolveRoot(t, store, dir, filemigrate.RootEnsureForWrite)
+
+	managed := []byte("-- grizzle:managed-introspection v1\n-- inert payload line\n")
+	plain := []byte("CREATE TABLE t (id INT);\n")
+	snap := []byte(`{"v":"1"}`)
+
+	loaded := mustCreateArtifact(t, store, root, "20240101000000_managed", managed, snap)
+	if !loaded.ManagedIntrospection {
+		t.Error("CreateArtifact (managed): ManagedIntrospection = false, want true")
+	}
+	plainLoaded := mustCreateArtifact(t, store, root, "20240101000001_plain", plain, snap)
+	if plainLoaded.ManagedIntrospection {
+		t.Error("CreateArtifact (plain): ManagedIntrospection = true, want false")
+	}
+
+	got, err := store.ReadArtifact(t.Context(), root, "20240101000000_managed", filemigrate.ReadArtifactOptions{})
+	if err != nil {
+		t.Fatalf("ReadArtifact (managed): %v", err)
+	}
+	if !got.ManagedIntrospection {
+		t.Error("ReadArtifact (managed): ManagedIntrospection = false, want true")
+	}
+	gotPlain, err := store.ReadArtifact(t.Context(), root, "20240101000001_plain", filemigrate.ReadArtifactOptions{})
+	if err != nil {
+		t.Fatalf("ReadArtifact (plain): %v", err)
+	}
+	if gotPlain.ManagedIntrospection {
+		t.Error("ReadArtifact (plain): ManagedIntrospection = true, want false")
+	}
+}
