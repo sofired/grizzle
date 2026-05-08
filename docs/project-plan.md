@@ -177,7 +177,7 @@ Code-side gate (from [Code Triage](#code-triage)):
 Issue-side gate:
 
 - [x] Old-direction issues are closed or marked `superseded` (#154, #249, #273-#275, #280).
-- [x] Defer targets carry `blocked-by-spec` (#157, #137, #172, #248, #250, #253, #254, #277, #278, #279).
+- [x] Defer targets carry `blocked-by-spec` (#157, #296, #137, #248, #250, #172, #253, #254, #277, #278, #279, #240).
 - [x] One parent issue exists for every Slice 0-8 (#290, #291, #292, #169, #153, #293, #294, #158, #295).
 - [x] One workstream parent exists for every project-wide area (#282-#289).
 - [x] Every open issue carries an `area:*` label or is explicitly non-gating backlog (docs/release).
