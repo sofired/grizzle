@@ -697,13 +697,53 @@ func TestFSSourceStore_HardlinkedFileRejected(t *testing.T) {
 		t.Errorf("ReadSourceFile: expected ErrInvalidPath, got %v", err)
 	}
 
-	// ListSourceFiles must also reject the hardlinked .go entry at discovery
-	// time so a hardlinked file never reaches the caller's returned slice.
+	// ListSourceFiles must also reject the hard-linked .go entry at discovery
+	// time so a hard-linked file never reaches the caller's returned slice.
 	_, listErr := store.ListSourceFiles(t.Context(), root, filemigrate.ListSourceFilesOptions{})
 	if listErr == nil {
 		t.Fatal("expected ListSourceFiles error for hardlinked source file")
 	}
 	if !errors.Is(listErr, filemigrate.ErrInvalidPath) {
 		t.Errorf("ListSourceFiles: expected ErrInvalidPath, got %v", listErr)
+	}
+}
+
+// TestFSSourceStore_HardlinkedNonGoFileIgnored verifies that hard-linked
+// non-.go sidecar files (e.g. README.md, .gitkeep) under the source root do
+// NOT fail listing. Non-.go files are silently skipped by ListSourceFiles, so
+// the hardlink rejection must run after the suffix filter; otherwise a
+// hard-linked sidecar would make the entire schema unreadable.
+func TestFSSourceStore_HardlinkedNonGoFileIgnored(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping filesystem test in short mode")
+	}
+	dir := t.TempDir()
+	outside := t.TempDir()
+
+	// A non-.go sidecar that is hard-linked from outside the root.
+	realReadme := filepath.Join(outside, "README.md")
+	if err := os.WriteFile(realReadme, []byte("readme"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(realReadme, filepath.Join(dir, "README.md")); err != nil {
+		t.Skipf("hard links not supported on this platform: %v", err)
+	}
+
+	// A normal, non-hard-linked .go schema file that the listing should return.
+	if err := os.WriteFile(filepath.Join(dir, "schema.go"), []byte("package schema"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	store := filemigrate.NewFSSourceStore()
+	root, err := store.ResolveSourceRoot(t.Context(), dir)
+	if err != nil {
+		t.Fatalf("ResolveSourceRoot: %v", err)
+	}
+	files, err := store.ListSourceFiles(t.Context(), root, filemigrate.ListSourceFilesOptions{})
+	if err != nil {
+		t.Fatalf("ListSourceFiles: unexpected error for hard-linked sidecar: %v", err)
+	}
+	if len(files) != 1 || files[0] != "schema.go" {
+		t.Errorf("expected [schema.go], got %v", files)
 	}
 }

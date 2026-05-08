@@ -120,6 +120,12 @@ func (s *FSSourceStore) ListSourceFiles(ctx context.Context, root SourceRoot, op
 				Err:  fmt.Errorf("not a regular file"),
 			}
 		}
+		if !strings.HasSuffix(path, ".go") {
+			// Non-.go files are silently skipped; the hardlink check
+			// must follow the suffix filter so a hard-linked sidecar
+			// (README.md, .gitkeep, lockfiles) does not fail discovery.
+			return nil
+		}
 		if hasExtraHardLinks(fi) {
 			return &Error{
 				Code: CodeInvalidPath,
@@ -127,9 +133,6 @@ func (s *FSSourceStore) ListSourceFiles(ctx context.Context, root SourceRoot, op
 				Path: safeRenderPath(path),
 				Err:  fmt.Errorf("hardlinks are not supported"),
 			}
-		}
-		if !strings.HasSuffix(path, ".go") {
-			return nil
 		}
 		rel, relErr := filepath.Rel(root.RealPath, path)
 		if relErr != nil {
