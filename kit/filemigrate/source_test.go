@@ -623,6 +623,32 @@ func TestMemSourceStore_ReadRejectsEscapingRelpath(t *testing.T) {
 	}
 }
 
+// TestMemSourceStore_ListSkipsEscapingRelpath verifies that ListSourceFiles
+// silently skips seeded keys whose relpath escapes the configured root, and
+// does not count them against MaxSchemaFiles. FSSourceStore walks the
+// filesystem rooted at RealPath and physically cannot return such entries, so
+// the in-memory store must match: a caller that lists then reads must not see
+// listings the filesystem store could never produce, and a tight
+// MaxSchemaFiles must not trip on entries that cannot belong to the root.
+func TestMemSourceStore_ListSkipsEscapingRelpath(t *testing.T) {
+	store := filemigrate.NewMemSourceStore()
+	store.AddFile("/schema", "a.go", []byte("package schema"))
+	store.AddFile("/schema", "../outside.go", []byte("package outside"))
+	store.AddFile("/schema", "sub/../../also-outside.go", []byte("package outside"))
+	root, _ := store.ResolveSourceRoot(t.Context(), "/schema")
+
+	files, err := store.ListSourceFiles(t.Context(), root, filemigrate.ListSourceFilesOptions{
+		// Tight limit: would trip if escaping keys were counted.
+		Limits: filemigrate.ResourceLimits{MaxSchemaFiles: 1},
+	})
+	if err != nil {
+		t.Fatalf("ListSourceFiles: %v", err)
+	}
+	if len(files) != 1 || files[0] != "a.go" {
+		t.Errorf("expected only [a.go], got %v", files)
+	}
+}
+
 // TestFSSourceStore_CurrentDirRoot verifies that "." resolves and operates as
 // a valid schema source root: filepath.Join(".", relpath) cleans to relpath
 // (no leading "./"), so the prefix-style containment check used previously
