@@ -679,8 +679,8 @@ func TestFSSourceStore_HardlinkedFileRejected(t *testing.T) {
 	if err := os.WriteFile(realFile, []byte("package schema"), 0o640); err != nil {
 		t.Fatal(err)
 	}
-	hardlinked := filepath.Join(dir, "schema.go")
-	if err := os.Link(realFile, hardlinked); err != nil {
+	linkedSchema := filepath.Join(dir, "schema.go")
+	if err := os.Link(realFile, linkedSchema); err != nil {
 		t.Skipf("hard links not supported on this platform: %v", err)
 	}
 
@@ -691,7 +691,7 @@ func TestFSSourceStore_HardlinkedFileRejected(t *testing.T) {
 	}
 	_, err = store.ReadSourceFile(t.Context(), root, "schema.go", filemigrate.ReadSourceFileOptions{})
 	if err == nil {
-		t.Fatal("expected ReadSourceFile error for hardlinked source file")
+		t.Fatal("expected ReadSourceFile error for hard-linked source file")
 	}
 	if !errors.Is(err, filemigrate.ErrInvalidPath) {
 		t.Errorf("ReadSourceFile: expected ErrInvalidPath, got %v", err)
@@ -701,7 +701,7 @@ func TestFSSourceStore_HardlinkedFileRejected(t *testing.T) {
 	// time so a hard-linked file never reaches the caller's returned slice.
 	_, listErr := store.ListSourceFiles(t.Context(), root, filemigrate.ListSourceFilesOptions{})
 	if listErr == nil {
-		t.Fatal("expected ListSourceFiles error for hardlinked source file")
+		t.Fatal("expected ListSourceFiles error for hard-linked source file")
 	}
 	if !errors.Is(listErr, filemigrate.ErrInvalidPath) {
 		t.Errorf("ListSourceFiles: expected ErrInvalidPath, got %v", listErr)

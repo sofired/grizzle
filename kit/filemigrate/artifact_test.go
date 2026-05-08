@@ -832,7 +832,7 @@ func TestFSArtifactStore_ReadRejectsHardlinkedArtifactFile(t *testing.T) {
 
 			_, err := store.ReadArtifact(t.Context(), root, "20240101000000_hl", filemigrate.ReadArtifactOptions{})
 			if err == nil {
-				t.Fatalf("expected error for hardlinked %s", target)
+				t.Fatalf("expected error for hard-linked %s", target)
 			}
 			if !errors.Is(err, filemigrate.ErrInvalidPath) {
 				t.Errorf("expected ErrInvalidPath, got %v", err)
