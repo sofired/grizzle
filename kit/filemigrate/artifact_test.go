@@ -691,6 +691,9 @@ func TestFSArtifactStore_OversizedSnapshotReturnsResourceLimit(t *testing.T) {
 // TestFSArtifactStore_NonRegularArtifactFileReturnsInvalidPath verifies the
 // non-size readArtifactFile failure paths still report invalid_path, so the
 // caller can tell user-tunable size breaches apart from path/shape failures.
+// Regression guard: prior to the codex-round-4 fix, both size-cap failures
+// and non-regular-file failures were wrapped as invalid_path, making them
+// indistinguishable; this test ensures the split is preserved.
 func TestFSArtifactStore_NonRegularArtifactFileReturnsInvalidPath(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping filesystem test in short mode")

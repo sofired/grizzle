@@ -73,6 +73,10 @@ func (s *MemArtifactStore) ResolveRoot(ctx context.Context, dir string, opts Res
 // in-memory store has no concept of sidecars or staging dirs, so the entry
 // count equals the artifact count, but the dir-entry limit is still checked
 // to keep mem and FS behavior aligned for tests using either backend.
+//
+// Check order: MaxArtifactDirEntries fires on the unsorted slice (matching
+// the FS store, which checks before sorting), then the slice is sorted, then
+// MaxArtifacts fires on the sorted slice so its diagnostics are deterministic.
 func (s *MemArtifactStore) ListArtifacts(ctx context.Context, root ArtifactRoot, opts ListArtifactsOptions) ([]ArtifactEntry, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -104,8 +108,8 @@ func (s *MemArtifactStore) ListArtifacts(ctx context.Context, root ArtifactRoot,
 			Migration: fmt.Sprintf("dir_entries=%d limit=%d", len(out), lim.MaxArtifactDirEntries),
 		}
 	}
-	// Sort before enforcing the limit so the result matches FS store behavior:
-	// the limit fires on a deterministic ordered set, not map-iteration order.
+	// Sort before enforcing the MaxArtifacts limit so the diagnostic count
+	// fires on a deterministic ordered set, not map-iteration order.
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	if len(out) > lim.MaxArtifacts {
 		return nil, &Error{

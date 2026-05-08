@@ -199,6 +199,10 @@ func (e *ExecutionError) Is(target error) bool { return e.Base.Is(target) }
 // Code/Op/Path/Migration/Dialect fields without traversing the redacted
 // Unwrap chain. Without this, Unwrap returns the safe cause (or nil) and
 // the *Error type is never reached.
+//
+// PartialApplicationError embeds ExecutionError by value, so it inherits this
+// method via Go's method promotion — errors.As works the same way on a
+// *PartialApplicationError and recovers the same embedded Base.
 func (e *ExecutionError) As(target any) bool {
 	if t, ok := target.(**Error); ok {
 		*t = &e.Base

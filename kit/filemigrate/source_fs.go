@@ -150,13 +150,12 @@ func (s *FSSourceStore) ListSourceFiles(ctx context.Context, root SourceRoot, op
 //
 // Non-Go relpaths (those without a .go suffix) are rejected with CodeInvalidPath
 // before any filesystem work runs, matching the schema-loader contract that
-// only .go files are valid schema inputs.
+// only .go files are valid schema inputs. The .go check fires before the
+// containment check so the rejection reason is the most specific (and the
+// ordering matches MemSourceStore).
 func (s *FSSourceStore) ReadSourceFile(ctx context.Context, root SourceRoot, relpath string, opts ReadSourceFileOptions) (*SourceFile, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
-	}
-	if err := assertSourceContained(root.RealPath, relpath); err != nil {
-		return nil, &Error{Code: CodeInvalidPath, Op: sourceOp + ".read_source_file", Path: safeRenderPath(relpath), Err: err}
 	}
 	if !strings.HasSuffix(relpath, ".go") {
 		return nil, &Error{
@@ -165,6 +164,9 @@ func (s *FSSourceStore) ReadSourceFile(ctx context.Context, root SourceRoot, rel
 			Path: safeRenderPath(relpath),
 			Err:  fmt.Errorf("only .go schema files are supported"),
 		}
+	}
+	if err := assertSourceContained(root.RealPath, relpath); err != nil {
+		return nil, &Error{Code: CodeInvalidPath, Op: sourceOp + ".read_source_file", Path: safeRenderPath(relpath), Err: err}
 	}
 	lim := opts.Limits.resolve()
 	if err := lim.Validate(sourceOp + ".read_source_file"); err != nil {
