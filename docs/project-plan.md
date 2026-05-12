@@ -23,9 +23,9 @@ _Last refreshed: 2026-05-08._
 
 | Item | Status |
 | --- | --- |
-| Last completed | **Slice 0** (#290 closed). `kit/filemigrate/` package + diagnostics + resource limits + source/artifact/managed test stores landed in PR #303. |
-| Active | **Slice 1** ([#291](https://github.com/sofired/grizzle/issues/291)) — artifact discovery and offline validation core. Slice-tagged hardening from Slice 0 dev (TOCTOU, naming validation, race hardening) folds into this slice via `slice:1`-labeled issues. |
-| Next | **Slice 2** ([#292](https://github.com/sofired/grizzle/issues/292)) — snapshot and schema input planning. |
+| Last completed | **[Slice 0](https://github.com/sofired/grizzle/milestone/7)** (closed). `kit/filemigrate/` package + diagnostics + resource limits + source/artifact/managed test stores landed in PR #303. |
+| Active | **[Slice 1](https://github.com/sofired/grizzle/milestone/8)** — artifact discovery and offline validation core. Slice-tagged hardening from Slice 0 dev (TOCTOU, naming validation, race hardening) folds into this milestone. |
+| Next | **[Slice 2](https://github.com/sofired/grizzle/milestone/9)** — snapshot and schema input planning. |
 | Parallel-safe workstreams | Schema (#282), Query (#283), Codegen (#284), Driver (#285), Dialect (#286), Pull (#288), Docs (#289). See [Parallel Work Guidance](#parallel-work-guidance). |
 | Blocked-by-spec | Direct-sync `push` (#157, #296). Sequence support (#137, #248, #250). Generated columns (#172, #253, #254). Non-transactional DDL header (#277). Hash-drift detection (#278). Non-interactive rename answers (#279). View dependency ordering (#240). |
 
@@ -70,19 +70,28 @@ This order is about dependency safety, not exclusivity. Independent query/schema
 
 ### Slice Plan
 
-| Slice | Status | Parent | Spec | Code involvement |
-| --- | --- | --- | --- | --- |
-| Slice 0: package boundary and test harness | Done (PR #303) | [#290](https://github.com/sofired/grizzle/issues/290) | `file-migrations-implementation-sequence.md` §Slice 0 | `kit/filemigrate/` (new). |
-| Slice 1: artifact discovery and offline validation | Active | [#291](https://github.com/sofired/grizzle/issues/291) | `file-migrations-implementation-sequence.md` §Slice 1 | Build artifact loader/validator; do not reuse `kit.LoadJSON`. |
-| Slice 2: snapshot and schema input planning | Upcoming | [#292](https://github.com/sofired/grizzle/issues/292) | `file-migrations-implementation-sequence.md` §Slice 2 | Adapt `schema/*`, `gen/parser/*`, `kit/snapshot.go` concepts into RC.1 snapshot planning. |
-| Slice 3: `check` | Upcoming | [#169](https://github.com/sofired/grizzle/issues/169) | `file-migrations-check.md` | Adapt `kit/diff.go` graph/diff logic. |
-| Slice 4: `generate` | Upcoming | [#153](https://github.com/sofired/grizzle/issues/153) | `file-migrations-generate.md`, `file-migrations-artifacts.md` | `kit/diff.go`, `kit/sqlgen*.go`, `schema/*`, `gen/parser`. |
-| Slice 5: history, locking, sessions | Upcoming | [#293](https://github.com/sofired/grizzle/issues/293) | `file-migrations-history.md`, `file-migrations-execution.md` | New session/history/locking under `kit/filemigrate`; `driver/*`, `dialect/`. |
-| Slice 6: `migrate` | Upcoming | [#294](https://github.com/sofired/grizzle/issues/294) | `file-migrations-execution.md` | Implement artifact execution; quarantine `kit/migrate*.go`. |
-| Slice 7: `pull` and `pull --init` | Upcoming | [#158](https://github.com/sofired/grizzle/issues/158) | `pull.md` | Adapt `kit/introspect/`, `schema/*`, `gen/codegen`. |
-| Slice 8: CLI cutover and cleanup | Upcoming | [#295](https://github.com/sofired/grizzle/issues/295) | `file-migrations-api.md`, `kit.md` | Rewire `cmd/grizzle/main.go`; remove legacy `kit/migrate*.go`, `kit/apply.go`, snapshot/diff CLI commands. |
+Each slice has its own GitHub Milestone. Live child-issue tracking, open/closed counts, and progress live there. The slice parent issues that previously served this role were retired on 2026-05-08 with redirect comments.
 
-Code-area follow-up tracking issues hang off slice or workstream parents above:
+The Grizzle repo uses **two milestone axes**:
+
+- **Slice milestones** (this section) — implementation sequence for the file-migration workflow, one per slice 0-8. Granular, ordered, time-bounded.
+- **Release/capability milestones** (`M1: Clean house`, `M4: Query builder parity`, `M5: Schema DSL + codegen completeness`, `M6: Advanced features`) — what ships when, across all workstreams. `M2: Dialect foundation` and `M3: Kit workflow` are now closed; M3's scope was absorbed into the slice milestones.
+
+Both axes are GitHub Milestones, and a GitHub issue can only carry **one milestone**, so the axes are mutually exclusive per issue. Assignment rule: if the issue is part of a file-migration slice, it goes on the slice milestone (the slice progress rollup depends on this being complete); otherwise it goes on the relevant M-milestone. Cross-axis association (e.g., a Slice 3 issue that also serves M5 capability completeness) is captured in the issue body, not by a second milestone.
+
+| Slice | Status | Milestone | Spec | Code involvement |
+| --- | --- | --- | --- | --- |
+| Slice 0: package boundary and test harness | Done (PR #303) | [Slice 0](https://github.com/sofired/grizzle/milestone/7) (closed) | `file-migrations-implementation-sequence.md` §Slice 0 | `kit/filemigrate/` (new). |
+| Slice 1: artifact discovery and offline validation | Active | [Slice 1](https://github.com/sofired/grizzle/milestone/8) | `file-migrations-implementation-sequence.md` §Slice 1 | Build artifact loader/validator; do not reuse `kit.LoadJSON`. |
+| Slice 2: snapshot and schema input planning | Upcoming | [Slice 2](https://github.com/sofired/grizzle/milestone/9) | `file-migrations-implementation-sequence.md` §Slice 2 | Adapt `schema/*`, `gen/parser/*`, `kit/snapshot.go` concepts into RC.1 snapshot planning. |
+| Slice 3: `check` | Upcoming | [Slice 3](https://github.com/sofired/grizzle/milestone/10) | `file-migrations-check.md` | Adapt `kit/diff.go` graph/diff logic. |
+| Slice 4: `generate` | Upcoming | [Slice 4](https://github.com/sofired/grizzle/milestone/11) | `file-migrations-generate.md`, `file-migrations-artifacts.md` | `kit/diff.go`, `kit/sqlgen*.go`, `schema/*`, `gen/parser`. |
+| Slice 5: history, locking, sessions | Upcoming (no child issues yet) | [Slice 5](https://github.com/sofired/grizzle/milestone/12) | `file-migrations-history.md`, `file-migrations-execution.md` | New session/history/locking under `kit/filemigrate`; `driver/*`, `dialect/`. |
+| Slice 6: `migrate` | Upcoming | [Slice 6](https://github.com/sofired/grizzle/milestone/13) | `file-migrations-execution.md` | Implement artifact execution; quarantine `kit/migrate*.go`. |
+| Slice 7: `pull` and `pull --init` | Upcoming | [Slice 7](https://github.com/sofired/grizzle/milestone/14) | `pull.md` | Adapt `kit/introspect/`, `schema/*`, `gen/codegen`. |
+| Slice 8: CLI cutover and cleanup | Upcoming | [Slice 8](https://github.com/sofired/grizzle/milestone/15) | `file-migrations-api.md`, `kit.md` | Rewire `cmd/grizzle/main.go`; remove legacy `kit/migrate*.go`, `kit/apply.go`, snapshot/diff CLI commands. |
+
+Code-area follow-up tracking issues hang off the milestones above:
 
 - [#296](https://github.com/sofired/grizzle/issues/296) — Quarantine direct-sync push helpers (blocked-by-spec)
 - [#297](https://github.com/sofired/grizzle/issues/297) — Quarantine legacy live-diff migrate/status helpers (slice:8)
@@ -90,6 +99,8 @@ Code-area follow-up tracking issues hang off slice or workstream parents above:
 - [#299](https://github.com/sofired/grizzle/issues/299) — Adapt schema definitions and static loader for strict file migrations (slice:2)
 - [#300](https://github.com/sofired/grizzle/issues/300) — Adapt diff and SQL rendering to RC.1 DDL entities (slice:4)
 - [#301](https://github.com/sofired/grizzle/issues/301) — Adapt introspection for `pull` and `pull --init` (slice:7)
+
+The Slice 5 milestone has no child issues yet; the closed umbrella (#293) was the only assigned issue, so the GitHub progress rollup currently shows 100% but reflects no real work. Treat the milestone as a placeholder for now: child work items (history table creation/validation, DB-backed locking, migration session interfaces, dialect capability checks) are authored as Slice 5 starts. Until then, rely on `file-migrations-history.md` and the Slice 5 spec section, not the milestone rollup, for Slice 5 status.
 
 ### Parallel Work Guidance
 
@@ -152,7 +163,7 @@ GitHub labels with project-defined semantics:
 | Family | Members | Semantics |
 | --- | --- | --- |
 | `area:*` | `area:schema`, `area:query`, `area:codegen`, `area:driver`, `area:dialect`, `area:kit`, `area:file-migrations`, `area:pull`, `area:docs` | Primary code area the issue affects. One per issue, with the explicit exception that `area:kit` and `area:file-migrations` may co-occur per the `area:kit` vs `area:file-migrations` row below. `area:docs` covers documentation, repo hygiene, CI, and release policy. |
-| `slice:*` | `slice:0` through `slice:8` | **Issue is delivered as part of Slice N** — authored, reviewed, merged within that slice's PR. **One slice tag per issue.** Cross-slice dependencies belong in the issue body, not as additional slice tags. |
+| `slice:*` | `slice:0` through `slice:8` | **Issue is delivered as part of Slice N** — authored, reviewed, merged within that slice's PR. **One slice tag per issue.** Cross-slice dependencies belong in the issue body, not as additional slice tags. Each `slice:N` label has a corresponding [GitHub Milestone](https://github.com/sofired/grizzle/milestones); the milestone is the live tracker (open/closed counts, progress), the label is the searchable filter. |
 | `priority:*` | `priority:critical`, `priority:high`, `priority:medium`, `priority:low` | Scheduling priority. (Renamed from `P0`-`P3` on 2026-05-08.) |
 | `phase:implementation` | — | Implementation work (code/tests). Spec-only work uses `blocked-by-spec` instead. |
 | `blocked-by-spec` | — | No implementation until a spec is written or amended. |
@@ -178,7 +189,7 @@ Issue-side gate:
 
 - [x] Old-direction issues are closed or marked `superseded` (#154, #249, #273-#275, #280).
 - [x] Defer targets carry `blocked-by-spec` (#157, #296, #137, #248, #250, #172, #253, #254, #277, #278, #279, #240).
-- [x] One parent issue exists for every Slice 0-8 (#290, #291, #292, #169, #153, #293, #294, #158, #295).
+- [x] One milestone exists for every Slice 0-8 (milestones 7-15).
 - [x] One workstream parent exists for every project-wide area (#282-#289).
 - [x] Every open issue carries an `area:*` label.
 - [x] Every implementation issue with a target slice carries exactly one `slice:N` tag (the delivery slice).
