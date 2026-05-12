@@ -44,7 +44,13 @@ type combinedGoldenVector struct {
 	wantHex string
 }
 
-// goldenCombinedVectors are independently computed via Python:
+// goldenCombinedVectors are independently computed by a Python reference
+// implementation in testdata/digest_reference.py. Run that script to
+// regenerate goldens after any deliberate, spec-amending change to the
+// digest formula; do NOT regenerate them from the Go production code, since
+// the cross-implementation match is what pins the wire format here.
+//
+// The script (and the inline formula it documents) is:
 //
 //	h = hashlib.sha256()
 //	h.update(b'grizzle-artifact-v1'); h.update(b'\x00')
