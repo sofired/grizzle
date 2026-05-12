@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
+	"fmt"
 	"testing"
 
 	"github.com/sofired/grizzle/kit/filemigrate"
@@ -102,7 +103,6 @@ var goldenCombinedVectors = []combinedGoldenVector{
 	},
 }
 
-// fullByteRange returns the 256-byte slice 0x00, 0x01, ..., 0xFF.
 func fullByteRange() []byte {
 	out := make([]byte, 256)
 	for i := range out {
@@ -212,7 +212,7 @@ func TestArtifactDigest_PerFileGoldenVectors(t *testing.T) {
 			sql:         fullByteRange(),
 			snap:        []byte(`{"v":"1"}`),
 			wantSQLHex:  "40aff2e9d2d8922e47afd4648e6967497158785fbd1da870e7110266bf944880",
-			wantSnapHex: "", // computed below; cross-check via raw sha256 since snap is short
+			wantSnapHex: "b8513f1a0c28d8dd9b3b175bee09eabca97c4819614ec9a2df7442a5b4eff8d7",
 		},
 	}
 	store := filemigrate.NewMemArtifactStore()
@@ -226,20 +226,9 @@ func TestArtifactDigest_PerFileGoldenVectors(t *testing.T) {
 			if gotSQLHex != tc.wantSQLHex {
 				t.Errorf("MigrationSQLSHA256 mismatch\n  got:  %s\n  want: %s", gotSQLHex, tc.wantSQLHex)
 			}
-
 			gotSnapHex := hex.EncodeToString(loaded.Digests.SnapshotJSONSHA256[:])
-			if tc.wantSnapHex != "" {
-				if gotSnapHex != tc.wantSnapHex {
-					t.Errorf("SnapshotJSONSHA256 mismatch\n  got:  %s\n  want: %s", gotSnapHex, tc.wantSnapHex)
-				}
-			} else {
-				// Fall back to recomputing with stdlib for cases where a hand-
-				// pinned snapshot hex would be redundant.
-				want := sha256.Sum256(tc.snap)
-				if loaded.Digests.SnapshotJSONSHA256 != filemigrate.Digest(want) {
-					t.Errorf("SnapshotJSONSHA256 mismatch\n  got:  %s\n  want: %s",
-						gotSnapHex, hex.EncodeToString(want[:]))
-				}
+			if gotSnapHex != tc.wantSnapHex {
+				t.Errorf("SnapshotJSONSHA256 mismatch\n  got:  %s\n  want: %s", gotSnapHex, tc.wantSnapHex)
 			}
 		})
 	}
@@ -332,13 +321,9 @@ func TestArtifactDigest_RoundtripsThroughRead(t *testing.T) {
 	}
 }
 
-// makeTestArtifactName builds a deterministic, validation-passing migration
-// directory name for the i-th vector. The names are unique per call so that
-// CreateArtifact does not reject duplicates inside a single store instance.
+// makeTestArtifactName builds a unique, validation-passing migration directory
+// name for the i-th vector. Callers offset i across test functions so that
+// CreateArtifact does not see duplicates within a single shared store.
 func makeTestArtifactName(i int) string {
-	const digits = "0123456789"
-	// Build "20240101000000_v<NN>" with i zero-padded to width 4. We avoid
-	// fmt.Sprintf to keep this helper trivial and dependency-free.
-	pad := []byte{digits[(i/1000)%10], digits[(i/100)%10], digits[(i/10)%10], digits[i%10]}
-	return "20240101000000_v" + string(pad)
+	return fmt.Sprintf("20240101000000_v%04d", i)
 }
