@@ -44,6 +44,29 @@ func TestLeadWithDefault_DefaultBoundAsParam(t *testing.T) {
 	}
 }
 
+func TestLeadWithDefault_NumericDefault(t *testing.T) {
+	ctx := expr.NewBuildContext(dialect.Postgres)
+	w := expr.LeadWithDefault(testScoreCol, 1, 0).OrderBy(testScoreCol.Asc())
+	sql := w.ToSQL(ctx)
+	args := ctx.Args()
+
+	if !strings.Contains(sql, "LEAD(") {
+		t.Errorf("expected LEAD function, got: %s", sql)
+	}
+	if len(args) != 2 {
+		t.Errorf("expected 2 bound args (offset + default), got %d: %v", len(args), args)
+	}
+	if args[0] != 1 {
+		t.Errorf("expected args[0] = 1 (offset), got %v", args[0])
+	}
+	if args[1] != 0 {
+		t.Errorf("expected args[1] = 0 (default), got %v", args[1])
+	}
+	if !strings.Contains(sql, "$1") || !strings.Contains(sql, "$2") {
+		t.Errorf("expected $1 and $2 placeholders in SQL, got: %s", sql)
+	}
+}
+
 func TestLagWithDefault_DefaultBoundAsParam(t *testing.T) {
 	ctx := expr.NewBuildContext(dialect.Postgres)
 	w := expr.LagWithDefault(testScoreCol, 1, 0).OrderBy(testScoreCol.Asc())
