@@ -15,6 +15,8 @@ Open an issue using the **Bug report** template. Include:
 
 Open an issue using the **Feature request** template before writing code. This lets us discuss the design and avoid duplicated effort.
 
+Repository maintainers organize accepted work using the single-milestone model and native issue relationships described in the [project plan](docs/project-plan.md). Issue bodies should focus on outcome, scope, and testable acceptance criteria rather than duplicating dependency lists.
+
 ## Development setup
 
 ```sh

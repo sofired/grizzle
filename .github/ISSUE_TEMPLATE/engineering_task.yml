@@ -1,0 +1,65 @@
+name: Engineering task
+description: Propose bounded implementation, refactoring, test, or repository work
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for a concrete engineering outcome. Maintainers will assign its workstream parent, milestone, and native dependency links during triage.
+
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Outcome
+      description: What observable result should this task produce?
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Why is this needed, and which specification or existing behavior governs it?
+    validations:
+      required: true
+
+  - type: textarea
+    id: in-scope
+    attributes:
+      label: In scope
+      description: List the bounded responsibilities owned by this issue.
+    validations:
+      required: true
+
+  - type: textarea
+    id: out-of-scope
+    attributes:
+      label: Out of scope
+      description: List nearby work deliberately excluded from this issue.
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Provide testable completion conditions.
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation plan
+      description: Identify the tests, checks, fixtures, or documentation needed to prove completion.
+    validations:
+      required: true
+
+  - type: textarea
+    id: references
+    attributes:
+      label: References
+      description: Link specifications, code, pull requests, or discussions. Do not maintain dependency lists here.
