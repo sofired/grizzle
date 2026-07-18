@@ -91,7 +91,7 @@ In Drizzle, the column name is the first argument to the type function: `uuid('i
 | `bit(name, { dimensions })` | DEVIATION:GAP (not designed) | — |
 | `sparsevec(name, { dimensions })` | DEVIATION:GAP (not designed) | — |
 | *(no exported RC.1 PostgreSQL column builder)* | `pg.Tsvector()` | GRIZZLE-ONLY — PostgreSQL `tsvector` storage column/source-generation support; Go type `string`; typed FTS helpers remain PostgreSQL-only Grizzle conveniences |
-| Array types (`.array()` / `.array('[][]')`) | `pg.Array(inner, dimensions?)` or equivalent | PARITY target for one-dimensional arrays; explicit multidimensional dimension strings are DEVIATION:GAP until specified/implemented; Go type `any`; typed `[]T` generation tracked in #144 |
+| Array types (`.array()` / `.array('[][]')`) | `pg.Array(inner, dimensions?)` or equivalent | PARITY target for one-dimensional arrays; explicit multidimensional dimension strings are DEVIATION:GAP until specified/implemented; Go type `any`; typed `[]T` generation remains a separate gap. |
 | Custom types (`.customType()`) | DEVIATION:GAP (not designed) | — |
 | *(no Drizzle equivalent)* | `pg.Tsquery()` | GRIZZLE-ONLY — PostgreSQL `tsquery` storage column; Go type `string` |
 | *(no Drizzle equivalent)* | `pg.Int4Range()`, `pg.Int8Range()`, `pg.NumRange()`, `pg.TsRange()`, `pg.TstzRange()`, `pg.DateRange()` | GRIZZLE-ONLY — PostgreSQL range types; Go type `string` |

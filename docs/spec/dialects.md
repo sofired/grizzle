@@ -118,7 +118,7 @@ The rules below are the RC.1-parity target. Any current silent dropping or suppr
 
 ### Array operators — mixed DEVIATION:GAP status
 
-Broad array SQL features such as `ANY`, `ALL`, array subscripting, and typed array scan/generation are **DEVIATION:GAP (not designed)**. Public RC.1 condition helpers `arrayContains`, `arrayContained`, and `arrayOverlaps` are **DEVIATION:GAP (designed)**: when implemented, empty-array helper inputs must fail with `build_validation`, matching RC.1's throw behavior. Tracked as #144.
+Broad array SQL features such as `ANY`, `ALL`, array subscripting, and typed array scan/generation are **DEVIATION:GAP (not designed)**. Public RC.1 condition helpers `arrayContains`, `arrayContained`, and `arrayOverlaps` are **DEVIATION:GAP (designed)**: when implemented, empty-array helper inputs must fail with `build_validation`, matching RC.1's throw behavior.
 
 ## Current Implementation Status: `*pg.TableDef` Leak Across Dialects
 

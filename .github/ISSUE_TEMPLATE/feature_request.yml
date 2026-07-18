@@ -24,10 +24,18 @@ body:
       required: true
 
   - type: textarea
-    id: scope
+    id: in-scope
     attributes:
-      label: Scope
-      description: What should be included, and what nearby work should explicitly remain out of scope?
+      label: In scope
+      description: What bounded behavior should this request include?
+    validations:
+      required: true
+
+  - type: textarea
+    id: out-of-scope
+    attributes:
+      label: Out of scope
+      description: What nearby behavior should this request explicitly exclude?
     validations:
       required: true
 

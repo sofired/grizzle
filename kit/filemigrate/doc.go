@@ -2,9 +2,9 @@
 // workflow. It is the Go equivalent of Drizzle Kit's generate/migrate/check/pull
 // command surface.
 //
-// # Slice 0 scope
+// # Milestone 00 scope
 //
-// This package currently contains only the foundation required by Slice 0 of
+// This package currently contains only the foundation required by Milestone 00 of
 // the implementation sequence defined in docs/spec/file-migrations-implementation-sequence.md:
 //
 //   - Stable [ErrorCode] constants and [Error] / [ExecutionError] / [PartialApplicationError] types
@@ -22,7 +22,7 @@
 // This package must not import or reuse the legacy kit.Snapshot, kit.SaveJSON,
 // kit.LoadJSON, kit.MigrationsTable, or kit.ChecksumSQL symbols. Those are
 // quarantined pending a separate cutover. The two code paths coexist in the
-// repository until Slice 8 wires the CLI to this package.
+// repository until Milestone 09 wires the CLI to this package.
 //
 // # Error contract
 //
