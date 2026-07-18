@@ -1,0 +1,58 @@
+name: Specification change
+description: Propose or ratify a product, API, format, or compatibility decision
+labels: [type:spec]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Implementation must not begin until required specification decisions are explicit and testable.
+
+  - type: textarea
+    id: decision
+    attributes:
+      label: Decision required
+      description: State the exact question this specification must answer.
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Context and constraints
+      description: Summarize current Grizzle behavior, normative specs, upstream RC.1 behavior, and hard constraints.
+    validations:
+      required: true
+
+  - type: textarea
+    id: options
+    attributes:
+      label: Options considered
+      description: Compare viable choices and their tradeoffs. Include a recommendation when possible.
+    validations:
+      required: true
+
+  - type: textarea
+    id: compatibility
+    attributes:
+      label: Compatibility impact
+      description: Cover public API, persisted formats, dialect support, generated code, and migration implications.
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Ratification criteria
+      description: List the decisions and specification updates required before implementation issues can become ready.
+      placeholder: |
+        - [ ] Normative behavior is documented.
+        - [ ] Unsupported behavior is explicit.
+        - [ ] Follow-up implementation issues are independently estimable.
+    validations:
+      required: true
+
+  - type: textarea
+    id: references
+    attributes:
+      label: References
+      description: Link the affected specs, upstream source, examples, or prior discussion. Native GitHub links will record implementation dependencies.
