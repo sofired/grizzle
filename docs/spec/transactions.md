@@ -16,7 +16,7 @@ Drizzle wraps the callback in a transaction and automatically commits on success
 
 ## Grizzle Callback Shape — PARITY
 
-The callback transaction shape below is implemented parity for PostgreSQL: begin a transaction, run the callback, commit on nil, and roll back on error. The stricter DB/Tx row-vs-exec validation, nil/typed-nil checks, redacted stable transaction errors, row ownership rules, isolation options, savepoints, and MySQL/SQLite wrappers are target implementation gaps until the driver packages satisfy the contracts below.
+The callback transaction shape below is implemented for PostgreSQL and through the generic `database/sql` wrapper used by MySQL and SQLite: begin a transaction, run the callback, commit on nil, and roll back on error. Stricter DB/Tx row-vs-exec validation, nil/typed-nil checks, redacted stable transaction errors, row ownership rules, isolation-option mapping, savepoints, and cross-driver conformance remain target implementation gaps until the driver packages satisfy the contracts below.
 
 ```go
 err := db.Transaction(ctx, func(tx *pgxdb.Tx) error {
@@ -124,4 +124,4 @@ Not yet implemented. Tracked as **#143**.
 
 ## MySQL and SQLite
 
-MySQL and SQLite transactions follow the same callback shape through their driver packages. The PostgreSQL implementation is exposed as `(*pgxdb.DB).Transaction` and uses `pgxpool` internally. Equivalent wrappers for MySQL and SQLite are **DEVIATION:GAP (designed)** — the API should be identical; only the underlying driver call differs.
+MySQL and SQLite transactions follow the same callback shape through the generic `driver/sql` wrapper; PostgreSQL exposes `(*pgxdb.DB).Transaction` over pgx. The generic wrappers exist. Dialect-specific option mapping, strict validation/error semantics, and integration conformance remain **DEVIATION:GAP (designed)** work; callers should not infer complete cross-driver parity from the shared callback shape alone.
