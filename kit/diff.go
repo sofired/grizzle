@@ -660,7 +660,8 @@ func diffColumn(tableName string, old, new pg.ColumnDef) []Change {
 			NewCol:     &n,
 		})
 	}
-	if normalizeDefaultExpr(old.DefaultExpr) != normalizeDefaultExpr(new.DefaultExpr) || old.HasDefault != new.HasDefault {
+	if old.HasDefault != new.HasDefault ||
+		(old.HasDefault && new.HasDefault && normalizeDefaultExpr(old.DefaultExpr) != normalizeDefaultExpr(new.DefaultExpr)) {
 		o, n := old, new
 		changes = append(changes, Change{
 			Kind:       ChangeAlterColumnDefault,
