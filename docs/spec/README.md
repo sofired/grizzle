@@ -74,30 +74,30 @@ The upstream mapping document also uses review-planning labels:
 
 ## Current completeness
 
-| Area | Progress / target status | Tracking |
-|---|---|---|
-| Schema DSL — PostgreSQL column types | Partial — see [schema.md](./schema.md) and [codegen.md](./codegen.md) for current per-type status | M5 (#32, #137, #144) |
-| Schema DSL — MySQL column types | Partial — see [schema.md](./schema.md) and [codegen.md](./codegen.md) for current per-type status | M5 (#32) |
-| Schema DSL — SQLite column types | Mostly complete — see [schema.md](./schema.md) and [codegen.md](./codegen.md) for current per-type status | — |
-| Schema DSL — `generatedAlwaysAs` | Designed rejection — recognized in RC.1 snapshots but unsupported in initial schema input; fail with `unsupported_feature` | Unmilestoned (#172) |
-| Query builder — SELECT / INSERT / UPDATE / DELETE | Mostly complete target design — generated table/view/alias no-arg selects, non-recursive SELECT CTE SQL behavior, and dialect-supported FOR UPDATE/FOR SHARE target PARITY; Go CTE helper shape is DEVIATION:LANGUAGE; no-arg derived-source selects, no-arg joined select result shapes, mutation CTE builders, scalar subquery select-list helpers, insert runtime-hook omission, `INSERT ... SELECT`, SQLite ordered multiple conflict clauses, error-returning `Build`, and fail-fast dialect gating remain gaps; see [query-builder.md](./query-builder.md) for remaining gaps | — |
-| Query builder — missing operators | Not started — `NOT LIKE`, `NOT ILIKE`, `NOT BETWEEN` (P1); array helpers `arrayContains`, `arrayContained`, `arrayOverlaps` (designed); `WHERE` on `ON CONFLICT` (P1); `UPDATE…FROM` target design is now covered in [query-builder.md](./query-builder.md) but remains an implementation gap; `CROSS JOIN` (designed). Query-order `NULLS FIRST`/`NULLS LAST` would be GRIZZLE-ONLY if added; RC.1 uses those helpers for PostgreSQL index config, not query ordering. | M4 (#164, #163, #162, #167) |
-| Query builder — prepared statements | Designed — DEVIATION:GAP until param-capable operators/builders, `BuildPrepared`, ordered prepared-argument plans, per-execution `query.Params`, pgx reusable handles/registries, and MySQL/SQLite one-time prepared driver helpers are implemented | M6 (#166) |
-| Query builder — window frame spec | Not started — GRIZZLE-ONLY future extension; DEVIATION:GAP (not designed) | M6 (#139) |
-| Query builder — lateral join, cursor/streaming | Not started — DEVIATION:GAP (not designed) | M6 (#171, #170) |
-| Kit — legacy/current helpers (`diff` / `sql` / `snapshot` / `status`) | Implemented current surface; not part of the target RC.1 public file-migration workflow — see [docs/kit/overview.md](../kit/overview.md) and [kit.md](./kit.md) | — |
-| Kit — `migrate` | DEVIATION:BROKEN — current branch work reads migration SQL from a directory, but the full RC.1-style artifact, history, and validation contract is not yet implemented end-to-end | M3 (#154, P0) |
-| Kit — `generate` (write SQL migration files to disk) | Not started — DEVIATION:GAP (designed); highest-priority Kit gap | M3 (#153, P0) |
-| Kit — `push` CLI command | Public command surface retained, but new CLI/API work is blocked until a dedicated direct-sync safety spec exists | M3 (#157, P1) |
-| Kit — `pull` (DB → Go schema definitions) | Not started — DEVIATION:GAP (designed); introspection exists internally | M3 (#158, P1) |
-| Kit — `check` command | Not started — DEVIATION:GAP (designed); required before `generate` and `migrate`, with richer branch-collision value after artifacts exist | M3 (#169) |
-| Kit — rename resolution during `generate` | Not started — DEVIATION:GAP (designed); initial target is Drizzle RC.1-style interactive prompts, with non-interactive/config-based resolution deferred | M3 (#153, P0); track upstream follow-on in `sofired/grizzle#279` |
-| Relations — JOIN helpers (`JoinRel`, `InnerJoinRel`) | Implemented — GRIZZLE-ONLY (documented in query-builder.md) | — |
-| Relations — relational query API (`findMany`) | Not started — DEVIATION:GAP (not designed); manual batch-loading is the current approach | Not milestoned |
-| Code generation (`grizzle gen`) | Partially implemented for PostgreSQL, MySQL, and SQLite; current helper generation is narrower than the target static schema loader, resource-limit, managed-output safety, redacted diagnostics, nullable assignment, JSON/JSONB, and MySQL marker contracts — see [codegen.md](./codegen.md) | M3 follow-up |
-| Transactions — core callback shape | Implemented — PARITY for begin/callback/commit-or-rollback shape; DB/Tx row-vs-exec validation, nil/typed-nil handling, redacted error-code contract, and row ownership rules are specified target behavior but remain implementation gaps until the driver package satisfies [transactions.md](./transactions.md) | M6 follow-up |
-| Transactions — isolation levels | Not started — DEVIATION:GAP (designed) | M6 (#159, P1) |
-| Transactions — savepoints / nested transactions | Not started — DEVIATION:GAP (designed) | M6 (#143, P1) |
-| Transactions — MySQL / SQLite wrappers | Not started — DEVIATION:GAP (designed) | M6 (#160, P1) |
-| Dialects — PostgreSQL | PARITY target with listed gaps; required initial scope | — |
-| Dialects — MySQL / SQLite | DEVIATION:GAP (designed) for remaining column type gaps; target dialect interface rename/shim work and fail-fast dialect gating remain implementation gaps | M5 for type gaps |
+| Area | Progress / target status |
+|---|---|
+| Schema DSL — PostgreSQL column types | Partial — see [schema.md](./schema.md) and [codegen.md](./codegen.md) for current per-type status. |
+| Schema DSL — MySQL column types | Partial — see [schema.md](./schema.md) and [codegen.md](./codegen.md) for current per-type status. |
+| Schema DSL — SQLite column types | Mostly complete — see [schema.md](./schema.md) and [codegen.md](./codegen.md) for current per-type status. |
+| Schema DSL — `generatedAlwaysAs` | Designed rejection — recognized in RC.1 snapshots but unsupported in initial schema input; fail with `unsupported_feature`. |
+| Query builder — SELECT / INSERT / UPDATE / DELETE | Mostly complete target design — generated table/view/alias no-arg selects, non-recursive SELECT CTE SQL behavior, and dialect-supported FOR UPDATE/FOR SHARE target PARITY; Go CTE helper shape is DEVIATION:LANGUAGE; no-arg derived-source selects, no-arg joined select result shapes, mutation CTE builders, scalar subquery select-list helpers, insert runtime-hook omission, `INSERT ... SELECT`, SQLite ordered multiple conflict clauses, error-returning `Build`, and fail-fast dialect gating remain gaps; see [query-builder.md](./query-builder.md). |
+| Query builder — missing operators | `NOT LIKE`, `NOT ILIKE`, `NOT BETWEEN`, designed array helpers, conflict predicates, and `UPDATE…FROM` remain gaps. Query-order `NULLS FIRST`/`NULLS LAST` is GRIZZLE-ONLY; RC.1 uses those helpers for PostgreSQL index configuration rather than query ordering. |
+| Query builder — prepared statements | Designed — DEVIATION:GAP until param-capable operators/builders, `BuildPrepared`, ordered prepared-argument plans, per-execution `query.Params`, adaptation of pgx handles/registries, and MySQL/SQLite one-time prepared driver helpers are implemented. |
+| Query builder — window frame spec | Boundary sentinels exist, but typed frame construction remains a GRIZZLE-ONLY DEVIATION:GAP. |
+| Query builder — lateral join, cursor/streaming | DEVIATION:GAP (not designed); dialect scope and public APIs require ratification. |
+| Kit — legacy/current helpers (`diff` / `sql` / `snapshot` / `status`) | Implemented current surface; not part of the target RC.1 public file-migration workflow — see [docs/kit/overview.md](../kit/overview.md) and [kit.md](./kit.md). |
+| Kit — `migrate` | DEVIATION:BROKEN — current code does not yet implement the complete artifact, history, session, and validation contract end to end. |
+| Kit — `generate` | DEVIATION:GAP (designed); planning, typed rendering, and atomic artifact publication remain incomplete. |
+| Kit — `push` | Public implementation is intentionally deferred until a dedicated direct-sync safety specification is ratified. |
+| Kit — `pull` | DEVIATION:GAP (designed); introspection exists internally but the managed Pull workflow is incomplete. |
+| Kit — `check` | DEVIATION:GAP (designed); the reusable offline validation API and command handler remain incomplete. |
+| Kit — rename resolution during `generate` | DEVIATION:GAP (designed); initial behavior uses interactive resolution, while non-interactive/config-based resolution remains future scope. |
+| Relations — JOIN helpers (`JoinRel`, `InnerJoinRel`) | Implemented — GRIZZLE-ONLY, as documented in [query-builder.md](./query-builder.md). |
+| Relations — relational query API (`findMany`) | DEVIATION:GAP (not designed); manual batch loading is the current approach. |
+| Code generation (`grizzle gen`) | Partially implemented for PostgreSQL, MySQL, and SQLite; static schema metadata, resource limits, managed-output safety, redacted diagnostics, nullable assignments, JSON/JSONB, and MySQL marker contracts remain incomplete. |
+| Transactions — core callback shape | Implemented — PARITY for begin/callback/commit-or-rollback shape; validation, redacted error contracts, and row ownership still require conformance work. |
+| Transactions — isolation levels | DEVIATION:GAP (designed) across the public driver contract. |
+| Transactions — savepoints / nested transactions | DEVIATION:GAP (designed). |
+| Transactions — MySQL / SQLite wrappers | Generic `database/sql` wrappers exist; integration conformance and option mapping remain incomplete. |
+| Dialects — PostgreSQL | PARITY target with the listed gaps; required initial scope. |
+| Dialects — MySQL / SQLite | DEVIATION:GAP for remaining column types, interface reconciliation, and fail-fast capability gating. |
