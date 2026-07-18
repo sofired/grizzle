@@ -18,8 +18,24 @@ body:
   - type: textarea
     id: proposal
     attributes:
-      label: Proposed solution
-      description: Describe the API or behaviour you have in mind. Code snippets welcome.
+      label: Desired outcome
+      description: Describe the observable result. API or behavior examples are welcome, but keep the outcome separate from a particular implementation.
+    validations:
+      required: true
+
+  - type: textarea
+    id: in-scope
+    attributes:
+      label: In scope
+      description: What bounded behavior should this request include?
+    validations:
+      required: true
+
+  - type: textarea
+    id: out-of-scope
+    attributes:
+      label: Out of scope
+      description: What nearby behavior should this request explicitly exclude?
     validations:
       required: true
 
@@ -30,6 +46,24 @@ body:
       description: Any other approaches you've thought about?
 
   - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: List observable, testable conditions that would make this request complete.
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: compatibility
+    attributes:
+      label: Compatibility and migration impact
+      description: Note public API, dialect, data format, or upgrade implications.
+
+  - type: textarea
     id: context
     attributes:
-      label: Additional context
+      label: Specifications and additional context
+      description: Link relevant Grizzle specs, upstream behavior, examples, or prior discussions. Dependencies will be recorded with GitHub's native relationships during triage.

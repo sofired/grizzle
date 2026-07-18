@@ -307,7 +307,7 @@ Target semantics are Drizzle parity: callers must be able to omit a nullable fie
 | `interval` | `string` | DEVIATION:INTENTIONAL — PostgreSQL intervals can include months/years with no exact `time.Duration` equivalent; `string` preserves full fidelity |
 | `enum` (pg) | `string` | Generates `expr.EnumColumn` |
 | `tsvector`, `tsquery` | `string` | GRIZZLE-ONLY/source-generation support; RC.1 recognizes these type names/codecs but does not expose PostgreSQL column-builder helpers for them |
-| array | `any` | Generates `expr.ArrayColumn`; typed `[]T` generation is deferred (tracked in #144) |
+| array | `any` | Generates `expr.ArrayColumn`; typed `[]T` generation remains a separately designed gap. |
 | range types (`int4range`, `int8range`, `numrange`, `tsrange`, `tstzrange`, `daterange`) | `string` | GRIZZLE-ONLY — no Drizzle equivalent |
 
 MySQL integer mappings are dialect-specific and must not reuse PostgreSQL `serial` defaults:
