@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
-"""Reference implementation of the CombinedSHA256 artifact digest formula.
+"""Reference implementation of the artifact digest formulas.
 
-Spec: docs/spec/file-migrations-api.md:365-371
+Combined formula spec: docs/spec/file-migrations-api.md:365-371
+
+Per-file formulas pinned by this reference:
+
+    MigrationSQLSHA256 = SHA256(raw migration.sql bytes)
+    SnapshotJSONSHA256 = SHA256(raw snapshot.json bytes)
 
     SHA256(
       "grizzle-artifact-v1" || 0x00 ||
@@ -46,11 +51,20 @@ def per_file(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
 
 
+NORMALIZATION_SENSITIVE_SQL = "-- café\r\nSELECT '雪';\r\n".encode("utf-8")
+NORMALIZATION_SENSITIVE_SNAP = '{\r\n  "note": "naïve 東京"\r\n}\r\n'.encode("utf-8")
+
+
 # Test vectors pinned by artifact_digest_test.go.
 # Adding a new vector here? Also add the matching Go entry.
 VECTORS = [
     ("both_empty", b"", b""),
     ("small_ascii", b"CREATE TABLE t (id INT);", b'{"version":"1"}'),
+    (
+        "utf8_comments_crlf_trailing_newlines",
+        NORMALIZATION_SENSITIVE_SQL,
+        NORMALIZATION_SENSITIVE_SNAP,
+    ),
     ("empty_sql_with_snap", b"", b"{}"),
     ("empty_snap_with_sql", b"SELECT 1;", b""),
     (
@@ -64,9 +78,6 @@ VECTORS = [
     ("per_file_select1_with_empty_obj", b"SELECT 1;", b"{}"),
     ("per_file_empty_inputs", b"", b""),
     ("per_file_full_byte_range_sql", bytes(range(256)), b'{"v":"1"}'),
-    # Swap/framing vectors.
-    ("swap_a_sql_AAA_snap_BBB", b"AAA", b"BBB"),
-    ("swap_b_sql_BBB_snap_AAA", b"BBB", b"AAA"),
 ]
 
 

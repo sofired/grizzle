@@ -44,6 +44,11 @@ type combinedGoldenVector struct {
 	wantHex string
 }
 
+const (
+	normalizationSensitiveSQL  = "-- café\r\nSELECT '雪';\r\n"
+	normalizationSensitiveSnap = "{\r\n  \"note\": \"naïve 東京\"\r\n}\r\n"
+)
+
 // goldenCombinedVectors are independently computed by a Python reference
 // implementation in testdata/digest_reference.py. Run that script to
 // regenerate goldens after any deliberate, spec-amending change to the
@@ -62,7 +67,7 @@ type combinedGoldenVector struct {
 //
 // Any change to the spec byte layout (separator byte, domain string, label
 // strings, label order, endianness, length-prefix width, or omission of any
-// component) will cause every vector below to flip, failing this test loudly.
+// component) should make at least one vector below fail loudly.
 var goldenCombinedVectors = []combinedGoldenVector{
 	{
 		name:    "both_empty",
@@ -75,6 +80,15 @@ var goldenCombinedVectors = []combinedGoldenVector{
 		sql:     []byte("CREATE TABLE t (id INT);"),
 		snap:    []byte(`{"version":"1"}`),
 		wantHex: "0cafd83a585887b16d54263041c29c3309bd35a85068ad21a420d988a40ac95d",
+	},
+	{
+		// Valid UTF-8 SQL and JSON with a SQL comment, CRLF line endings,
+		// and trailing newlines. The golden pins those exact raw bytes so
+		// hashing cannot silently normalize text-shaped artifact content.
+		name:    "utf8_comments_crlf_trailing_newlines",
+		sql:     []byte(normalizationSensitiveSQL),
+		snap:    []byte(normalizationSensitiveSnap),
+		wantHex: "6726bbd011c3b92f787fca83aed435200df6f92552dda4f3e075e9b06fb8b26d",
 	},
 	{
 		name:    "empty_sql_with_snap",
@@ -99,9 +113,8 @@ var goldenCombinedVectors = []combinedGoldenVector{
 		wantHex: "65c1350c4e33e8986cda857b9b0bfab3643ca88694873b7de47558663dbc4d92",
 	},
 	{
-		// 1 KiB of zero bytes for both payloads — exercises the length-prefix
-		// path with a payload that is otherwise indistinguishable from absence
-		// without the length header.
+		// 1 KiB of zero bytes for both payloads exercises embedded NUL bytes
+		// together with a multi-byte big-endian length.
 		name:    "zeros_1024_each",
 		sql:     bytes.Repeat([]byte{0x00}, 1024),
 		snap:    bytes.Repeat([]byte{0x00}, 1024),
@@ -167,7 +180,7 @@ func TestArtifactDigest_CombinedByteAssembly(t *testing.T) {
 			buf.Write(v.snap)
 			want := sha256.Sum256(buf.Bytes())
 
-			name := makeTestArtifactName(i + len(goldenCombinedVectors))
+			name := makeTestArtifactName(i)
 			loaded := mustCreateArtifact(t, store, root, name, v.sql, v.snap)
 			if loaded.Digests.CombinedSHA256 != filemigrate.Digest(want) {
 				t.Errorf("CombinedSHA256 mismatch with byte-assembly\n  got:  %s\n  want: %s",
@@ -179,11 +192,10 @@ func TestArtifactDigest_CombinedByteAssembly(t *testing.T) {
 }
 
 // TestArtifactDigest_PerFileGoldenVectors locks the exact per-file SHA-256
-// values for known inputs. Per-file digests are plain SHA-256 over raw bytes
-// (no domain prefix, no length framing) per
-// docs/spec/file-migrations-artifacts.md:528-536. The MigrationSQLSHA256 is
+// values for known inputs. These tests pin per-file digests as plain SHA-256
+// over raw bytes with no domain prefix or length framing. MigrationSQLSHA256 is
 // what the DB history table records as `hash` for Drizzle RC.1 alignment, so
-// any drift here would corrupt cross-version history reads.
+// any drift here would break history-hash compatibility.
 func TestArtifactDigest_PerFileGoldenVectors(t *testing.T) {
 	cases := []struct {
 		name        string
@@ -198,6 +210,13 @@ func TestArtifactDigest_PerFileGoldenVectors(t *testing.T) {
 			snap:        []byte(`{"version":"1"}`),
 			wantSQLHex:  "f423e61fbd021a13b6ae0afb423f2da5c3cf7cc0647ddb7348266dbfd281d6fe",
 			wantSnapHex: "aa5bc61f44d5f633935d04cbccf2654c56806fc924b0083a6cb6b7545369ad64",
+		},
+		{
+			name:        "utf8_comments_crlf_trailing_newlines",
+			sql:         []byte(normalizationSensitiveSQL),
+			snap:        []byte(normalizationSensitiveSnap),
+			wantSQLHex:  "7eea9d1e2389949ca151a38a802209a7f661b78cd54f530ca585a7456d2d20e2",
+			wantSnapHex: "0eee986c58412baf4d16e1646ae79459247e7e40d4161df0a2fab705bb1b30fd",
 		},
 		{
 			name:        "select1_with_empty_obj",
@@ -225,7 +244,7 @@ func TestArtifactDigest_PerFileGoldenVectors(t *testing.T) {
 	root := mustResolveRoot(t, store, "/m", filemigrate.RootEnsureForWrite)
 	for i, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			name := makeTestArtifactName(i + 2*len(goldenCombinedVectors))
+			name := makeTestArtifactName(i)
 			loaded := mustCreateArtifact(t, store, root, name, tc.sql, tc.snap)
 
 			gotSQLHex := hex.EncodeToString(loaded.Digests.MigrationSQLSHA256[:])
@@ -240,10 +259,9 @@ func TestArtifactDigest_PerFileGoldenVectors(t *testing.T) {
 	}
 }
 
-// TestArtifactDigest_CombinedSwapDistinguishable verifies that swapping the
-// two payloads produces a different combined digest. This guards against an
-// implementation that drops the labels or treats the two sections as
-// interchangeable. The two inputs are byte-distinct, so the swap is observable.
+// TestArtifactDigest_CombinedSwapDistinguishable verifies that the combined
+// digest is sensitive to payload role and order. The two inputs are
+// byte-distinct, so the swap is observable.
 func TestArtifactDigest_CombinedSwapDistinguishable(t *testing.T) {
 	store := filemigrate.NewMemArtifactStore()
 	root := mustResolveRoot(t, store, "/m", filemigrate.RootEnsureForWrite)
@@ -259,24 +277,69 @@ func TestArtifactDigest_CombinedSwapDistinguishable(t *testing.T) {
 	}
 }
 
-// TestArtifactDigest_CombinedLengthFramingDistinguishable verifies that the
-// uint64be length prefix actually distinguishes inputs that would otherwise
-// collide under naive concatenation. The pair below has the same total payload
-// bytes but different splits between migration.sql and snapshot.json, and must
-// produce different combined digests.
-func TestArtifactDigest_CombinedLengthFramingDistinguishable(t *testing.T) {
-	store := filemigrate.NewMemArtifactStore()
-	root := mustResolveRoot(t, store, "/m", filemigrate.RootEnsureForWrite)
+// TestArtifactDigest_RawBytesAreNotNormalized proves that text-shaped artifacts
+// are hashed as raw bytes. Each pair differs by exactly one normalization a
+// caller might otherwise be tempted to apply.
+func TestArtifactDigest_RawBytesAreNotNormalized(t *testing.T) {
+	cases := []struct {
+		name         string
+		sqlA, sqlB   []byte
+		snapA, snapB []byte
+	}{
+		{
+			name:  "migration_sql_lf_vs_crlf",
+			sqlA:  []byte("-- café\nSELECT '雪';\n"),
+			sqlB:  []byte("-- café\r\nSELECT '雪';\r\n"),
+			snapA: []byte(`{"note":"naïve"}`),
+			snapB: []byte(`{"note":"naïve"}`),
+		},
+		{
+			name:  "snapshot_json_lf_vs_crlf",
+			sqlA:  []byte("SELECT 1;"),
+			sqlB:  []byte("SELECT 1;"),
+			snapA: []byte("{\n  \"note\": \"naïve\"\n}\n"),
+			snapB: []byte("{\r\n  \"note\": \"naïve\"\r\n}\r\n"),
+		},
+		{
+			name:  "migration_sql_comment_retained",
+			sqlA:  []byte("-- café\nSELECT '雪';"),
+			sqlB:  []byte("SELECT '雪';"),
+			snapA: []byte(`{"note":"naïve"}`),
+			snapB: []byte(`{"note":"naïve"}`),
+		},
+		{
+			name:  "migration_sql_trailing_newline_retained",
+			sqlA:  []byte("SELECT '雪';"),
+			sqlB:  []byte("SELECT '雪';\n"),
+			snapA: []byte(`{"note":"naïve"}`),
+			snapB: []byte(`{"note":"naïve"}`),
+		},
+		{
+			name:  "snapshot_json_trailing_newline_retained",
+			sqlA:  []byte("SELECT 1;"),
+			sqlB:  []byte("SELECT 1;"),
+			snapA: []byte(`{"note":"naïve"}`),
+			snapB: []byte("{\"note\":\"naïve\"}\n"),
+		},
+	}
 
-	a := mustCreateArtifact(t, store, root, "20240101000000_a",
-		[]byte("AAA"), []byte("B"))
-	b := mustCreateArtifact(t, store, root, "20240101000000_b",
-		[]byte("AA"), []byte("AB"))
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			store := filemigrate.NewMemArtifactStore()
+			root := mustResolveRoot(t, store, "/m", filemigrate.RootEnsureForWrite)
+			a := mustCreateArtifact(t, store, root, "20240101000000_a", tc.sqlA, tc.snapA)
+			b := mustCreateArtifact(t, store, root, "20240101000000_b", tc.sqlB, tc.snapB)
 
-	if a.Digests.CombinedSHA256 == b.Digests.CombinedSHA256 {
-		t.Errorf("length framing must distinguish (sql=%q,snap=%q) from (sql=%q,snap=%q), got identical %s",
-			"AAA", "B", "AA", "AB",
-			hex.EncodeToString(a.Digests.CombinedSHA256[:]))
+			if !bytes.Equal(tc.sqlA, tc.sqlB) && a.Digests.MigrationSQLSHA256 == b.Digests.MigrationSQLSHA256 {
+				t.Error("raw migration.sql byte variants must have distinct per-file digests")
+			}
+			if !bytes.Equal(tc.snapA, tc.snapB) && a.Digests.SnapshotJSONSHA256 == b.Digests.SnapshotJSONSHA256 {
+				t.Error("raw snapshot.json byte variants must have distinct per-file digests")
+			}
+			if a.Digests.CombinedSHA256 == b.Digests.CombinedSHA256 {
+				t.Error("raw artifact byte variants must have distinct combined digests")
+			}
+		})
 	}
 }
 
@@ -300,10 +363,8 @@ func TestArtifactDigest_CombinedDeterministic(t *testing.T) {
 	}
 }
 
-// TestArtifactDigest_RoundtripsThroughRead pins that ReadArtifact reproduces
-// the same digests that CreateArtifact emitted. This rules out a class of bug
-// where digests are computed only on the write path (or only on the read
-// path), or where the read path silently rehashes from a normalized buffer.
+// TestArtifactDigest_RoundtripsThroughRead pins digest consistency for
+// unchanged bytes across MemArtifactStore CreateArtifact and ReadArtifact.
 func TestArtifactDigest_RoundtripsThroughRead(t *testing.T) {
 	store := filemigrate.NewMemArtifactStore()
 	root := mustResolveRoot(t, store, "/m", filemigrate.RootEnsureForWrite)
@@ -328,8 +389,7 @@ func TestArtifactDigest_RoundtripsThroughRead(t *testing.T) {
 }
 
 // makeTestArtifactName builds a unique, validation-passing migration directory
-// name for the i-th vector. Callers offset i across test functions so that
-// CreateArtifact does not see duplicates within a single shared store.
+// name for the i-th vector within a test-local store.
 func makeTestArtifactName(i int) string {
 	return fmt.Sprintf("20240101000000_v%04d", i)
 }
