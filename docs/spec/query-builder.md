@@ -403,7 +403,8 @@ Drizzle RC.1 does not expose public typed helpers such as `rowNumber().over(...)
 |---|---|---|
 | raw `` sql`row_number() over (...)` `` / `` sql`rank() over (...)` `` | typed wrappers such as `expr.RowNumber().PartitionBy(...).OrderBy(...)` and `expr.Rank()` | GRIZZLE-ONLY typed convenience over raw SQL parity |
 | raw `` sql`lag(${col}) over (...)` `` / `` sql`lead(${col}) over (...)` `` | `expr.Lag(col, ...)`, `expr.Lead(col, ...)` | GRIZZLE-ONLY typed convenience over raw SQL parity |
-| raw `` sql`first_value(${col}) over (...)` `` and related navigation functions | `expr.FirstValue(col)`, `expr.LastValue(col)`, `expr.NthValue(col, n)`, `expr.Ntile(n)`, `expr.PercentRank()`, `expr.CumeDist()` | GRIZZLE-ONLY typed convenience over raw SQL parity |
+| raw `` sql`first_value(${col}) over (...)` `` and related navigation functions | `expr.FirstValue(col)`, `expr.LastValue(col)`, `expr.NthValue(col, n)` | GRIZZLE-ONLY typed convenience over raw SQL parity |
+| raw `` sql`ntile(${n}) over (...)` ``, `` sql`percent_rank() over (...)` ``, and `` sql`cume_dist() over (...)` `` | planned `expr.Ntile(n)`, `expr.PercentRank()`, and `expr.CumeDist()` | GRIZZLE-ONLY typed convenience; DEVIATION:GAP (designed) until implemented |
 | raw SQL `PARTITION BY` / `ORDER BY` inside `OVER (...)` | `.PartitionBy(cols...)` / `.OrderBy(cols...)` on typed window expressions | GRIZZLE-ONLY typed convenience |
 | raw SQL frame spec (`ROWS` / `RANGE` / `GROUPS BETWEEN`) | typed frame API | GRIZZLE-ONLY future extension; DEVIATION:GAP (not designed) until the frame API is specified (#139) |
 | *(no Drizzle equivalent)* | `expr.WinSum(col)` | GRIZZLE-ONLY — see below |

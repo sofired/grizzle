@@ -1,14 +1,16 @@
 # File Migrations Implementation Sequence
 
-This document is the Phase 4 implementation sequencing plan for the Drizzle RC.1-style file-migration workflow.
+This document is the implementation sequencing plan for the Drizzle RC.1-style file-migration workflow.
 
 The implementation target is the spec package rooted at [kit.md](./kit.md), with behavior pinned to Drizzle ORM / Drizzle Kit `v1.0.0-rc.1`.
 
 ## Status
 
-- Phase 2 target specs are complete.
-- Phase 3 broad documentation review found no remaining Medium or High findings.
+- The historical Phase 2 target-spec pass is complete.
+- The historical Phase 3 broad documentation review found no remaining Medium or High findings.
 - Remaining implementation work should proceed in the sequence below unless the project owner explicitly changes the order.
+
+The Phase 2/3 wording above identifies completed specification-review passes, not a second delivery schedule. GitHub Milestones are the only scheduling model. Milestone 01 is cross-cutting backlog and API governance, so it has no file-migration implementation section here; the workflow sequence intentionally moves from the completed Milestone 00 foundation to Milestone 02.
 
 ## Rationale
 
@@ -35,11 +37,11 @@ Prior work attempted to repurpose `migrate` before the rest of that workflow exi
 - Use Drizzle RC.1 source behavior as the default answer when implementation questions arise; any divergence must be documented before code changes.
 - Existing code, open PRs, and GitHub issues are triaged against this sequence before implementation starts. They are not implicitly accepted just because they already exist.
 - Exploratory prototypes are allowed only to answer implementation questions; they must not be promoted into production code until reconciled against the ratified specs.
-- Intermediate slices must remain easy to back out. If a slice stalls, either revert it or leave it behind non-command-path APIs until the missing spec or implementation dependency is resolved.
+- Intermediate milestone increments must remain easy to back out. If an increment stalls, either revert it or leave it behind non-command-path APIs until the missing spec or implementation dependency is resolved.
 
 ## GitHub And Existing-Code Triage
 
-Before Slice 0 implementation starts, the repository and GitHub backlog must be normalized against the ratified spec.
+Before Milestone 00 implementation starts, the repository and GitHub backlog must be normalized against the ratified spec.
 
 ### Existing Code
 
@@ -63,55 +65,54 @@ Every open PR touching migration, schema loading, codegen, query metadata, diale
 
 Classification:
 
-- `Merge after rebase`: aligns with the spec and belongs in the current or next slice.
-- `Split`: contains useful parts, but mixes multiple slices or unrelated cleanup.
+- `Merge after rebase`: aligns with the spec and belongs in the current or next milestone.
+- `Split`: contains useful parts, but mixes multiple milestones or unrelated cleanup.
 - `Rework`: useful intent, but implementation conflicts with the spec.
 - `Close / supersede`: implements the old checksum/live-diff approach, old artifact layout, unsafe migration behavior, or an unapproved divergence.
 
 Rules:
 
-- PRs must state which slice they implement
+- PRs must state which milestone outcome they advance
 - PRs must link to the relevant spec section
-- PRs must not mix workflow slices unless the dependency is unavoidable and documented
-- PRs that change public command meaning must wait until Slice 8 unless explicitly scoped as internal-only preparation
+- PRs must not mix milestone outcomes unless the dependency is unavoidable and documented
+- PRs that change public command meaning must wait until Milestone 09 unless explicitly scoped as internal-only preparation
 
 ### GitHub Issues
 
-Existing issues should be mapped into implementation slices and milestones.
+Existing issues should be mapped into the unified GitHub Milestones and native workstream hierarchy.
 
 Required labels or equivalent project fields:
 
-- `file-migrations`
-- `phase:implementation`
-- `slice:0` through `slice:8`
-- `spec-required` for issues that need a spec amendment before implementation
-- `blocked-by-spec` for issues intentionally deferred until a dedicated spec exists
+- `area:file-migrations` for file-migration work
+- `type:spec` for specification decisions
+- `status:ready`, `status:in-progress`, or `status:icebox` when a lifecycle state applies
 - `superseded` for issues made obsolete by the RC.1 file-migration decision
 
 Issue handling rules:
 
 - close or mark superseded issues that only track the discarded checksum-based migration direction
 - keep issues for genuine implementation gaps, but rewrite acceptance criteria to cite the ratified specs
-- create missing issues for each implementation slice before coding that slice
+- create missing issues for each milestone outcome before coding that outcome
 - direct-sync `push`, `export`, legacy upgrade support, and non-interactive rename resolution remain backlog items unless separately approved
 
 ### Triage Deliverable
 
 Create or update a GitHub project/milestone view with:
 
-- one parent issue per implementation slice
-- child issues for concrete implementation tasks
+- root workstream issues #282–#289 for navigation
+- exactly one native parent for every non-root issue
+- native sub-issues for concrete implementation tasks
 - linked PRs only after classification
-- explicit blockers for cross-slice dependencies
+- native blocked-by links for hard dependencies
 
 Exit criteria:
 
 - every open migration-related PR is classified
 - every migration-related issue is mapped, superseded, or deferred
-- Slice 0 has a concrete issue list ready for implementation
+- Milestone 00 has a concrete issue list ready for implementation
 - no open PR remains that can accidentally merge old-direction behavior into the new workflow
 
-## Slice 0: Package Boundary And Test Harness
+## Milestone 00: File-Migration Foundation
 
 Objective:
 Create a safe place to build the new workflow without letting existing migration behavior shape the target design.
@@ -119,7 +120,7 @@ Create a safe place to build the new workflow without letting existing migration
 Build:
 
 - internal/package boundaries for file-migration APIs defined in [file-migrations-api.md](./file-migrations-api.md)
-- stable error codes and redacted diagnostic carriers used by all later slices
+- stable error codes and redacted diagnostic carriers used by all later milestones
 - resource-limit structs and test fixtures
 - test filesystem/source/artifact stores with no-follow and containment behavior
 
@@ -129,7 +130,7 @@ Exit criteria:
 - new internal APIs compile but do not take over the CLI command path yet
 - tests can exercise stores, diagnostics, and limits without a database
 
-## Slice 1: Artifact Discovery And Offline Validation Core
+## Milestone 02: Artifact Discovery And Validation
 
 Objective:
 Implement the local artifact model before generating or applying anything.
@@ -149,7 +150,7 @@ Exit criteria:
 - malformed artifact cases produce stable redacted errors
 - no database connection is required
 
-## Slice 2: Snapshot And Schema Input Planning
+## Milestone 03: Snapshot And Schema Planning
 
 Objective:
 Produce and compare Grizzle snapshots without writing migration artifacts.
@@ -168,7 +169,7 @@ Exit criteria:
 - unsupported RC.1 fields fail before artifact writes
 - snapshot fixtures round-trip or fail exactly as specified
 
-## Slice 3: `check`
+## Milestone 04: `check`
 
 Objective:
 Make `check` the trusted offline gate for later mutating commands.
@@ -186,7 +187,7 @@ Exit criteria:
 - `check` catches malformed graphs and unsafe artifacts
 - `check` is callable by later `generate` and `migrate` code without CLI coupling
 
-## Slice 4: `generate`
+## Milestone 05: `generate`
 
 Objective:
 Create migration artifacts from schema definitions on top of `check`.
@@ -207,7 +208,7 @@ Exit criteria:
 - generated artifacts pass `check`
 - failed generation leaves no partial artifacts
 
-## Slice 5: History, Locking, And Migration Sessions
+## Milestone 06: Migration Sessions And History
 
 Objective:
 Prepare the database-side foundation before executing migrations.
@@ -227,7 +228,7 @@ Exit criteria:
 - unsupported or legacy history schemas fail as specified
 - concurrent migration attempts are serialized or fail safely
 
-## Slice 6: `migrate`
+## Milestone 07: `migrate`
 
 Objective:
 Apply reviewed artifacts safely.
@@ -247,9 +248,9 @@ Exit criteria:
 - generated artifacts can be applied end-to-end
 - applied migrations are skipped by name on later runs
 - failed runs surface deterministic state and diagnostics
-- only after this slice may the CLI `migrate` command be wired to the new workflow
+- only after this milestone may the CLI `migrate` command be wired to the new workflow
 
-## Slice 7: `pull` And `pull --init`
+## Milestone 08: `pull` And `pull --init`
 
 Objective:
 Add database-to-schema bootstrapping after the core artifact/history path exists.
@@ -269,7 +270,7 @@ Exit criteria:
 - `pull --init` records reviewed bootstrap state without executing its SQL
 - broad-scan diagnostics and object refs follow the redaction contract
 
-## Slice 8: CLI Cutover And Cleanup
+## Milestone 09: CLI Cutover And Release
 
 Objective:
 Expose the completed RC.1-style workflow and remove ambiguity.
@@ -298,7 +299,7 @@ Exit criteria:
 
 ## Implementation Test Matrix
 
-Each slice should add focused tests for the behavior it owns. Before the CLI cutover, the implementation should have coverage for:
+Each milestone should add focused tests for the behavior it owns. Before the CLI cutover, the implementation should have coverage for:
 
 - generation from an empty state
 - generation from prior snapshot and artifact state

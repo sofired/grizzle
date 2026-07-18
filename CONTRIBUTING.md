@@ -15,6 +15,8 @@ Open an issue using the **Bug report** template. Include:
 
 Open an issue using the **Feature request** template before writing code. This lets us discuss the design and avoid duplicated effort.
 
+Repository maintainers organize accepted work using a single scheduling model based on GitHub Milestones and the native issue relationships described in the [project plan](docs/project-plan.md). Issue bodies should focus on outcome, scope, and testable acceptance criteria rather than duplicating dependency lists.
+
 ## Development setup
 
 ```sh
@@ -25,7 +27,7 @@ go test ./...
 
 No external services are required for the unit tests. Integration tests (under `driver/pgx/`) require a PostgreSQL instance — set `GRIZZLE_TEST_DSN` to a connection string to run them.
 
-## Pull requests
+## Pull requests when contributions reopen
 
 1. **Fork** the repository and create a branch from `main`.
 2. Keep changes focused — one logical change per PR.
