@@ -101,12 +101,12 @@ In Drizzle, the column name is the first argument to the type function: `uuid('i
 | Drizzle | Grizzle | Status |
 |---|---|---|
 | `mysqlTable(name, cols)` | `mysql.Table(name, cols...)` | PARITY |
-| `int(name, { unsigned? })` | `mysql.Int()` plus unsigned option | PARITY for DDL and generated signed/unsigned Go type mapping; see [codegen.md](./codegen.md#go-type-mappings) |
+| `int(name, { unsigned? })` | `mysql.Integer()` plus unsigned option | PARITY target; DEVIATION:GAP because the current re-exported PostgreSQL builder has no MySQL unsigned representation or generated unsigned Go type mapping |
 | `varchar(name, { length, enum? })` | `mysql.Varchar(n)` plus Go enum/type policy | PARITY for DDL; Drizzle `enum` is TypeScript type narrowing and maps to Go codegen/type policy as DEVIATION:LANGUAGE until represented |
 | `text(name, { enum? })` | `mysql.Text()` plus Go enum/type policy | PARITY for DDL; Drizzle `enum` is TypeScript type narrowing and maps to Go codegen/type policy as DEVIATION:LANGUAGE until represented |
 | `boolean(name)` | `mysql.Boolean()` | PARITY |
 | `timestamp(name, { mode?, fsp? })` | `mysql.Timestamp()` plus mode/fsp mapping | PARITY for DDL; mode/fsp API coverage is DEVIATION:GAP until specified |
-| `bigint(name, { mode, unsigned? })` | `mysql.BigInt()` plus mode/unsigned mapping | PARITY for DDL and generated signed/unsigned Go type mapping; Drizzle mode-specific API behavior remains DEVIATION:GAP until represented |
+| `bigint(name, { mode, unsigned? })` | `mysql.BigInt()` plus mode/unsigned mapping | PARITY target; DEVIATION:GAP until mode, unsigned DDL, and generated signed/unsigned Go type behavior are represented |
 | `serial(name)` | `mysql.Serial()` | PARITY for DDL; generated Go type `uint64` is DEVIATION:LANGUAGE from RC.1's JavaScript `number`/uint53 surface to preserve MySQL's unsigned physical range |
 | `datetime(name, { mode?, fsp? })` | `mysql.DateTime()` plus mode/fsp mapping | PARITY target; DEVIATION:GAP until API/options are specified/implemented |
 | `date(name, { mode? })` | `mysql.Date()` plus mode-specific Go type mapping | PARITY target for DDL; mode is a type/API mapping concern and is DEVIATION:GAP until specified/implemented |
@@ -117,9 +117,9 @@ In Drizzle, the column name is the first argument to the type function: `uuid('i
 | `real(name, { precision?, scale? })` | `mysql.Real()` plus precision/scale options | PARITY target; DEVIATION:GAP until API/options are specified/implemented |
 | `decimal(name, { precision?, scale?, unsigned?, mode? })` | `mysql.Decimal(precision?, scale?)` plus unsigned/mode-specific Go type mapping | PARITY target; DEVIATION:GAP until API/options are specified/implemented |
 | `json(name)` | `mysql.JSON()` | PARITY target; DEVIATION:GAP until implemented |
-| `mediumint(name, { unsigned? })` | `mysql.MediumInt()` plus unsigned option | PARITY for DDL and generated signed/unsigned Go type mapping |
-| `smallint(name, { unsigned? })` | `mysql.SmallInt()` plus unsigned option | PARITY target for DDL and generated signed/unsigned Go type mapping; DEVIATION:GAP until builder coverage is implemented if missing |
-| `tinyint(name, { unsigned? })` | `mysql.TinyInt()` plus unsigned option | PARITY target for DDL and generated signed/unsigned Go type mapping; DEVIATION:GAP until builder coverage is implemented if missing |
+| `mediumint(name, { unsigned? })` | `mysql.MediumInt()` plus unsigned option | PARITY target; DEVIATION:GAP until unsigned DDL and generated unsigned Go type mapping are implemented |
+| `smallint(name, { unsigned? })` | `mysql.SmallInt()` plus unsigned option | PARITY target; DEVIATION:GAP until unsigned DDL and generated unsigned Go type mapping are implemented |
+| `tinyint(name, { unsigned? })` | `mysql.TinyInt()` plus unsigned option | PARITY target; DEVIATION:GAP until unsigned DDL and generated unsigned Go type mapping are implemented |
 | `binary(name)` | DEVIATION:GAP (not designed) | — |
 | `varbinary(name)` | DEVIATION:GAP (not designed) | — |
 | `blob(name)` | DEVIATION:GAP (not designed) | — |

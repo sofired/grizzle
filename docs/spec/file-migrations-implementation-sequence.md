@@ -1,14 +1,16 @@
 # File Migrations Implementation Sequence
 
-This document is the Phase 4 implementation sequencing plan for the Drizzle RC.1-style file-migration workflow.
+This document is the implementation sequencing plan for the Drizzle RC.1-style file-migration workflow.
 
 The implementation target is the spec package rooted at [kit.md](./kit.md), with behavior pinned to Drizzle ORM / Drizzle Kit `v1.0.0-rc.1`.
 
 ## Status
 
-- Phase 2 target specs are complete.
-- Phase 3 broad documentation review found no remaining Medium or High findings.
+- The historical Phase 2 target-spec pass is complete.
+- The historical Phase 3 broad documentation review found no remaining Medium or High findings.
 - Remaining implementation work should proceed in the sequence below unless the project owner explicitly changes the order.
+
+The Phase 2/3 wording above identifies completed specification-review passes, not a second delivery schedule. GitHub Milestones are the only scheduling model. Milestone 01 is cross-cutting backlog and API governance, so it has no file-migration implementation section here; the workflow sequence intentionally moves from the completed Milestone 00 foundation to Milestone 02.
 
 ## Rationale
 

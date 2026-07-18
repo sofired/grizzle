@@ -106,7 +106,7 @@ The rules below are the RC.1-parity target. Any current silent dropping or suppr
 
 ### JSONB operators — GRIZZLE-ONLY (PostgreSQL-specific typed convenience)
 
-`JSONBColumn[T]` and typed containment/existence/delete-path helpers (`@>`, `<@`, `?`, `?|`, `?&`, `#-`) are restricted to generated handles backed by `pg.JSONB()`. Drizzle RC.1 has distinct PostgreSQL `json()` and `jsonb()` builders, and PostgreSQL containment/existence/delete-path operators are JSONB-only. Plain `JSONColumn[T]` is the generated handle for plain JSON across supported dialects and must not expose JSONB-only helpers. Shared extraction helpers such as `->`, `->>`, `#>`, and `#>>` may be offered for PostgreSQL plain JSON if specified; otherwise plain JSON uses raw SQL or an explicit cast. Non-PostgreSQL builders should omit unsupported JSON helpers or return `unsupported_feature` rather than silently changing JSON semantics. Tracked as part of #140.
+`JSONBColumn[T]` and typed containment/existence/delete-path helpers (`@>`, `<@`, `?`, `?|`, `?&`, `#-`) are restricted to generated handles backed by `pg.JSONB()`. Drizzle RC.1 has distinct PostgreSQL `json()` and `jsonb()` builders, and PostgreSQL containment/existence/delete-path operators are JSONB-only. Plain `JSONColumn[T]` is the generated handle for plain JSON across supported dialects and must not expose JSONB-only helpers. Shared extraction helpers such as `->`, `->>`, `#>`, and `#>>` may be offered for PostgreSQL plain JSON if specified; otherwise plain JSON uses raw SQL or an explicit cast. Non-PostgreSQL builders should omit unsupported JSON helpers or return `unsupported_feature` rather than silently changing JSON semantics.
 
 ### Full-text search — GRIZZLE-ONLY (PostgreSQL-only)
 
