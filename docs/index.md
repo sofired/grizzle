@@ -28,7 +28,7 @@ features:
 
   - icon: 🔧
     title: Migration kit
-    details: Target workflow: generate migration artifacts, review them, run check, then migrate with database history tracking. Current legacy helpers remain separate until the RC.1 file workflow lands.
+    details: "Target workflow: generate migration artifacts, review them, run check, then migrate with database history tracking. Current legacy helpers remain separate until the RC.1 file workflow lands."
 
   - icon: ✨
     title: Code generation
