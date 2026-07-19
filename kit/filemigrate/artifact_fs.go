@@ -309,13 +309,30 @@ func (s *FSArtifactStore) CreateArtifact(ctx context.Context, root ArtifactRoot,
 	if err := rootHandle.Rename(tmpName, artifact.Name); err != nil {
 		return nil, &Error{Code: CodeInvalidPath, Op: fsOp + ".create_artifact", Migration: artifact.Name, Err: err}
 	}
-	if err := verifySecureDirIdentity(rootHandle, artifact.Name, stagingInfo); err != nil {
+	publishedDir, publishedInfo, err := openSecureDir(rootHandle, artifact.Name, nil)
+	if err != nil {
+		return nil, &Error{Code: CodeInvalidPath, Op: fsOp + ".create_artifact", Migration: artifact.Name, Err: err}
+	}
+	defer func() { _ = publishedDir.Close() }()
+	if !os.SameFile(stagingInfo, publishedInfo) {
+		return nil, &Error{Code: CodeInvalidPath, Op: fsOp + ".create_artifact", Migration: artifact.Name, Err: errSecurePathChanged}
+	}
+	sql, err := readArtifactFile(ctx, publishedDir, "migration.sql", lim.MaxMigrationSQLBytes)
+	if err != nil {
+		return nil, &Error{Code: CodeInvalidPath, Op: fsOp + ".create_artifact", Migration: artifact.Name, Err: err}
+	}
+	snap, err := readArtifactFile(ctx, publishedDir, "snapshot.json", lim.MaxSnapshotJSONBytes)
+	if err != nil {
+		return nil, &Error{Code: CodeInvalidPath, Op: fsOp + ".create_artifact", Migration: artifact.Name, Err: err}
+	}
+	if !bytes.Equal(sql, artifact.MigrationSQL) || !bytes.Equal(snap, artifact.SnapshotJSON) {
+		return nil, &Error{Code: CodeInvalidPath, Op: fsOp + ".create_artifact", Migration: artifact.Name, Err: errSecureContentChanged}
+	}
+	if err := verifySecureDirIdentity(rootHandle, artifact.Name, publishedInfo); err != nil {
 		return nil, &Error{Code: CodeInvalidPath, Op: fsOp + ".create_artifact", Migration: artifact.Name, Err: err}
 	}
 
-	digests := computeArtifactDigest(artifact.MigrationSQL, artifact.SnapshotJSON)
-	sql := bytes.Clone(artifact.MigrationSQL)
-	snap := bytes.Clone(artifact.SnapshotJSON)
+	digests := computeArtifactDigest(sql, snap)
 	return &LoadedArtifact{
 		Name:                 artifact.Name,
 		Dir:                  target,

@@ -17,10 +17,11 @@ import (
 var errSecureFilesystemUnsupported = errors.New("secure handle-relative filesystem operations are unsupported")
 
 var (
-	errSecurePathChanged  = errors.New("filesystem entry changed during secure open")
-	errSecureSymlink      = errors.New("symlinks are not supported")
-	errSecureNotDirectory = errors.New("not a directory")
-	errSecureNotRegular   = errors.New("not a regular file")
+	errSecurePathChanged    = errors.New("filesystem entry changed during secure open")
+	errSecureContentChanged = errors.New("filesystem contents changed during secure verification")
+	errSecureSymlink        = errors.New("symlinks are not supported")
+	errSecureNotDirectory   = errors.New("not a directory")
+	errSecureNotRegular     = errors.New("not a regular file")
 )
 
 // secureFSTestHooks permits deterministic race injection through public store

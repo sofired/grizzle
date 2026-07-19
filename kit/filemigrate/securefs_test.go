@@ -450,3 +450,47 @@ func TestFSArtifactStore_CreateArtifact_StagingVerificationSwapLeavesReplacement
 		t.Fatalf("original staging directory was unexpectedly removed: %v", err)
 	}
 }
+
+func TestFSArtifactStore_CreateArtifact_PublishedContentSwapRejected(t *testing.T) {
+	if err := ensureSecureFilesystemSupported(); err != nil {
+		t.Skip(err)
+	}
+	store := NewFSArtifactStore()
+	rootDir := t.TempDir()
+	root, err := store.ResolveRoot(t.Context(), rootDir, ResolveArtifactRootOptions{Mode: RootEnsureForWrite})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var tamperErr error
+	hooks := secureFSTestHooks{beforeArtifactPublish: func(stagingName string) {
+		tamperErr = os.WriteFile(
+			filepath.Join(root.RealPath, stagingName, "migration.sql"),
+			[]byte("tampered"),
+			0o640,
+		)
+	}}
+	ctx := context.WithValue(t.Context(), secureFSTestHooksKey{}, hooks)
+	const name = "20240101000000_content_swap"
+	loaded, err := store.CreateArtifact(ctx, root, NewArtifact{
+		Name:         name,
+		MigrationSQL: []byte("safe"),
+		SnapshotJSON: []byte("{}"),
+	}, CreateArtifactOptions{})
+	if tamperErr != nil {
+		t.Fatalf("install race fixture: %v", tamperErr)
+	}
+	if loaded != nil {
+		t.Fatalf("content swap returned a loaded artifact: %+v", loaded)
+	}
+	if !errors.Is(err, ErrInvalidPath) || !errors.Is(err, errSecureContentChanged) {
+		t.Fatalf("got %v, want invalid_path content-change error", err)
+	}
+	published, err := os.ReadFile(filepath.Join(root.RealPath, name, "migration.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(published, []byte("tampered")) {
+		t.Fatalf("published bytes = %q, want tampered fixture", published)
+	}
+}
