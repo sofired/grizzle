@@ -218,6 +218,9 @@ func (s *FSArtifactStore) ReadArtifact(ctx context.Context, root ArtifactRoot, n
 	if err != nil {
 		return nil, &Error{Code: artifactReadErrorCode(err), Op: fsOp + ".read_artifact", Migration: name, Err: err}
 	}
+	if err := validateMigrationSQL(name, sql); err != nil {
+		return nil, err
+	}
 
 	digests := computeArtifactDigest(sql, snap)
 	return &LoadedArtifact{
