@@ -158,6 +158,86 @@ func TestOpenSecureFile_IdentityReplacementRejected(t *testing.T) {
 	}
 }
 
+func TestOpenSecureFile_SymlinkSwapToSameFileRejected(t *testing.T) {
+	if err := ensureSecureFilesystemSupported(); err != nil {
+		t.Skip(err)
+	}
+	rootDir := t.TempDir()
+	victim := filepath.Join(rootDir, "migration.sql")
+	original := filepath.Join(rootDir, "original.sql")
+	if err := os.WriteFile(victim, []byte("safe"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	root, err := os.OpenRoot(rootDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = root.Close() }()
+
+	var swapErr error
+	f, _, err := openSecureFile(root, "migration.sql", func() {
+		if renameErr := os.Rename(victim, original); renameErr != nil {
+			swapErr = renameErr
+			return
+		}
+		swapErr = os.Symlink("original.sql", victim)
+	})
+	if errors.Is(swapErr, os.ErrPermission) {
+		t.Skipf("symlinks are not available: %v", swapErr)
+	}
+	if swapErr != nil {
+		t.Fatalf("install race fixture: %v", swapErr)
+	}
+	if f != nil {
+		_ = f.Close()
+		t.Fatal("same-file symlink swap returned a file handle")
+	}
+	if !errors.Is(err, errSecureSymlink) {
+		t.Fatalf("got %v, want symlink error", err)
+	}
+}
+
+func TestOpenSecureDir_SymlinkSwapToSameDirectoryRejected(t *testing.T) {
+	if err := ensureSecureFilesystemSupported(); err != nil {
+		t.Skip(err)
+	}
+	rootDir := t.TempDir()
+	victim := filepath.Join(rootDir, "artifact")
+	original := filepath.Join(rootDir, "original-artifact")
+	if err := os.Mkdir(victim, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	root, err := os.OpenRoot(rootDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = root.Close() }()
+
+	var swapErr error
+	child, _, err := openSecureDir(root, "artifact", func() {
+		if renameErr := os.Rename(victim, original); renameErr != nil {
+			swapErr = renameErr
+			return
+		}
+		swapErr = os.Symlink("original-artifact", victim)
+	})
+	if errors.Is(swapErr, os.ErrPermission) {
+		t.Skipf("symlinks are not available: %v", swapErr)
+	}
+	if swapErr != nil {
+		t.Fatalf("install race fixture: %v", swapErr)
+	}
+	if child != nil {
+		_ = child.Close()
+		t.Fatal("same-directory symlink swap returned a root handle")
+	}
+	if !errors.Is(err, errSecureSymlink) {
+		t.Fatalf("got %v, want symlink error", err)
+	}
+}
+
 func TestFSArtifactStore_SecureErrorEscapesControlCharacters(t *testing.T) {
 	if err := ensureSecureFilesystemSupported(); err != nil {
 		t.Skip(err)

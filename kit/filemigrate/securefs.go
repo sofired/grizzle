@@ -154,6 +154,23 @@ func openSecureDirFromInfo(parent *os.Root, name string, info fs.FileInfo, after
 		_ = child.Close()
 		return nil, nil, errSecurePathChanged
 	}
+	currentInfo, err := parent.Lstat(name)
+	if err != nil {
+		_ = child.Close()
+		return nil, nil, sanitizeSecureFSError(err)
+	}
+	if currentInfo.Mode()&fs.ModeSymlink != 0 {
+		_ = child.Close()
+		return nil, nil, errSecureSymlink
+	}
+	if !currentInfo.IsDir() {
+		_ = child.Close()
+		return nil, nil, errSecureNotDirectory
+	}
+	if !os.SameFile(openedInfo, currentInfo) {
+		_ = child.Close()
+		return nil, nil, errSecurePathChanged
+	}
 	return child, openedInfo, nil
 }
 
@@ -192,6 +209,23 @@ func openSecureFile(parent *os.Root, name string, afterLstat func()) (*os.File, 
 		return nil, nil, errSecureNotRegular
 	}
 	if !os.SameFile(info, openedInfo) {
+		_ = f.Close()
+		return nil, nil, errSecurePathChanged
+	}
+	currentInfo, err := parent.Lstat(name)
+	if err != nil {
+		_ = f.Close()
+		return nil, nil, sanitizeSecureFSError(err)
+	}
+	if currentInfo.Mode()&fs.ModeSymlink != 0 {
+		_ = f.Close()
+		return nil, nil, errSecureSymlink
+	}
+	if !currentInfo.Mode().IsRegular() {
+		_ = f.Close()
+		return nil, nil, errSecureNotRegular
+	}
+	if !os.SameFile(openedInfo, currentInfo) {
 		_ = f.Close()
 		return nil, nil, errSecurePathChanged
 	}
