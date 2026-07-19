@@ -29,6 +29,15 @@ jobs:
       - name: Test
         run: go test -race -count=1 ./...
 
+  digest-vectors:
+    name: Artifact digest vectors
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+      - name: Check canonical artifact digest vectors
+        run: python3 kit/filemigrate/testdata/digest_reference.py --check
+
   lint:
     name: Lint
     runs-on: ubuntu-latest
