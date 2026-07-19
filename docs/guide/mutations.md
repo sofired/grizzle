@@ -91,9 +91,9 @@ query.InsertInto(db.UsersT).
     DoUpdateSetStruct(UserUpdate{Enabled: &enabled})
 ```
 
-### Grizzle-only / future constraint targets
+### Grizzle-only constraint targets
 
-Drizzle RC.1 PostgreSQL conflict targets are column-based; SQLite also accepts trusted SQL conflict-target expressions. A named-constraint conflict helper such as `OnConflictConstraint("users_realm_username_idx")` is not RC.1 parity and must stay out of the initial parity path unless it is separately implemented and labeled as a Grizzle-only extension.
+Drizzle RC.1 PostgreSQL conflict targets are column-based; SQLite also accepts trusted SQL conflict-target expressions. `OnConflictConstraint("users_realm_username_idx")` is a Grizzle-only PostgreSQL extension. SQLite does not support the `ON CONSTRAINT` target form, so building this helper with SQLite (or any dialect whose `SupportsOnConflictConstraint()` returns false) fails with `unsupported_feature`.
 
 ### Dialect-specific ignore helpers
 

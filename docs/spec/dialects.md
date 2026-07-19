@@ -7,7 +7,7 @@ Grizzle's dialect system is the Go equivalent of [Drizzle's multi-dialect suppor
 | Dialect | Drizzle package | Grizzle package | Status |
 |---|---|---|---|
 | PostgreSQL | `drizzle-orm/pg-core` | `schema/pg`, `dialect.Postgres` | PARITY target with listed gaps; required initial scope |
-| MySQL / MariaDB | `drizzle-orm/mysql-core` | `schema/mysql`, `dialect.MySQL` | DEVIATION:GAP (designed) for remaining column type gaps; see [schema.md](./schema.md) |
+| MySQL 8.0+ | `drizzle-orm/mysql-core` | `schema/mysql`, `dialect.MySQL` | DEVIATION:GAP (designed) for remaining column type gaps; see [schema.md](./schema.md) |
 | SQLite | `drizzle-orm/sqlite-core` | `schema/sqlite`, `dialect.SQLite` | DEVIATION:GAP (designed) for remaining column type gaps; see [schema.md](./schema.md) |
 | CockroachDB | `drizzle-orm/cockroach-core` | Use `dialect.Postgres` where compatible only after dedicated validation | DEVIATION:GAP (not designed); file-migration support is out of initial scope |
 | Neon, Supabase | Use `pg-core` | Use `dialect.Postgres` where driver-compatible | DEVIATION:GAP (not designed); file-migration support depends on driver capability |
@@ -41,9 +41,8 @@ Window-function SQL capability is a database feature row, not a claim that Drizz
 
 All query builder operations must route dialect-specific SQL through the `Dialect` interface — no dialect name checks (`if d.Name() == "postgres"`) inside query builder code.
 
-Target interface:
-
-The current branch still exposes older names such as `InsertIgnoreClause` and `SupportsForShareOf` in places. The interface below is the RC.1-parity target; implementation must either migrate the current interface to this shape or provide compatibility shims while preserving the target semantics.
+Current interface (the authoritative definition is `dialect.Dialect` in
+`dialect/dialect.go`):
 
 ```go
 type UpsertStyle string
@@ -56,25 +55,25 @@ const (
 
 type Dialect interface {
     Placeholder(n int) string
-    QuoteIdent(name string) (string, error)
+    QuoteIdent(name string) string
     Name() string
     SupportsReturning() bool
     UpsertStyle() UpsertStyle
-    MySQLInsertIgnoreKeyword() string
-    SQLiteOnConflictDoNothingClause() string
+    SupportsOnConflictConstraint() bool   // PostgreSQL ON CONFLICT ON CONSTRAINT only
+    InsertIgnoreClause() string
+    SupportsIgnoreConflicts() bool
     SupportsCTE() bool
     SupportsWindowFunctions() bool
     SupportsDistinctOn() bool
-    SupportsForUpdate() bool                // FOR UPDATE / FOR SHARE
-    SupportsForNoKeyUpdate() bool           // PostgreSQL-compatible; false for MySQL/SQLite
-    SupportsForKeyShare() bool              // PostgreSQL-compatible; false for MySQL/SQLite
-    SupportsRightJoin() bool                     // true for PostgreSQL/MySQL; SQLite version/driver gated: true only for 3.39+
-    SupportsFullJoin() bool                      // false for MySQL; SQLite version/driver gated: true only for 3.39+
-    ForShareClause() string                 // "FOR SHARE" for PostgreSQL and MySQL RC.1 parity
-    SupportsLockOf() bool                   // PostgreSQL-compatible; absent from MySQL/SQLite in RC.1
-    SupportsRegexpMatch() bool              // PostgreSQL-only (~, ~*, !~, !~*); false for MySQL/SQLite
-    SupportsFullTextSearch() bool           // PostgreSQL-only (@@, to_tsvector, etc.); false for MySQL/SQLite
-    SupportsLimitOnMutate() bool            // false for PostgreSQL; true for MySQL; SQLite must be driver/compile-option gated
+    SupportsForUpdate() bool
+    SupportsForNoKeyUpdate() bool
+    SupportsFullJoin() bool
+    SupportsRightJoin() bool
+    ForShareClause() string
+    SupportsForShareOf() bool
+    SupportsRegexpMatch() bool
+    SupportsFullTextSearch() bool
+    SupportsLimitOnMutate() bool
 }
 ```
 

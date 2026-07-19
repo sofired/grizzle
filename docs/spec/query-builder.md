@@ -720,7 +720,7 @@ PostgreSQL and SQLite:
 | `.onConflictDoUpdate({target, set})` | `.OnConflict(query.ConflictColumn(col), ...).DoUpdateSetExcluded(cols...)` | PARITY |
 | PostgreSQL conflict target as columns | `query.ConflictColumn(col)` | PARITY |
 | SQLite conflict target as columns or trusted SQL expression | `query.ConflictColumn(col)` or `query.SQLiteConflictExpr(expr)` | PARITY target for both target shapes; `SQLiteConflictExpr` is DEVIATION:GAP (designed) until implemented |
-| Constraint-name conflict target | `.OnConflictConstraint(name)` | GRIZZLE-ONLY / future extension; not RC.1 parity |
+| Constraint-name conflict target | `.OnConflictConstraint(name)` | GRIZZLE-ONLY; PostgreSQL only, gated by `SupportsOnConflictConstraint()` |
 | `set` with `excluded` reference | `.DoUpdateSetExcluded(cols...)` | PARITY |
 | `set` with arbitrary value | `query.SetValue(columnHandle, val)` passed to `.DoUpdateSet(...)` | PARITY |
 | `set` with expression | `query.SetExpr(columnHandle, expr)` passed to `.DoUpdateSet(...)` | PARITY |

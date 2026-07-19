@@ -11,9 +11,13 @@ Query builds fail fast when a requested feature is unsupported and return
 import "github.com/sofired/grizzle/dialect"
 
 dialect.Postgres  // PostgreSQL-compatible SQL; CockroachDB needs dedicated validation before initial support
-dialect.MySQL     // MySQL / MariaDB
+dialect.MySQL     // MySQL 8.0+
 dialect.SQLite    // SQLite 3.35+ baseline; RIGHT/FULL JOIN requires SQLite 3.39+
 ```
+
+The built-in `dialect.MySQL` targets MySQL 8.0+ and renders modern shared locks
+as `FOR SHARE`. It does not claim MariaDB compatibility; MariaDB requires a
+separately validated custom dialect.
 
 ## Comparison
 
@@ -26,6 +30,7 @@ SQLite RIGHT/FULL OUTER JOIN support starts in SQLite 3.39.0. The built-in SQLit
 | Normal `RETURNING` clause | Yes | No | Yes (3.35+) |
 | Insert ID return | normal `RETURNING` | `.ReturningID()` parity for Drizzle `$returningId()` | normal `RETURNING` |
 | Upsert style | `ON CONFLICT … DO UPDATE` | `ON DUPLICATE KEY UPDATE` | `ON CONFLICT … DO UPDATE` |
+| Named-constraint conflict target | `ON CONFLICT ON CONSTRAINT …` | No API or fail-fast | No API or fail-fast |
 | Insert ignore / do-nothing conflict | `ON CONFLICT … DO NOTHING` | `INSERT IGNORE` | `ON CONFLICT … DO NOTHING` |
 | Non-recursive SELECT CTEs (`With` / `CTERef`) | Yes; Go API shape is DEVIATION:LANGUAGE | Yes (8.0+); Go API shape is DEVIATION:LANGUAGE | Yes (3.8.3+); Go API shape is DEVIATION:LANGUAGE |
 | Mutation CTE builders | DEVIATION:GAP (not designed) for insert/update/delete CTE APIs | DEVIATION:GAP (not designed) for update/delete CTE APIs; reviewed RC.1 MySQL insert path does not expose `withList` | DEVIATION:GAP (not designed) for insert/update/delete CTE APIs |
@@ -84,6 +89,7 @@ type Dialect interface {
 
     // UpsertStyle returns the conflict-resolution style.
     UpsertStyle() UpsertStyle
+    SupportsOnConflictConstraint() bool
 
     // Dialect-specific INSERT keyword for ignore-conflict syntax.
     InsertIgnoreClause() string
@@ -108,6 +114,10 @@ type Dialect interface {
 
 The shared `IgnoreConflicts()` helper is enabled only when `SupportsIgnoreConflicts()` is true. `UpsertStyle()` and `InsertIgnoreClause()` then select the classified syntax without branching on `Name()`.
 
+The Grizzle-only `OnConflictConstraint()` helper is enabled only when
+`SupportsOnConflictConstraint()` is true. PostgreSQL returns true; the built-in
+MySQL and SQLite dialects return false and fail closed with `unsupported_feature`.
+
 ## Implementing a custom dialect
 
 Any type that satisfies the `Dialect` interface can be used. For example, a PostgreSQL-compatible custom dialect can override identifier quoting. This is illustrative only; dedicated CockroachDB support remains outside the initial Grizzle scope until explicitly specified and tested.
@@ -122,6 +132,7 @@ func (CRDBDialect) QuoteIdent(name string) string {
 }
 func (CRDBDialect) SupportsReturning() bool       { return true }
 func (CRDBDialect) UpsertStyle() dialect.UpsertStyle { return dialect.UpsertOnConflict }
+func (CRDBDialect) SupportsOnConflictConstraint() bool { return false } // fail closed until validated
 func (CRDBDialect) InsertIgnoreClause() string     { return "" }
 func (CRDBDialect) SupportsIgnoreConflicts() bool  { return false }
 func (CRDBDialect) SupportsCTE() bool             { return true }
