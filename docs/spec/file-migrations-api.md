@@ -360,7 +360,33 @@ Diagnostic redaction rules:
 
 `LoadedArtifact` owns immutable byte snapshots of the validated files, or an implementation-equivalent stable no-follow file handle with a clear close lifecycle. If exported `[]byte` fields are used, returned slices are caller-owned defensive copies and are never reused internally after publication. The initial public API prefers owned byte slices so callers do not need to manage artifact handles.
 
-`ArtifactDigest.CombinedSHA256` is required in all successful local artifact validation results. It is computed as:
+### Artifact digest formulas and canonical vectors
+
+The binary per-file digest values carried by `ArtifactDigest` are the SHA-256
+of each file's exact raw byte sequence:
+
+```text
+MigrationSQLSHA256 = SHA256(raw migration.sql bytes)
+SnapshotJSONSHA256 = SHA256(raw snapshot.json bytes)
+```
+
+Each `ArtifactDigest` field carries the 32 raw digest bytes. In the canonical
+fixture and any textual serialization, those bytes are encoded as exactly 64
+lowercase hexadecimal characters:
+
+```text
+MigrationSQLSHA256Hex = lowercase_hex(MigrationSQLSHA256)
+SnapshotJSONSHA256Hex = lowercase_hex(SnapshotJSONSHA256)
+```
+
+These per-file digests apply no framing, text decoding, Unicode normalization,
+line-ending conversion, SQL comment removal, whitespace trimming, or
+trailing-newline normalization. Every byte, including embedded NUL and bytes
+that are not valid UTF-8, participates unchanged in SHA-256.
+
+`ArtifactDigest.CombinedSHA256` is required in all successful local artifact
+validation results. Its 32 raw digest bytes are the SHA-256 of this framed byte
+sequence:
 
 ```text
 SHA256(
@@ -370,7 +396,42 @@ SHA256(
 )
 ```
 
+Quoted domain and file-name strings in this formula denote their exact ASCII
+bytes. `len(payload)` is the raw payload byte count, and `uint64be` encodes that
+count as exactly eight unsigned big-endian bytes. The fixture's
+`combined_sha256` field is the 64-character lowercase hexadecimal encoding of
+the resulting 32 digest bytes.
+
 The combined digest is a local artifact/TOCTOU diagnostic value only. It is not written to the initial database history table.
+
+The canonical cross-implementation examples are
+[`artifact_digest_vectors.json`](../../kit/filemigrate/testdata/artifact_digest_vectors.json).
+Each vector has a stable name, hexadecimal encodings of the exact two input byte
+sequences, and the expected per-file and combined digests. This fixture is the
+single vector source for the Go conformance tests and the independent
+[`digest_reference.py`](../../kit/filemigrate/testdata/digest_reference.py)
+checker; neither implementation may maintain a separate copy of the vector
+inventory.
+
+Verify the published vectors without modifying them:
+
+```sh
+python3 kit/filemigrate/testdata/digest_reference.py --check
+go test ./kit/filemigrate -run TestArtifactDigest
+```
+
+An intentional vector update requires an approved specification change. Update
+the normative formula and independent Python implementation as needed, edit only
+the fixture's names or hexadecimal input fields when changing cases, then
+regenerate expected values with:
+
+```sh
+python3 kit/filemigrate/testdata/digest_reference.py --write
+```
+
+Review the complete fixture diff, rerun `--check` and the Go conformance tests,
+and commit the specification, checker, and fixture changes together. Never
+regenerate expected values from the Go production implementation.
 
 Literal validation table:
 
