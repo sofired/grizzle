@@ -74,6 +74,7 @@ func invalidMigrationSQLError(migration, reason string) error {
 // finding line boundaries; the returned spans always refer to original bytes.
 func findMigrationSQLDelimiterCandidates(sql []byte) []migrationSQLDelimiterCandidate {
 	var candidates []migrationSQLDelimiterCandidate
+	marker := []byte(statementBreakpointLine)
 	for lineStart := 0; lineStart < len(sql); {
 		contentEnd := lineStart
 		for contentEnd < len(sql) && sql[contentEnd] != '\n' && sql[contentEnd] != '\r' {
@@ -89,7 +90,7 @@ func findMigrationSQLDelimiterCandidates(sql []byte) []migrationSQLDelimiterCand
 			}
 		}
 
-		if bytes.Equal(bytes.TrimSpace(sql[lineStart:contentEnd]), []byte(statementBreakpointLine)) {
+		if bytes.Equal(bytes.TrimSpace(sql[lineStart:contentEnd]), marker) {
 			candidates = append(candidates, migrationSQLDelimiterCandidate{start: lineStart, end: lineEnd})
 		}
 		lineStart = lineEnd
