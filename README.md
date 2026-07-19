@@ -10,6 +10,10 @@ This repository is still in initial build-out. It has not been tagged, released,
 
 Do not treat the current repository state as production-ready or as a stable integration target.
 
+The [API and stability policy](./docs/api-stability.md) identifies supported,
+experimental, and non-public surfaces and defines the compatibility process
+before and after v1.
+
 ## Documentation
 
 The authoritative project specifications live under [docs/spec](./docs/spec/).
