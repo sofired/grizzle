@@ -29,6 +29,11 @@ No external services are required for the unit tests. Integration tests (under `
 
 ## Pull requests when contributions reopen
 
+Read the [API and stability policy](docs/api-stability.md) before changing an
+exported API or another user-visible surface. Pull requests with compatibility
+impact must identify the affected classification and include the required
+migration notes.
+
 1. **Fork** the repository and create a branch from `main`.
 2. Keep changes focused — one logical change per PR.
 3. Add or update tests for any behaviour you change.
