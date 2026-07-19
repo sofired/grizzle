@@ -152,6 +152,9 @@ func (s *MemArtifactStore) ReadArtifact(ctx context.Context, root ArtifactRoot, 
 		return nil, &Error{Code: CodeResourceLimit, Op: "mem_artifact_store.read_artifact", Migration: name}
 	}
 	sql := bytes.Clone(a.migrationSQL)
+	if err := validateMigrationSQL(name, sql); err != nil {
+		return nil, err
+	}
 	snap := bytes.Clone(a.snapshotJSON)
 	digests := computeArtifactDigest(sql, snap)
 	return &LoadedArtifact{
