@@ -95,6 +95,34 @@ func TestBuild_UnsupportedExpressionFailsClosedWithoutArguments(t *testing.T) {
 	}
 }
 
+func TestBuild_RejectsTypedNilWherePredicates(t *testing.T) {
+	var typedNil *leakingExpression
+	table := unsafeTable("users")
+	builders := []query.Builder{
+		query.Select().From(table).Where(typedNil),
+		query.Update(table).Set("name", "alice").Where(typedNil),
+		query.DeleteFrom(table).Where(typedNil),
+	}
+	for _, b := range builders {
+		assertBuildError(t, b, dialect.Postgres, query.ErrBuildValidation)
+	}
+}
+
+func TestBuild_AllowsIntentionalNilWherePredicates(t *testing.T) {
+	table := unsafeTable("users")
+	builders := []query.Builder{
+		query.Select().From(table).Where(nil),
+		query.Update(table).Set("name", "alice").Where(nil),
+		query.DeleteFrom(table).Where(nil),
+	}
+	for _, b := range builders {
+		sql, _, err := b.Build(dialect.Postgres)
+		if err != nil || sql == "" {
+			t.Fatalf("intentional nil WHERE build = (%q, %v), want non-empty SQL and nil error", sql, err)
+		}
+	}
+}
+
 func TestBuild_RejectsNilJoinPredicates(t *testing.T) {
 	var typedNil *leakingExpression
 	for _, predicate := range []expr.Expression{nil, typedNil} {

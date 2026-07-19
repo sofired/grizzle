@@ -61,8 +61,11 @@ type joinClause struct {
 // -------------------------------------------------------------------
 
 func buildWhere(ctx *expr.BuildContext, where expr.Expression) (string, error) {
-	if isNilValue(where) {
+	if where == nil {
 		return "", nil
+	}
+	if isNilValue(where) {
+		return "", NewError(CodeBuildValidation, "build_where", "where predicate is nil")
 	}
 	sql, err := where.RenderSQL(ctx)
 	if err != nil {
