@@ -7,7 +7,7 @@
 //
 // Typical usage:
 //
-//	sql, args := query.Select(UsersT.ID, UsersT.Name).
+//	sql, args, err := query.Select(UsersT.ID, UsersT.Name).
 //	    From(UsersT).
 //	    Where(expr.And(
 //	        UsersT.RealmID.EQ(realmID),
@@ -19,6 +19,9 @@
 package query
 
 import (
+	"errors"
+	"reflect"
+
 	"github.com/sofired/grizzle/dialect"
 	"github.com/sofired/grizzle/expr"
 )
@@ -57,20 +60,28 @@ type joinClause struct {
 // Shared build helper
 // -------------------------------------------------------------------
 
-func buildWhere(ctx *expr.BuildContext, where expr.Expression) string {
-	if where == nil {
-		return ""
+func buildWhere(ctx *expr.BuildContext, where expr.Expression) (string, error) {
+	if isNilValue(where) {
+		return "", nil
 	}
-	return " WHERE " + where.ToSQL(ctx)
+	sql, err := where.RenderSQL(ctx)
+	if err != nil {
+		return "", err
+	}
+	return " WHERE " + sql, nil
 }
 
-func buildOrderBy(ctx *expr.BuildContext, exprs []expr.OrderExpr) string {
+func buildOrderBy(ctx *expr.BuildContext, exprs []expr.OrderExpr) (string, error) {
 	if len(exprs) == 0 {
-		return ""
+		return "", nil
 	}
 	parts := make([]string, len(exprs))
 	for i, o := range exprs {
-		parts[i] = o.ToSQL(ctx)
+		part, err := o.RenderSQL(ctx)
+		if err != nil {
+			return "", err
+		}
+		parts[i] = part
 	}
 	s := " ORDER BY "
 	for i, p := range parts {
@@ -79,10 +90,52 @@ func buildOrderBy(ctx *expr.BuildContext, exprs []expr.OrderExpr) string {
 		}
 		s += p
 	}
-	return s
+	return s, nil
 }
 
 // Build is a convenience wrapper to produce SQL + args from a dialect in one call.
 type Builder interface {
-	Build(d dialect.Dialect) (string, []any)
+	Build(d dialect.Dialect) (string, []any, error)
+}
+
+func newBuildContext(d dialect.Dialect) (*expr.BuildContext, error) {
+	if isNilValue(d) {
+		return nil, NewError(CodeUnsupportedDialect, "build_query", "dialect is nil")
+	}
+	return expr.NewBuildContext(d), nil
+}
+
+func isNilValue(value any) bool {
+	if value == nil {
+		return true
+	}
+	v := reflect.ValueOf(value)
+	switch v.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
+		return v.IsNil()
+	default:
+		return false
+	}
+}
+
+func normalizeBuildError(op string, err error) error {
+	if err == nil {
+		return nil
+	}
+	var buildErr *Error
+	if errors.As(err, &buildErr) {
+		return buildErr
+	}
+	return NewError(CodeBuildValidation, op, "query rendering failed")
+}
+
+func buildFailure(op string, err error) (string, []any, error) {
+	return "", nil, normalizeBuildError(op, err)
+}
+
+func quoteTableSource(ctx *expr.BuildContext, table TableSource) (string, error) {
+	if isNilValue(table) {
+		return "", NewError(CodeBuildValidation, "render_table_source", "table source is nil")
+	}
+	return ctx.Quote(table.GrizTableName())
 }

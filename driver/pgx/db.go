@@ -8,7 +8,7 @@
 //	db := pgxdb.New(pool)
 //
 //	// Build a query with the query package, execute with pgx.
-//	sql, args := query.Select(UsersT.ID, UsersT.Name).
+//	sql, args, err := query.Select(UsersT.ID, UsersT.Name).
 //	    From(UsersT).
 //	    Where(UsersT.DeletedAt.IsNull()).
 //	    Build(dialect.Postgres)
@@ -20,6 +20,7 @@ package pgx
 import (
 	"context"
 	"fmt"
+	"reflect"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -50,19 +51,39 @@ func (db *DB) Dialect() dialect.Dialect { return dialect.Postgres }
 
 // Query executes a SELECT builder and returns the raw pgx.Rows.
 // Use ScanAll or ScanOne to collect results into typed structs.
-func (db *DB) Query(ctx context.Context, b interface {
-	Build(dialect.Dialect) (string, []any)
-}) (pgx.Rows, error) {
-	sql, args := b.Build(dialect.Postgres)
+func (db *DB) Query(ctx context.Context, b query.Builder) (pgx.Rows, error) {
+	if db == nil {
+		return nil, query.NewError(query.CodeInvalidReceiver, "pgx_query", "database receiver is invalid")
+	}
+	if isNilValue(b) {
+		return nil, query.NewError(query.CodeBuildValidation, "pgx_query", "query builder is nil")
+	}
+	sql, args, err := b.Build(dialect.Postgres)
+	if err != nil {
+		return nil, err
+	}
+	if db.pool == nil {
+		return nil, query.NewError(query.CodeInvalidReceiver, "pgx_query", "database receiver is invalid")
+	}
 	return db.pool.Query(ctx, sql, args...)
 }
 
 // Exec executes an INSERT, UPDATE, or DELETE builder and returns the
 // number of rows affected.
-func (db *DB) Exec(ctx context.Context, b interface {
-	Build(dialect.Dialect) (string, []any)
-}) (int64, error) {
-	sql, args := b.Build(dialect.Postgres)
+func (db *DB) Exec(ctx context.Context, b query.Builder) (int64, error) {
+	if db == nil {
+		return 0, query.NewError(query.CodeInvalidReceiver, "pgx_exec", "database receiver is invalid")
+	}
+	if isNilValue(b) {
+		return 0, query.NewError(query.CodeBuildValidation, "pgx_exec", "query builder is nil")
+	}
+	sql, args, err := b.Build(dialect.Postgres)
+	if err != nil {
+		return 0, err
+	}
+	if db.pool == nil {
+		return 0, query.NewError(query.CodeInvalidReceiver, "pgx_exec", "database receiver is invalid")
+	}
 	tag, err := db.pool.Exec(ctx, sql, args...)
 	if err != nil {
 		return 0, err
@@ -174,18 +195,38 @@ func (db *DB) Transaction(ctx context.Context, fn func(tx *Tx) error) error {
 }
 
 // Query executes a SELECT builder within the transaction.
-func (tx *Tx) Query(ctx context.Context, b interface {
-	Build(dialect.Dialect) (string, []any)
-}) (pgx.Rows, error) {
-	sql, args := b.Build(dialect.Postgres)
+func (tx *Tx) Query(ctx context.Context, b query.Builder) (pgx.Rows, error) {
+	if tx == nil {
+		return nil, query.NewError(query.CodeInvalidReceiver, "pgx_tx_query", "transaction receiver is invalid")
+	}
+	if isNilValue(b) {
+		return nil, query.NewError(query.CodeBuildValidation, "pgx_tx_query", "query builder is nil")
+	}
+	sql, args, err := b.Build(dialect.Postgres)
+	if err != nil {
+		return nil, err
+	}
+	if isNilValue(tx.tx) {
+		return nil, query.NewError(query.CodeInvalidReceiver, "pgx_tx_query", "transaction receiver is invalid")
+	}
 	return tx.tx.Query(ctx, sql, args...)
 }
 
 // Exec executes an INSERT/UPDATE/DELETE builder within the transaction.
-func (tx *Tx) Exec(ctx context.Context, b interface {
-	Build(dialect.Dialect) (string, []any)
-}) (int64, error) {
-	sql, args := b.Build(dialect.Postgres)
+func (tx *Tx) Exec(ctx context.Context, b query.Builder) (int64, error) {
+	if tx == nil {
+		return 0, query.NewError(query.CodeInvalidReceiver, "pgx_tx_exec", "transaction receiver is invalid")
+	}
+	if isNilValue(b) {
+		return 0, query.NewError(query.CodeBuildValidation, "pgx_tx_exec", "query builder is nil")
+	}
+	sql, args, err := b.Build(dialect.Postgres)
+	if err != nil {
+		return 0, err
+	}
+	if isNilValue(tx.tx) {
+		return 0, query.NewError(query.CodeInvalidReceiver, "pgx_tx_exec", "transaction receiver is invalid")
+	}
 	tag, err := tx.tx.Exec(ctx, sql, args...)
 	if err != nil {
 		return 0, err
@@ -233,4 +274,17 @@ func FromSelectOne[T any](ctx context.Context, db *DB, b *query.SelectBuilder) (
 func FromSelectOpt[T any](ctx context.Context, db *DB, b *query.SelectBuilder) (*T, error) {
 	rows, err := db.Query(ctx, b)
 	return ScanOneOpt[T](rows, err)
+}
+
+func isNilValue(value any) bool {
+	if value == nil {
+		return true
+	}
+	v := reflect.ValueOf(value)
+	switch v.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
+		return v.IsNil()
+	default:
+		return false
+	}
 }

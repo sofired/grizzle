@@ -16,7 +16,7 @@ import (
 //	active := query.Select(UsersT.Email).From(UsersT).Where(UsersT.Active.IsTrue())
 //	admin  := query.Select(AdminsT.Email).From(AdminsT)
 //
-//	sql, args := active.Union(admin).
+//	sql, args, err := active.Union(admin).
 //	    OrderBy(UsersT.Email.Asc()).
 //	    Build(dialect.Postgres)
 //	// (SELECT "users"."email" FROM "users" WHERE "users"."active" = $1)
@@ -37,13 +37,17 @@ type setPart struct {
 
 // buildSetOpOrderBy renders ORDER BY for a set operation, stripping table
 // qualifiers: only the column name is valid in UNION/INTERSECT/EXCEPT ORDER BY.
-func buildSetOpOrderBy(ctx *expr.BuildContext, exprs []expr.OrderExpr) string {
+func buildSetOpOrderBy(ctx *expr.BuildContext, exprs []expr.OrderExpr) (string, error) {
 	if len(exprs) == 0 {
-		return ""
+		return "", nil
 	}
 	parts := make([]string, len(exprs))
 	for i, o := range exprs {
-		parts[i] = o.ToSQLUnqualified(ctx)
+		part, err := o.RenderSQLUnqualified(ctx)
+		if err != nil {
+			return "", err
+		}
+		parts[i] = part
 	}
 	s := " ORDER BY "
 	for i, p := range parts {
@@ -52,7 +56,7 @@ func buildSetOpOrderBy(ctx *expr.BuildContext, exprs []expr.OrderExpr) string {
 		}
 		s += p
 	}
-	return s
+	return s, nil
 }
 
 // -------------------------------------------------------------------
@@ -151,11 +155,29 @@ func (b *SetOpBuilder) Offset(n int) *SetOpBuilder {
 // -------------------------------------------------------------------
 
 // Build renders the set operation query to a SQL string and bound arg slice.
-func (b *SetOpBuilder) Build(d dialect.Dialect) (string, []any) {
-	ctx := expr.NewBuildContext(d)
+func (b *SetOpBuilder) Build(d dialect.Dialect) (string, []any, error) {
+	ctx, err := newBuildContext(d)
+	if err != nil {
+		return buildFailure("build_set_operation", err)
+	}
+	if b == nil {
+		return buildFailure("build_set_operation", NewError(CodeBuildValidation, "build_set_operation", "set operation builder is nil"))
+	}
+	if len(b.parts) < 2 {
+		return buildFailure("build_set_operation", NewError(CodeBuildValidation, "build_set_operation", "set operation requires at least two selects"))
+	}
+	if b.limit < 0 || b.offset < 0 {
+		return buildFailure("build_set_operation", NewError(CodeBuildValidation, "build_set_operation", "set-operation limit and offset must not be negative"))
+	}
 	var sb strings.Builder
 
 	for i, part := range b.parts {
+		if part.sel == nil {
+			return buildFailure("build_set_operation", NewError(CodeBuildValidation, "build_set_operation", "set operation contains a nil select"))
+		}
+		if i > 0 && part.op == "" {
+			return buildFailure("build_set_operation", NewError(CodeBuildValidation, "build_set_operation", "set operation is missing an operator"))
+		}
 		if i > 0 {
 			sb.WriteString(" ")
 			sb.WriteString(part.op)
@@ -165,20 +187,28 @@ func (b *SetOpBuilder) Build(d dialect.Dialect) (string, []any) {
 		// individual SELECTs carry their own ORDER BY or LIMIT, and is always
 		// syntactically correct for the overall statement.
 		sb.WriteString("(")
-		sb.WriteString(part.sel.buildWith(ctx))
+		component, err := part.sel.buildWith(ctx)
+		if err != nil {
+			return buildFailure("build_set_operation", err)
+		}
+		sb.WriteString(component)
 		sb.WriteString(")")
 	}
 
 	// Overall ORDER BY for set operations must use bare column names only
 	// (no table qualifier) — SQL does not allow table-qualified references
 	// in the ORDER BY of a UNION / INTERSECT / EXCEPT.
-	sb.WriteString(buildSetOpOrderBy(ctx, b.orderBy))
+	orderBy, err := buildSetOpOrderBy(ctx, b.orderBy)
+	if err != nil {
+		return buildFailure("build_set_operation", err)
+	}
+	sb.WriteString(orderBy)
 	if b.limit > 0 {
-		fmt.Fprintf(&sb, " LIMIT %d", b.limit)
+		_, _ = fmt.Fprintf(&sb, " LIMIT %d", b.limit)
 	}
 	if b.offset > 0 {
-		fmt.Fprintf(&sb, " OFFSET %d", b.offset)
+		_, _ = fmt.Fprintf(&sb, " OFFSET %d", b.offset)
 	}
 
-	return sb.String(), ctx.Args()
+	return sb.String(), ctx.Args(), nil
 }

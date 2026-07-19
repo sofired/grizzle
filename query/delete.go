@@ -41,8 +41,8 @@ func (b *DeleteBuilder) Returning(cols ...expr.SelectableColumn) *DeleteBuilder 
 }
 
 // Limit sets a row limit on the DELETE (MySQL / SQLite only).
-// PostgreSQL does not support LIMIT on DELETE; this is silently ignored for
-// dialects that do not support it.
+// Build returns ErrUnsupportedFeature when the selected dialect does not
+// support the clause.
 func (b *DeleteBuilder) Limit(n int) *DeleteBuilder {
 	cp := *b
 	cp.limit = n
@@ -50,28 +50,55 @@ func (b *DeleteBuilder) Limit(n int) *DeleteBuilder {
 }
 
 // Build renders the DELETE statement.
-func (b *DeleteBuilder) Build(d dialect.Dialect) (string, []any) {
-	ctx := expr.NewBuildContext(d)
+func (b *DeleteBuilder) Build(d dialect.Dialect) (string, []any, error) {
+	ctx, err := newBuildContext(d)
+	if err != nil {
+		return buildFailure("build_delete", err)
+	}
+	if b == nil {
+		return buildFailure("build_delete", NewError(CodeBuildValidation, "build_delete", "delete builder is nil"))
+	}
+	if b.limit < 0 {
+		return buildFailure("build_delete", NewError(CodeBuildValidation, "build_delete", "delete limit must not be negative"))
+	}
 	var sb strings.Builder
 
 	sb.WriteString("DELETE FROM ")
-	sb.WriteString(ctx.Quote(b.table.GrizTableName()))
+	table, err := quoteTableSource(ctx, b.table)
+	if err != nil {
+		return buildFailure("build_delete", err)
+	}
+	sb.WriteString(table)
 
-	sb.WriteString(buildWhere(ctx, b.where))
+	where, err := buildWhere(ctx, b.where)
+	if err != nil {
+		return buildFailure("build_delete", err)
+	}
+	sb.WriteString(where)
 
-	if b.limit > 0 && d.SupportsLimitOnMutate() {
-		fmt.Fprintf(&sb, " LIMIT %d", b.limit)
+	if b.limit > 0 {
+		if !d.SupportsLimitOnMutate() {
+			return buildFailure("build_delete", NewError(CodeUnsupportedFeature, "build_delete", "delete limit is not supported by this dialect"))
+		}
+		_, _ = fmt.Fprintf(&sb, " LIMIT %d", b.limit)
 	}
 
-	if len(b.returning) > 0 && d.SupportsReturning() {
+	if len(b.returning) > 0 {
+		if !d.SupportsReturning() {
+			return buildFailure("build_delete", NewError(CodeUnsupportedFeature, "build_delete", "returning is not supported by this dialect"))
+		}
 		sb.WriteString(" RETURNING ")
 		for i, c := range b.returning {
 			if i > 0 {
 				sb.WriteString(", ")
 			}
-			sb.WriteString(selectColSQL(ctx, c))
+			column, err := selectColSQL(ctx, c)
+			if err != nil {
+				return buildFailure("build_delete", err)
+			}
+			sb.WriteString(column)
 		}
 	}
 
-	return sb.String(), ctx.Args()
+	return sb.String(), ctx.Args(), nil
 }

@@ -14,34 +14,51 @@ import "strings"
 //	    Having(expr.Count().GT(5)).
 //	    OrderBy(expr.Count().Desc())
 type AggExpr struct {
-	fn       string   // "COUNT", "SUM", "AVG", "MAX", "MIN"
-	col      colRefer // nil means COUNT(*)
-	distinct bool
-	alias    string // optional AS alias (for SELECT only)
+	fn         string   // "COUNT", "SUM", "AVG", "MAX", "MIN"
+	col        colRefer // nil means COUNT(*)
+	distinct   bool
+	alias      string // optional AS alias (for SELECT only)
+	requireCol bool
 }
 
-// ToSQL renders the aggregate function call, including AS alias when set.
+// RenderSQL renders the aggregate function call, including AS alias when set.
 // This is the form used in SELECT lists. For HAVING/ORDER BY, create the
 // aggregate without As() so no alias is emitted.
-func (a AggExpr) ToSQL(ctx *BuildContext) string {
-	var arg string
-	if a.col == nil {
-		arg = "*"
-	} else {
-		arg = a.col.colRef(ctx)
-	}
-	if a.distinct {
-		arg = "DISTINCT " + arg
-	}
-	result := a.fn + "(" + arg + ")"
-	if a.alias != "" {
-		result += " AS " + ctx.Quote(a.alias)
-	}
-	return result
+func (a AggExpr) RenderSQL(ctx *BuildContext) (string, error) {
+	return renderAtomically(ctx, func() (string, error) {
+		if a.fn == "" {
+			return "", NewError(CodeBuildValidation, "render_aggregate", "aggregate function is empty")
+		}
+		var arg string
+		if isNilInterface(a.col) {
+			if a.requireCol {
+				return "", NewError(CodeBuildValidation, "render_aggregate", "aggregate column is nil")
+			}
+			arg = "*"
+		} else {
+			var err error
+			arg, err = a.col.colRef(ctx)
+			if err != nil {
+				return "", err
+			}
+		}
+		if a.distinct {
+			arg = "DISTINCT " + arg
+		}
+		result := a.fn + "(" + arg + ")"
+		if a.alias != "" {
+			alias, err := ctx.Quote(a.alias)
+			if err != nil {
+				return "", err
+			}
+			result += " AS " + alias
+		}
+		return result, nil
+	})
 }
 
 // colRef implements colRefer so AggExpr can be embedded in OrderExpr.
-func (a AggExpr) colRef(ctx *BuildContext) string { return a.ToSQL(ctx) }
+func (a AggExpr) colRef(ctx *BuildContext) (string, error) { return a.RenderSQL(ctx) }
 
 // ColumnName implements SelectableColumn. Returns the alias if set, otherwise
 // the lower-case function name.
@@ -86,21 +103,23 @@ func (a AggExpr) NEQ(val any) Expression { return binaryExpr{ref: a, op: "<>", v
 func Count() AggExpr { return AggExpr{fn: "COUNT"} }
 
 // CountCol returns COUNT(col).
-func CountCol(col SelectableColumn) AggExpr { return AggExpr{fn: "COUNT", col: col} }
+func CountCol(col SelectableColumn) AggExpr {
+	return AggExpr{fn: "COUNT", col: col, requireCol: true}
+}
 
 // CountDistinct returns COUNT(DISTINCT col).
 func CountDistinct(col SelectableColumn) AggExpr {
-	return AggExpr{fn: "COUNT", col: col, distinct: true}
+	return AggExpr{fn: "COUNT", col: col, distinct: true, requireCol: true}
 }
 
 // Sum returns SUM(col).
-func Sum(col SelectableColumn) AggExpr { return AggExpr{fn: "SUM", col: col} }
+func Sum(col SelectableColumn) AggExpr { return AggExpr{fn: "SUM", col: col, requireCol: true} }
 
 // Avg returns AVG(col).
-func Avg(col SelectableColumn) AggExpr { return AggExpr{fn: "AVG", col: col} }
+func Avg(col SelectableColumn) AggExpr { return AggExpr{fn: "AVG", col: col, requireCol: true} }
 
 // Max returns MAX(col).
-func Max(col SelectableColumn) AggExpr { return AggExpr{fn: "MAX", col: col} }
+func Max(col SelectableColumn) AggExpr { return AggExpr{fn: "MAX", col: col, requireCol: true} }
 
 // Min returns MIN(col).
-func Min(col SelectableColumn) AggExpr { return AggExpr{fn: "MIN", col: col} }
+func Min(col SelectableColumn) AggExpr { return AggExpr{fn: "MIN", col: col, requireCol: true} }

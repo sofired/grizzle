@@ -118,7 +118,7 @@ query.MySQLInsertInto(mysqlschema.UsersT).
     OnDuplicateKeyUpdateSet(query.MySQLSetColSelf(mysqlschema.UsersT.ID))
 ```
 
-`IgnoreConflicts()` is an optional shared wrapper. If retained, it must render `ON CONFLICT DO NOTHING` for PostgreSQL and SQLite, `INSERT IGNORE` for MySQL, and a build error for unsupported/custom dialects.
+`IgnoreConflicts()` is an optional shared wrapper. It renders `ON CONFLICT DO NOTHING` for PostgreSQL and SQLite and `INSERT IGNORE` for MySQL. Unsupported or custom dialects whose no-op conflict semantics have not been explicitly classified return a build error.
 :::
 
 ::: warning

@@ -13,10 +13,10 @@ import (
 type UpdateBuilder struct {
 	table     TableSource
 	sets      []setClause // explicit col = val pairs
-	setStruct any         // alternative: set via struct reflection
 	where     expr.Expression
 	returning []expr.SelectableColumn
 	limit     int // 0 = no limit; MySQL/SQLite only
+	buildErr  error
 }
 
 type setClause struct {
@@ -49,7 +49,17 @@ func (b *UpdateBuilder) Set(col string, val any) *UpdateBuilder {
 //	query.Update(UsersT).SetStruct(UserUpdate{Name: ptr("Alice")})
 func (b *UpdateBuilder) SetStruct(row any) *UpdateBuilder {
 	cp := *b
-	cp.setStruct = row
+	cols, vals, err := structSetsForUpdate(row)
+	if err != nil {
+		if cp.buildErr == nil {
+			cp.buildErr = err
+		}
+		return &cp
+	}
+	cp.sets = append([]setClause(nil), b.sets...)
+	for i, col := range cols {
+		cp.sets = append(cp.sets, setClause{col: col, val: vals[i]})
+	}
 	return &cp
 }
 
@@ -73,8 +83,6 @@ func (b *UpdateBuilder) Returning(cols ...expr.SelectableColumn) *UpdateBuilder 
 }
 
 // Limit sets a row limit on the UPDATE (MySQL / SQLite only).
-// PostgreSQL does not support LIMIT on UPDATE; this is silently ignored for
-// dialects that do not support it.
 func (b *UpdateBuilder) Limit(n int) *UpdateBuilder {
 	cp := *b
 	cp.limit = n
@@ -82,56 +90,81 @@ func (b *UpdateBuilder) Limit(n int) *UpdateBuilder {
 }
 
 // Build renders the UPDATE statement.
-func (b *UpdateBuilder) Build(d dialect.Dialect) (string, []any) {
-	ctx := expr.NewBuildContext(d)
+func (b *UpdateBuilder) Build(d dialect.Dialect) (string, []any, error) {
+	ctx, err := newBuildContext(d)
+	if err != nil {
+		return buildFailure("build_update", err)
+	}
+	if b == nil {
+		return buildFailure("build_update", NewError(CodeBuildValidation, "build_update", "update builder is nil"))
+	}
+	if b.buildErr != nil {
+		return buildFailure("build_update", b.buildErr)
+	}
+	if b.limit < 0 {
+		return buildFailure("build_update", NewError(CodeBuildValidation, "build_update", "update limit must not be negative"))
+	}
 	var sb strings.Builder
 
 	sb.WriteString("UPDATE ")
-	sb.WriteString(ctx.Quote(b.table.GrizTableName()))
+	table, err := quoteTableSource(ctx, b.table)
+	if err != nil {
+		return buildFailure("build_update", err)
+	}
+	sb.WriteString(table)
 	sb.WriteString(" SET ")
 
-	// Collect all SET clauses: explicit sets + struct sets
+	// Collect all SET clauses.
 	allSets := append([]setClause(nil), b.sets...)
-	if b.setStruct != nil {
-		cols, vals, err := structSetsForUpdate(b.setStruct)
-		if err != nil {
-			return "", nil
-		}
-		for i, c := range cols {
-			allSets = append(allSets, setClause{col: c, val: vals[i]})
-		}
-	}
 
 	if len(allSets) == 0 {
-		return "", nil
+		return buildFailure("build_update", NewError(CodeBuildValidation, "build_update", "update contains no assignments"))
 	}
 
 	for i, s := range allSets {
 		if i > 0 {
 			sb.WriteString(", ")
 		}
-		sb.WriteString(ctx.Quote(s.col))
+		column, err := ctx.Quote(s.col)
+		if err != nil {
+			return buildFailure("build_update", err)
+		}
+		sb.WriteString(column)
 		sb.WriteString(" = ")
 		sb.WriteString(ctx.Add(s.val))
 	}
 
-	sb.WriteString(buildWhere(ctx, b.where))
+	where, err := buildWhere(ctx, b.where)
+	if err != nil {
+		return buildFailure("build_update", err)
+	}
+	sb.WriteString(where)
 
-	if b.limit > 0 && d.SupportsLimitOnMutate() {
-		fmt.Fprintf(&sb, " LIMIT %d", b.limit)
+	if b.limit > 0 {
+		if !d.SupportsLimitOnMutate() {
+			return buildFailure("build_update", NewError(CodeUnsupportedFeature, "build_update", "update limits are not supported by this dialect"))
+		}
+		_, _ = fmt.Fprintf(&sb, " LIMIT %d", b.limit)
 	}
 
-	if len(b.returning) > 0 && d.SupportsReturning() {
+	if len(b.returning) > 0 {
+		if !d.SupportsReturning() {
+			return buildFailure("build_update", NewError(CodeUnsupportedFeature, "build_update", "returning is not supported by this dialect"))
+		}
 		sb.WriteString(" RETURNING ")
 		for i, c := range b.returning {
 			if i > 0 {
 				sb.WriteString(", ")
 			}
-			sb.WriteString(selectColSQL(ctx, c))
+			column, err := selectColSQL(ctx, c)
+			if err != nil {
+				return buildFailure("build_update", err)
+			}
+			sb.WriteString(column)
 		}
 	}
 
-	return sb.String(), ctx.Args()
+	return sb.String(), ctx.Args(), nil
 }
 
 // -------------------------------------------------------------------
@@ -157,6 +190,7 @@ func structSetsForUpdate(row any) (cols []string, vals []any, err error) {
 		return nil, nil, fmt.Errorf("structSetsForUpdate: expected struct, got %s", rv.Kind())
 	}
 	rt := rv.Type()
+	seen := make(map[string]struct{})
 	for i := 0; i < rt.NumField(); i++ {
 		field := rt.Field(i)
 		fv := rv.Field(i)
@@ -164,7 +198,23 @@ func structSetsForUpdate(row any) (cols []string, vals []any, err error) {
 		if tag == "" || tag == "-" {
 			continue
 		}
-		colName := strings.SplitN(tag, ",", 2)[0]
+		if field.PkgPath != "" || !fv.CanInterface() {
+			return nil, nil, fmt.Errorf("structSetsForUpdate: tagged field is not exported")
+		}
+		parts := strings.Split(tag, ",")
+		colName := parts[0]
+		if colName == "" {
+			return nil, nil, fmt.Errorf("structSetsForUpdate: empty db tag")
+		}
+		for _, option := range parts[1:] {
+			if option != "" && option != "omitempty" {
+				return nil, nil, fmt.Errorf("structSetsForUpdate: unsupported db tag option")
+			}
+		}
+		if _, ok := seen[colName]; ok {
+			return nil, nil, fmt.Errorf("structSetsForUpdate: duplicate db tag")
+		}
+		seen[colName] = struct{}{}
 		if fv.Kind() == reflect.Ptr && fv.IsNil() {
 			continue
 		}

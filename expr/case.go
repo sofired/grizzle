@@ -55,30 +55,57 @@ func (c *CaseExpr) As(alias string) *CaseExpr {
 	return &cp
 }
 
-// ToSQL renders the CASE expression.
-func (c *CaseExpr) ToSQL(ctx *BuildContext) string {
-	var sb strings.Builder
-	sb.WriteString("CASE")
-	for _, w := range c.whens {
-		sb.WriteString(" WHEN ")
-		sb.WriteString(w.cond.ToSQL(ctx))
-		sb.WriteString(" THEN ")
-		sb.WriteString(w.then.ToSQL(ctx))
-	}
-	if c.else_ != nil {
-		sb.WriteString(" ELSE ")
-		sb.WriteString(c.else_.ToSQL(ctx))
-	}
-	sb.WriteString(" END")
-	if c.alias != "" {
-		sb.WriteString(" AS ")
-		sb.WriteString(ctx.Quote(c.alias))
-	}
-	return sb.String()
+// RenderSQL renders the CASE expression.
+func (c *CaseExpr) RenderSQL(ctx *BuildContext) (string, error) {
+	return renderAtomically(ctx, func() (string, error) {
+		if c == nil {
+			return "", NewError(CodeBuildValidation, "render_case", "case expression is nil")
+		}
+		if len(c.whens) == 0 {
+			return "", NewError(CodeBuildValidation, "render_case", "case expression contains no branches")
+		}
+		var sb strings.Builder
+		sb.WriteString("CASE")
+		for _, w := range c.whens {
+			if isNilExpression(w.cond) || isNilExpression(w.then) {
+				return "", NewError(CodeBuildValidation, "render_case", "case branch contains a nil expression")
+			}
+			sb.WriteString(" WHEN ")
+			cond, err := w.cond.RenderSQL(ctx)
+			if err != nil {
+				return "", err
+			}
+			sb.WriteString(cond)
+			sb.WriteString(" THEN ")
+			then, err := w.then.RenderSQL(ctx)
+			if err != nil {
+				return "", err
+			}
+			sb.WriteString(then)
+		}
+		if !isNilExpression(c.else_) {
+			sb.WriteString(" ELSE ")
+			fallback, err := c.else_.RenderSQL(ctx)
+			if err != nil {
+				return "", err
+			}
+			sb.WriteString(fallback)
+		}
+		sb.WriteString(" END")
+		if c.alias != "" {
+			sb.WriteString(" AS ")
+			alias, err := ctx.Quote(c.alias)
+			if err != nil {
+				return "", err
+			}
+			sb.WriteString(alias)
+		}
+		return sb.String(), nil
+	})
 }
 
 // colRef implements colRefer so CaseExpr can appear in OrderExpr and binary expressions.
-func (c *CaseExpr) colRef(ctx *BuildContext) string { return c.ToSQL(ctx) }
+func (c *CaseExpr) colRef(ctx *BuildContext) (string, error) { return c.RenderSQL(ctx) }
 
 // ColumnName implements SelectableColumn. Returns the alias if set, otherwise "case".
 func (c *CaseExpr) ColumnName() string {
@@ -153,30 +180,57 @@ func (c *SimpleCaseExpr) As(alias string) *SimpleCaseExpr {
 	return &cp
 }
 
-// ToSQL renders the simple CASE expression.
-func (c *SimpleCaseExpr) ToSQL(ctx *BuildContext) string {
-	var sb strings.Builder
-	sb.WriteString("CASE ")
-	sb.WriteString(c.subject.colRef(ctx))
-	for _, w := range c.whens {
-		sb.WriteString(" WHEN ")
-		sb.WriteString(ctx.Add(w.val))
-		sb.WriteString(" THEN ")
-		sb.WriteString(w.then.ToSQL(ctx))
-	}
-	if c.else_ != nil {
-		sb.WriteString(" ELSE ")
-		sb.WriteString(c.else_.ToSQL(ctx))
-	}
-	sb.WriteString(" END")
-	if c.alias != "" {
-		sb.WriteString(" AS ")
-		sb.WriteString(ctx.Quote(c.alias))
-	}
-	return sb.String()
+// RenderSQL renders the simple CASE expression.
+func (c *SimpleCaseExpr) RenderSQL(ctx *BuildContext) (string, error) {
+	return renderAtomically(ctx, func() (string, error) {
+		if c == nil || isNilInterface(c.subject) {
+			return "", NewError(CodeBuildValidation, "render_simple_case", "case subject is nil")
+		}
+		if len(c.whens) == 0 {
+			return "", NewError(CodeBuildValidation, "render_simple_case", "case expression contains no branches")
+		}
+		var sb strings.Builder
+		sb.WriteString("CASE ")
+		subject, err := c.subject.colRef(ctx)
+		if err != nil {
+			return "", err
+		}
+		sb.WriteString(subject)
+		for _, w := range c.whens {
+			if isNilExpression(w.then) {
+				return "", NewError(CodeBuildValidation, "render_simple_case", "case branch contains a nil expression")
+			}
+			sb.WriteString(" WHEN ")
+			sb.WriteString(ctx.Add(w.val))
+			sb.WriteString(" THEN ")
+			then, err := w.then.RenderSQL(ctx)
+			if err != nil {
+				return "", err
+			}
+			sb.WriteString(then)
+		}
+		if !isNilExpression(c.else_) {
+			sb.WriteString(" ELSE ")
+			fallback, err := c.else_.RenderSQL(ctx)
+			if err != nil {
+				return "", err
+			}
+			sb.WriteString(fallback)
+		}
+		sb.WriteString(" END")
+		if c.alias != "" {
+			sb.WriteString(" AS ")
+			alias, err := ctx.Quote(c.alias)
+			if err != nil {
+				return "", err
+			}
+			sb.WriteString(alias)
+		}
+		return sb.String(), nil
+	})
 }
 
-func (c *SimpleCaseExpr) colRef(ctx *BuildContext) string { return c.ToSQL(ctx) }
+func (c *SimpleCaseExpr) colRef(ctx *BuildContext) (string, error) { return c.RenderSQL(ctx) }
 func (c *SimpleCaseExpr) ColumnName() string {
 	if c.alias != "" {
 		return c.alias
@@ -201,4 +255,4 @@ func Lit(v any) Expression { return litExpr{v: v} }
 
 type litExpr struct{ v any }
 
-func (e litExpr) ToSQL(ctx *BuildContext) string { return ctx.Add(e.v) }
+func (e litExpr) RenderSQL(ctx *BuildContext) (string, error) { return ctx.Add(e.v), nil }

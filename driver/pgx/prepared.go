@@ -2,7 +2,7 @@ package pgx
 
 import (
 	"context"
-	"fmt"
+	"errors"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -79,7 +79,16 @@ type PreparedSelect[T any] struct {
 // a PreparedSelect for repeated execution. Returns an error if the SQL is
 // syntactically invalid or references unknown columns or tables.
 func PrepareSelect[T any](ctx context.Context, db *DB, name string, b *query.SelectBuilder) (*PreparedSelect[T], error) {
-	sql, args := b.Build(dialect.Postgres)
+	if isNilValue(b) {
+		return nil, query.NewError(query.CodeBuildValidation, "prepare_select", "query builder is nil")
+	}
+	sql, args, err := b.Build(dialect.Postgres)
+	if err != nil {
+		return nil, err
+	}
+	if db == nil || db.pool == nil {
+		return nil, query.NewError(query.CodeInvalidReceiver, "prepare_select", "database receiver is invalid")
+	}
 	if err := validateStatement(ctx, db, name, sql); err != nil {
 		return nil, err
 	}
@@ -95,17 +104,27 @@ func (p *PreparedSelect[T]) SQL() string { return p.sql }
 
 // QueryAll executes the prepared query and returns all matching rows.
 func (p *PreparedSelect[T]) QueryAll(ctx context.Context, db *DB) ([]T, error) {
+	if p == nil || db == nil || db.pool == nil {
+		return nil, query.NewError(query.CodeInvalidReceiver, "prepared_select_query_all", "prepared query receiver is invalid")
+	}
 	return p.queryAllWith(ctx, db.Pool())
 }
 
 // QueryOne executes the prepared query and expects exactly one row.
 // Returns an error if zero or more than one row is returned.
 func (p *PreparedSelect[T]) QueryOne(ctx context.Context, db *DB) (T, error) {
+	var zero T
+	if p == nil || db == nil || db.pool == nil {
+		return zero, query.NewError(query.CodeInvalidReceiver, "prepared_select_query_one", "prepared query receiver is invalid")
+	}
 	return p.queryOneWith(ctx, db.Pool())
 }
 
 // QueryOpt executes the prepared query and returns nil if no rows are found.
 func (p *PreparedSelect[T]) QueryOpt(ctx context.Context, db *DB) (*T, error) {
+	if p == nil || db == nil || db.pool == nil {
+		return nil, query.NewError(query.CodeInvalidReceiver, "prepared_select_query_opt", "prepared query receiver is invalid")
+	}
 	return p.queryOptWith(ctx, db.Pool())
 }
 
@@ -160,10 +179,17 @@ type PreparedExec struct {
 // PrepareExec validates and caches a mutation query. The builder interface
 // accepts SelectBuilder, InsertBuilder, UpdateBuilder, or DeleteBuilder —
 // anything with a Build method.
-func PrepareExec(ctx context.Context, db *DB, name string, b interface {
-	Build(dialect.Dialect) (string, []any)
-}) (*PreparedExec, error) {
-	sql, args := b.Build(dialect.Postgres)
+func PrepareExec(ctx context.Context, db *DB, name string, b query.Builder) (*PreparedExec, error) {
+	if isNilValue(b) {
+		return nil, query.NewError(query.CodeBuildValidation, "prepare_exec", "query builder is nil")
+	}
+	sql, args, err := b.Build(dialect.Postgres)
+	if err != nil {
+		return nil, err
+	}
+	if db == nil || db.pool == nil {
+		return nil, query.NewError(query.CodeInvalidReceiver, "prepare_exec", "database receiver is invalid")
+	}
 	if err := validateStatement(ctx, db, name, sql); err != nil {
 		return nil, err
 	}
@@ -179,11 +205,17 @@ func (p *PreparedExec) SQL() string { return p.sql }
 
 // Exec runs the prepared mutation and returns the number of rows affected.
 func (p *PreparedExec) Exec(ctx context.Context, db *DB) (int64, error) {
+	if p == nil || db == nil || db.pool == nil {
+		return 0, query.NewError(query.CodeInvalidReceiver, "prepared_exec", "prepared query receiver is invalid")
+	}
 	return p.execWith(ctx, db.Pool())
 }
 
 // ExecTx runs the prepared mutation inside an existing transaction.
 func (p *PreparedExec) ExecTx(ctx context.Context, tx *Tx) (int64, error) {
+	if p == nil || tx == nil || isNilValue(tx.tx) {
+		return 0, query.NewError(query.CodeInvalidReceiver, "prepared_exec_tx", "prepared query receiver is invalid")
+	}
 	return p.execWith(ctx, tx.tx)
 }
 
@@ -208,8 +240,8 @@ func (p *PreparedExec) execWith(ctx context.Context, e poolExecer) (int64, error
 // Example:
 //
 //	reg := pgxdb.NewRegistry(db)
-//	getUser   := pgxdb.Register[UserSelect](reg, "get_active_users", activeUsersQuery)
-//	updateUser := pgxdb.RegisterExec(reg, "soft_delete",  softDeleteQuery)
+//	getUser, err := pgxdb.RegisterSelect[UserSelect](reg, "get_active_users", activeUsersQuery)
+//	updateUser, err := pgxdb.RegisterExec(reg, "soft_delete", softDeleteQuery)
 //
 //	if err := reg.PrepareAll(ctx); err != nil {
 //	    log.Fatal("query validation failed:", err)
@@ -234,9 +266,12 @@ func NewRegistry(db *DB) *Registry {
 // Call this once during server startup; if it returns an error, at least one
 // query has a SQL problem.
 func (r *Registry) PrepareAll(ctx context.Context) error {
+	if r == nil || r.db == nil || r.db.pool == nil {
+		return query.NewError(query.CodeInvalidReceiver, "prepare_registry", "registry receiver is invalid")
+	}
 	for _, e := range r.entries {
 		if err := validateStatement(ctx, r.db, e.name, e.sql); err != nil {
-			return fmt.Errorf("prepare %q: %w", e.name, err)
+			return err
 		}
 	}
 	return nil
@@ -251,22 +286,38 @@ func (r *Registry) register(name string, sql string, args []any) {
 // to validate all registered statements in one shot.
 //
 //	reg := pgxdb.NewRegistry(db)
-//	stmt := pgxdb.RegisterSelect[UserSelect](reg, "active_users", activeUsersBuilder)
+//	stmt, err := pgxdb.RegisterSelect[UserSelect](reg, "active_users", activeUsersBuilder)
 //	if err := reg.PrepareAll(ctx); err != nil { ... }
 //	users, err := stmt.QueryAll(ctx, db)
-func RegisterSelect[T any](reg *Registry, name string, b *query.SelectBuilder) *PreparedSelect[T] {
-	sql, args := b.Build(dialect.Postgres)
+func RegisterSelect[T any](reg *Registry, name string, b *query.SelectBuilder) (*PreparedSelect[T], error) {
+	if isNilValue(b) {
+		return nil, query.NewError(query.CodeBuildValidation, "register_select", "query builder is nil")
+	}
+	sql, args, err := b.Build(dialect.Postgres)
+	if err != nil {
+		return nil, err
+	}
+	if reg == nil {
+		return nil, query.NewError(query.CodeInvalidReceiver, "register_select", "registry receiver is invalid")
+	}
 	reg.register(name, sql, args)
-	return &PreparedSelect[T]{name: name, sql: sql, args: args}
+	return &PreparedSelect[T]{name: name, sql: sql, args: args}, nil
 }
 
 // RegisterExec adds a mutation query to a Registry.
-func RegisterExec(reg *Registry, name string, b interface {
-	Build(dialect.Dialect) (string, []any)
-}) *PreparedExec {
-	sql, args := b.Build(dialect.Postgres)
+func RegisterExec(reg *Registry, name string, b query.Builder) (*PreparedExec, error) {
+	if isNilValue(b) {
+		return nil, query.NewError(query.CodeBuildValidation, "register_exec", "query builder is nil")
+	}
+	sql, args, err := b.Build(dialect.Postgres)
+	if err != nil {
+		return nil, err
+	}
+	if reg == nil {
+		return nil, query.NewError(query.CodeInvalidReceiver, "register_exec", "registry receiver is invalid")
+	}
 	reg.register(name, sql, args)
-	return &PreparedExec{name: name, sql: sql, args: args}
+	return &PreparedExec{name: name, sql: sql, args: args}, nil
 }
 
 // -------------------------------------------------------------------
@@ -283,16 +334,27 @@ func RegisterExec(reg *Registry, name string, b interface {
 // validates the SQL without executing it — wrong column names, type errors, and
 // syntax problems are all caught here.
 func validateStatement(ctx context.Context, db *DB, name, sql string) error {
+	if db == nil || db.pool == nil {
+		return query.NewError(query.CodeInvalidReceiver, "validate_statement", "database receiver is invalid")
+	}
 	conn, err := db.Pool().Acquire(ctx)
 	if err != nil {
-		return fmt.Errorf("acquire connection: %w", err)
+		return preparedValidationError("acquire_prepared_connection", err)
 	}
 	defer conn.Release()
 
 	// Conn() returns the underlying *pgx.Conn.
 	// Prepare(ctx, name, sql) sends a Parse + Describe to the backend.
 	if _, err := conn.Conn().Prepare(ctx, name, sql); err != nil {
-		return fmt.Errorf("SQL validation failed for %q: %w", name, err)
+		return preparedValidationError("validate_prepared_statement", err)
 	}
 	return nil
+}
+
+func preparedValidationError(op string, cause error) *query.Error {
+	err := query.NewError(query.CodePreparedNotReady, op, "prepared statement validation failed")
+	if errors.Is(cause, context.Canceled) || errors.Is(cause, context.DeadlineExceeded) {
+		err.Err = cause
+	}
+	return err
 }

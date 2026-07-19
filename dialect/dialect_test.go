@@ -18,11 +18,13 @@ func TestDialectFeatureMatrix(t *testing.T) {
 		supportsForUpdate      bool
 		supportsForNoKey       bool
 		supportsFullJoin       bool
+		supportsRightJoin      bool
 		supportsForShareOf     bool
 		supportsLimitOnMutate  bool
 		forShareClause         string
 		supportsRegexpMatch    bool
 		supportsFullTextSearch bool
+		supportsIgnoreConflict bool
 	}
 
 	cases := []row{
@@ -35,11 +37,13 @@ func TestDialectFeatureMatrix(t *testing.T) {
 			supportsForUpdate:      true,
 			supportsForNoKey:       true,
 			supportsFullJoin:       true,
+			supportsRightJoin:      true,
 			supportsForShareOf:     true,
 			supportsLimitOnMutate:  false,
 			forShareClause:         "FOR SHARE",
 			supportsRegexpMatch:    true,
 			supportsFullTextSearch: true,
+			supportsIgnoreConflict: true,
 		},
 		{
 			name:                   "mysql",
@@ -50,11 +54,13 @@ func TestDialectFeatureMatrix(t *testing.T) {
 			supportsForUpdate:      true,
 			supportsForNoKey:       false,
 			supportsFullJoin:       false,
+			supportsRightJoin:      true,
 			supportsForShareOf:     false,
 			supportsLimitOnMutate:  true,
 			forShareClause:         "LOCK IN SHARE MODE",
 			supportsRegexpMatch:    false,
 			supportsFullTextSearch: false,
+			supportsIgnoreConflict: true,
 		},
 		{
 			name:                   "sqlite",
@@ -65,11 +71,13 @@ func TestDialectFeatureMatrix(t *testing.T) {
 			supportsForUpdate:      false,
 			supportsForNoKey:       false,
 			supportsFullJoin:       false,
+			supportsRightJoin:      false,
 			supportsForShareOf:     false,
 			supportsLimitOnMutate:  true,
 			forShareClause:         "",
 			supportsRegexpMatch:    false,
 			supportsFullTextSearch: false,
+			supportsIgnoreConflict: true,
 		},
 	}
 
@@ -93,11 +101,13 @@ func TestDialectFeatureMatrix(t *testing.T) {
 			checkBool("SupportsForUpdate", c.d.SupportsForUpdate(), c.supportsForUpdate)
 			checkBool("SupportsForNoKeyUpdate", c.d.SupportsForNoKeyUpdate(), c.supportsForNoKey)
 			checkBool("SupportsFullJoin", c.d.SupportsFullJoin(), c.supportsFullJoin)
+			checkBool("SupportsRightJoin", c.d.SupportsRightJoin(), c.supportsRightJoin)
 			checkBool("SupportsForShareOf", c.d.SupportsForShareOf(), c.supportsForShareOf)
 			checkBool("SupportsLimitOnMutate", c.d.SupportsLimitOnMutate(), c.supportsLimitOnMutate)
 			checkStr("ForShareClause", c.d.ForShareClause(), c.forShareClause)
 			checkBool("SupportsRegexpMatch", c.d.SupportsRegexpMatch(), c.supportsRegexpMatch)
 			checkBool("SupportsFullTextSearch", c.d.SupportsFullTextSearch(), c.supportsFullTextSearch)
+			checkBool("SupportsIgnoreConflicts", c.d.SupportsIgnoreConflicts(), c.supportsIgnoreConflict)
 		})
 	}
 }

@@ -23,11 +23,11 @@ type LockOption string
 
 const (
 	// NoWait causes the query to fail immediately if any selected row cannot
-	// be locked. Supported by PostgreSQL and MySQL 8.0+; silently dropped for SQLite.
+	// be locked. Unsupported dialects cause Build to return ErrUnsupportedFeature.
 	NoWait LockOption = "NOWAIT"
 	// SkipLocked causes the query to skip rows that are already locked, returning
-	// only the rows that could be locked. Supported by PostgreSQL and MySQL 8.0+;
-	// silently dropped for SQLite.
+	// only the rows that could be locked. Unsupported dialects cause Build to
+	// return ErrUnsupportedFeature.
 	SkipLocked LockOption = "SKIP LOCKED"
 )
 
@@ -50,6 +50,7 @@ type SelectBuilder struct {
 	lockStrength LockStrength  // row-level lock mode (empty = no lock)
 	lockOpts     []LockOption  // NOWAIT / SKIP LOCKED modifiers
 	lockOf       []TableSource // OF table list for row-level locking (PostgreSQL/MySQL)
+	lockOfSet    bool
 }
 
 // cteClause holds a single WITH name AS (...) entry.
@@ -88,11 +89,9 @@ func (b *SelectBuilder) Distinct() *SelectBuilder {
 //
 // Dialect behaviour:
 //   - PostgreSQL: all four modes are emitted.
-//   - MySQL: only LockForUpdate (FOR UPDATE) and LockForShare (LOCK IN SHARE MODE)
-//     are emitted; LockForNoKeyUpdate and LockForKeyShare are silently dropped.
-//   - SQLite: the entire clause is silently dropped (SQLite has no row-level locking).
-//   - NoWait / SkipLocked are supported by PostgreSQL and MySQL 8.0+; silently
-//     dropped for SQLite.
+//   - MySQL: LockForUpdate and LockForShare are emitted; PostgreSQL-only modes
+//     return ErrUnsupportedFeature.
+//   - SQLite: all row-locking modes return ErrUnsupportedFeature.
 //
 // Example:
 //
@@ -119,14 +118,7 @@ func (b *SelectBuilder) For(strength LockStrength, opts ...LockOption) *SelectBu
 //
 // Dialect behaviour:
 //   - PostgreSQL: rendered as DISTINCT ON (cols).
-//   - MySQL / SQLite: SupportsDistinctOn() is false; the DISTINCT ON columns
-//     are silently dropped and the query degrades to SELECT DISTINCT.
-//
-// Warning: the degraded form is semantically different. SELECT DISTINCT ON
-// deduplicates within each DISTINCT ON group (returning one row per group);
-// SELECT DISTINCT deduplicates across all selected columns. The result set
-// will differ in most real queries, so portable code should avoid DistinctOn
-// or handle the dialect difference explicitly.
+//   - MySQL / SQLite: Build returns ErrUnsupportedFeature.
 func (b *SelectBuilder) DistinctOn(cols ...expr.SelectableColumn) *SelectBuilder {
 	cp := *b
 	cp.distinct = true
@@ -135,8 +127,8 @@ func (b *SelectBuilder) DistinctOn(cols ...expr.SelectableColumn) *SelectBuilder
 }
 
 // ForUpdate appends FOR UPDATE to the query, locking selected rows against
-// concurrent updates. Supported by PostgreSQL and MySQL; silently dropped for
-// SQLite, which uses file-level locking only.
+// concurrent updates. Unsupported dialects cause Build to return
+// ErrUnsupportedFeature.
 //
 // ForUpdate is a convenience wrapper around For(LockForUpdate).
 func (b *SelectBuilder) ForUpdate() *SelectBuilder {
@@ -145,7 +137,8 @@ func (b *SelectBuilder) ForUpdate() *SelectBuilder {
 
 // ForShare appends FOR SHARE (PostgreSQL) / LOCK IN SHARE MODE (MySQL) to
 // the query, locking rows for read while allowing other readers.
-// PostgreSQL and MySQL only — SQLite silently drops the clause.
+// PostgreSQL and MySQL only; unsupported dialects cause Build to return
+// ErrUnsupportedFeature.
 //
 // ForShare is a convenience wrapper around For(LockForShare).
 func (b *SelectBuilder) ForShare() *SelectBuilder {
@@ -154,8 +147,8 @@ func (b *SelectBuilder) ForShare() *SelectBuilder {
 
 // ForNoKeyUpdate appends FOR NO KEY UPDATE to the query. This PostgreSQL-specific
 // lock mode is weaker than FOR UPDATE: it does not block INSERT of child rows that
-// reference this row via a foreign key. Silently dropped for dialects that do not
-// support this locking mode (e.g. MySQL, SQLite).
+// reference this row via a foreign key. Unsupported dialects cause Build to
+// return ErrUnsupportedFeature.
 //
 // ForNoKeyUpdate is a convenience wrapper around For(LockForNoKeyUpdate).
 func (b *SelectBuilder) ForNoKeyUpdate() *SelectBuilder {
@@ -164,8 +157,8 @@ func (b *SelectBuilder) ForNoKeyUpdate() *SelectBuilder {
 
 // ForKeyShare appends FOR KEY SHARE to the query. This PostgreSQL-specific
 // lock mode is the weakest row lock: it only blocks DELETE and FOR UPDATE
-// operations that would delete or change key values. Silently dropped for
-// dialects that do not support this locking mode (e.g. MySQL, SQLite).
+// operations that would delete or change key values. Unsupported dialects cause
+// Build to return ErrUnsupportedFeature.
 //
 // ForKeyShare is a convenience wrapper around For(LockForKeyShare).
 func (b *SelectBuilder) ForKeyShare() *SelectBuilder {
@@ -198,16 +191,14 @@ func (b *SelectBuilder) ForKeyShare() *SelectBuilder {
 // Of works with all four lock modes (LockForUpdate, LockForNoKeyUpdate,
 // LockForShare, LockForKeyShare). Dialect-specific behaviour:
 //   - PostgreSQL: all specified tables are emitted for all four lock modes.
-//   - MySQL: all specified tables are emitted for FOR UPDATE (MySQL 8.0+).
-//     For LOCK IN SHARE MODE (LockForShare on MySQL), OF is not supported and is
-//     silently dropped. LockForNoKeyUpdate and LockForKeyShare are dropped entirely
-//     on MySQL, so OF has no effect for those modes.
-//   - SQLite: OF is silently ignored (SQLite has no row-level locking).
+//   - MySQL: lock table lists return ErrUnsupportedFeature.
+//   - SQLite: Build returns ErrUnsupportedFeature.
 //
 // The call order relative to For/ForUpdate/ForShare does not matter.
 func (b *SelectBuilder) Of(tables ...TableSource) *SelectBuilder {
 	cp := *b
 	cp.lockOf = append(append([]TableSource(nil), cp.lockOf...), tables...)
+	cp.lockOfSet = true
 	return &cp
 }
 
@@ -217,10 +208,7 @@ func (b *SelectBuilder) Of(tables ...TableSource) *SelectBuilder {
 //
 // CTE support requires SupportsCTE() on the dialect. All built-in dialects
 // (PostgreSQL, MySQL 8.0+, SQLite 3.8.3+) return true. When building against a
-// dialect where SupportsCTE() is false, the WITH clause is omitted from the
-// output SQL. Any CTERef used in From() or Join() remains as a plain table
-// name, which will cause a runtime database error (unknown table). This is
-// intentional: failing loudly is safer than silently returning wrong results.
+// dialect where SupportsCTE() is false, Build returns ErrUnsupportedFeature.
 //
 // Example:
 //
@@ -244,10 +232,7 @@ func (b *SelectBuilder) With(name string, sub *SelectBuilder) *SelectBuilder {
 //
 // CTE support requires SupportsCTE() on the dialect. All built-in dialects
 // (PostgreSQL, MySQL 8.0+, SQLite 3.8.3+) return true. When building against a
-// dialect where SupportsCTE() is false, the WITH RECURSIVE clause is omitted
-// from the output SQL. Any CTERef used in From() or Join() remains as a plain
-// table name, producing a runtime database error (unknown table). This is
-// intentional: failing loudly is safer than silently returning wrong results.
+// dialect where SupportsCTE() is false, Build returns ErrUnsupportedFeature.
 //
 // Example — traverse an org-chart by manager_id:
 //
@@ -318,7 +303,8 @@ func (b *SelectBuilder) InnerJoin(t TableSource, on expr.Expression) *SelectBuil
 	return &cp
 }
 
-// RightJoin adds a RIGHT JOIN clause.
+// RightJoin adds a RIGHT JOIN clause. Build returns ErrUnsupportedFeature when
+// the selected dialect cannot guarantee RIGHT JOIN support.
 func (b *SelectBuilder) RightJoin(t TableSource, on expr.Expression) *SelectBuilder {
 	cp := *b
 	cp.joins = append(append([]joinClause(nil), cp.joins...), joinClause{kind: joinRight, table: t, on: on})
@@ -327,13 +313,8 @@ func (b *SelectBuilder) RightJoin(t TableSource, on expr.Expression) *SelectBuil
 
 // FullJoin adds a FULL JOIN clause.
 // FULL JOIN requires SupportsFullJoin() on the dialect. When building against a
-// dialect where SupportsFullJoin() is false (MySQL, SQLite), the join is
-// silently dropped from the output SQL.
-//
-// Warning: dropping a FULL JOIN is a semantic change, not just a syntax
-// difference. Rows that would have been included via the outer side of the join
-// are omitted entirely. Do not rely on the silent-drop behaviour for portable
-// code; use a dialect check or restructure the query for non-PostgreSQL targets.
+// dialect where SupportsFullJoin() is false (MySQL, SQLite), Build returns
+// ErrUnsupportedFeature.
 func (b *SelectBuilder) FullJoin(t TableSource, on expr.Expression) *SelectBuilder {
 	cp := *b
 	cp.joins = append(append([]joinClause(nil), cp.joins...), joinClause{kind: joinFull, table: t, on: on})
@@ -405,19 +386,36 @@ func (b *SelectBuilder) Offset(n int) *SelectBuilder {
 	return &cp
 }
 
-// Build renders the query to a SQL string and bound arg slice.
-func (b *SelectBuilder) Build(d dialect.Dialect) (string, []any) {
-	ctx := expr.NewBuildContext(d)
-	return b.buildWith(ctx), ctx.Args()
+// Build renders the query to a SQL string and bound arg slice. Validation or
+// dialect-capability failures return empty SQL and no arguments.
+func (b *SelectBuilder) Build(d dialect.Dialect) (string, []any, error) {
+	ctx, err := newBuildContext(d)
+	if err != nil {
+		return buildFailure("build_select", err)
+	}
+	sql, err := b.buildWith(ctx)
+	if err != nil {
+		return buildFailure("build_select", err)
+	}
+	return sql, ctx.Args(), nil
 }
 
 // buildWith renders the SELECT statement into an existing BuildContext.
 // This is called by Build and by subquery expressions to share parameter numbering.
-func (b *SelectBuilder) buildWith(ctx *expr.BuildContext) string {
+func (b *SelectBuilder) buildWith(ctx *expr.BuildContext) (string, error) {
+	if b == nil {
+		return "", NewError(CodeBuildValidation, "build_select", "select builder is nil")
+	}
+	if b.limit < 0 || b.offset < 0 {
+		return "", NewError(CodeBuildValidation, "build_select", "select limit and offset must not be negative")
+	}
 	var sb strings.Builder
 
-	// WITH [RECURSIVE] (CTEs) — only emitted for dialects that support CTEs.
-	if len(b.ctes) > 0 && ctx.Dialect().SupportsCTE() {
+	// WITH [RECURSIVE] (CTEs).
+	if len(b.ctes) > 0 {
+		if !ctx.Dialect().SupportsCTE() {
+			return "", NewError(CodeUnsupportedFeature, "build_select", "common table expressions are not supported by this dialect")
+		}
 		hasRecursive := false
 		for _, cte := range b.ctes {
 			if cte.anchor != nil {
@@ -434,15 +432,37 @@ func (b *SelectBuilder) buildWith(ctx *expr.BuildContext) string {
 			if i > 0 {
 				sb.WriteString(", ")
 			}
-			sb.WriteString(ctx.Quote(cte.name))
+			name, err := ctx.Quote(cte.name)
+			if err != nil {
+				return "", err
+			}
+			sb.WriteString(name)
 			sb.WriteString(" AS (")
 			if cte.anchor != nil {
+				if cte.recursive == nil {
+					return "", NewError(CodeBuildValidation, "build_select", "recursive common table expression contains a nil term")
+				}
 				// Recursive CTE: anchor UNION ALL recursive
-				sb.WriteString(cte.anchor.buildWith(ctx))
+				anchor, err := cte.anchor.buildWith(ctx)
+				if err != nil {
+					return "", err
+				}
+				sb.WriteString(anchor)
 				sb.WriteString(" UNION ALL ")
-				sb.WriteString(cte.recursive.buildWith(ctx))
+				recursive, err := cte.recursive.buildWith(ctx)
+				if err != nil {
+					return "", err
+				}
+				sb.WriteString(recursive)
 			} else {
-				sb.WriteString(cte.sub.buildWith(ctx))
+				if cte.sub == nil {
+					return "", NewError(CodeBuildValidation, "build_select", "common table expression contains a nil select")
+				}
+				sub, err := cte.sub.buildWith(ctx)
+				if err != nil {
+					return "", err
+				}
+				sb.WriteString(sub)
 			}
 			sb.WriteString(")")
 		}
@@ -452,7 +472,10 @@ func (b *SelectBuilder) buildWith(ctx *expr.BuildContext) string {
 	// SELECT [DISTINCT [ON (cols)]]
 	sb.WriteString("SELECT ")
 	if b.distinct {
-		if len(b.distinctOn) > 0 && ctx.Dialect().SupportsDistinctOn() {
+		if len(b.distinctOn) > 0 {
+			if !ctx.Dialect().SupportsDistinctOn() {
+				return "", NewError(CodeUnsupportedFeature, "build_select", "distinct on is not supported by this dialect")
+			}
 			// PostgreSQL DISTINCT ON: SELECT DISTINCT ON (col1, col2) ...
 			// Use distinctColSQL (not selectColSQL) to avoid emitting "AS alias"
 			// when the caller passes an AliasedCol; DISTINCT ON does not accept aliases.
@@ -461,7 +484,11 @@ func (b *SelectBuilder) buildWith(ctx *expr.BuildContext) string {
 				if i > 0 {
 					sb.WriteString(", ")
 				}
-				sb.WriteString(distinctColSQL(ctx, c))
+				col, err := distinctColSQL(ctx, c)
+				if err != nil {
+					return "", err
+				}
+				sb.WriteString(col)
 			}
 			sb.WriteString(") ")
 		} else {
@@ -471,71 +498,109 @@ func (b *SelectBuilder) buildWith(ctx *expr.BuildContext) string {
 	if len(b.cols) == 0 {
 		sb.WriteString("*")
 	} else {
-		// Window functions are dropped for dialects that do not support them.
-		// AliasedCol is unwrapped one level (via Unwrap()) so that
-		// expr.ColAs(expr.RowNumber(), "rn") is also correctly gated.
-		written := 0
-		for _, c := range b.cols {
-			if !ctx.Dialect().SupportsWindowFunctions() && isWindowFunction(c) {
-				continue
+		// AliasedCol is unwrapped one level (via Unwrap()) so that window
+		// capability checks also apply to aliased window expressions.
+		for i, c := range b.cols {
+			if isNilValue(c) {
+				return "", NewError(CodeBuildValidation, "build_select", "select list contains a nil column")
 			}
-			if written > 0 {
+			if !ctx.Dialect().SupportsWindowFunctions() && isWindowFunction(c) {
+				return "", NewError(CodeUnsupportedFeature, "build_select", "window functions are not supported by this dialect")
+			}
+			if i > 0 {
 				sb.WriteString(", ")
 			}
-			sb.WriteString(selectColSQL(ctx, c))
-			written++
-		}
-		if written == 0 {
-			// All selected columns were window functions dropped by the dialect.
-			// Fall back to SELECT * to produce a runnable query rather than a
-			// syntax error. Note: SELECT * returns all table columns, including
-			// any that were intentionally excluded from the original SELECT list.
-			// Callers that rely on column restriction for correctness or data
-			// access control must check d.SupportsWindowFunctions() before
-			// building the query in this configuration.
-			sb.WriteString("*")
+			col, err := selectColSQL(ctx, c)
+			if err != nil {
+				return "", err
+			}
+			sb.WriteString(col)
 		}
 	}
 
 	// FROM
 	if b.from != nil {
+		if isNilValue(b.from) {
+			return "", NewError(CodeBuildValidation, "build_select", "from source is nil")
+		}
 		sb.WriteString(" FROM ")
 		if sq, ok := b.from.(*SubquerySource); ok {
+			if sq == nil || sq.sub == nil {
+				return "", NewError(CodeBuildValidation, "build_select", "from subquery is nil")
+			}
 			// Subquery: (SELECT ...) AS alias — render into the same context.
 			sb.WriteString("(")
-			sb.WriteString(sq.sub.buildWith(ctx))
+			sub, err := sq.sub.buildWith(ctx)
+			if err != nil {
+				return "", err
+			}
+			sb.WriteString(sub)
 			sb.WriteString(") AS ")
-			sb.WriteString(ctx.Quote(sq.alias))
+			alias, err := ctx.Quote(sq.alias)
+			if err != nil {
+				return "", err
+			}
+			sb.WriteString(alias)
 		} else {
-			sb.WriteString(ctx.Quote(b.from.GrizTableName()))
+			table, err := quoteTableSource(ctx, b.from)
+			if err != nil {
+				return "", err
+			}
+			sb.WriteString(table)
 			if b.from.GrizTableAlias() != b.from.GrizTableName() {
 				sb.WriteString(" AS ")
-				sb.WriteString(ctx.Quote(b.from.GrizTableAlias()))
+				alias, err := ctx.Quote(b.from.GrizTableAlias())
+				if err != nil {
+					return "", err
+				}
+				sb.WriteString(alias)
 			}
 		}
 	}
 
-	// JOINs — FULL JOIN is silently dropped for dialects that do not support it.
+	// JOINs.
 	for _, j := range b.joins {
+		if j.kind == joinRight && !ctx.Dialect().SupportsRightJoin() {
+			return "", NewError(CodeUnsupportedFeature, "build_select", "right join is not supported by this dialect")
+		}
 		if j.kind == joinFull && !ctx.Dialect().SupportsFullJoin() {
-			continue
+			return "", NewError(CodeUnsupportedFeature, "build_select", "full join is not supported by this dialect")
+		}
+		if j.kind != joinCross && isNilValue(j.on) {
+			return "", NewError(CodeBuildValidation, "build_select", "join predicate is nil")
 		}
 		sb.WriteString(" ")
 		sb.WriteString(string(j.kind))
 		sb.WriteString(" ")
-		sb.WriteString(ctx.Quote(j.table.GrizTableName()))
+		table, err := quoteTableSource(ctx, j.table)
+		if err != nil {
+			return "", err
+		}
+		sb.WriteString(table)
 		if j.table.GrizTableAlias() != j.table.GrizTableName() {
 			sb.WriteString(" AS ")
-			sb.WriteString(ctx.Quote(j.table.GrizTableAlias()))
+			alias, err := ctx.Quote(j.table.GrizTableAlias())
+			if err != nil {
+				return "", err
+			}
+			sb.WriteString(alias)
 		}
-		if j.on != nil {
+		if j.kind != joinCross {
 			sb.WriteString(" ON ")
-			sb.WriteString(j.on.ToSQL(ctx))
+			on, err := j.on.RenderSQL(ctx)
+			if err != nil {
+				return "", err
+			}
+			sb.WriteString(on)
 		}
 	}
 
 	// WHERE
-	sb.WriteString(buildWhere(ctx, b.where))
+	where, err := buildWhere(ctx, b.where)
+	if err != nil {
+		return "", err
+	}
+	sb.WriteString(where)
 
 	// GROUP BY
 	// Use distinctColSQL (not selectColSQL) to avoid emitting "AS alias" when
@@ -546,46 +611,89 @@ func (b *SelectBuilder) buildWith(ctx *expr.BuildContext) string {
 			if i > 0 {
 				sb.WriteString(", ")
 			}
-			sb.WriteString(distinctColSQL(ctx, c))
+			col, err := distinctColSQL(ctx, c)
+			if err != nil {
+				return "", err
+			}
+			sb.WriteString(col)
 		}
 	}
 
 	// HAVING
 	if b.having != nil {
+		if isNilValue(b.having) {
+			return "", NewError(CodeBuildValidation, "build_select", "having expression is nil")
+		}
 		sb.WriteString(" HAVING ")
-		sb.WriteString(b.having.ToSQL(ctx))
+		having, err := b.having.RenderSQL(ctx)
+		if err != nil {
+			return "", err
+		}
+		sb.WriteString(having)
 	}
 
 	// ORDER BY
-	sb.WriteString(buildOrderBy(ctx, b.orderBy))
+	orderBy, err := buildOrderBy(ctx, b.orderBy)
+	if err != nil {
+		return "", err
+	}
+	sb.WriteString(orderBy)
 
 	// LIMIT
 	if b.limit > 0 {
-		fmt.Fprintf(&sb, " LIMIT %d", b.limit)
+		_, _ = fmt.Fprintf(&sb, " LIMIT %d", b.limit)
 	}
 
 	// OFFSET
 	if b.offset > 0 {
-		fmt.Fprintf(&sb, " OFFSET %d", b.offset)
+		_, _ = fmt.Fprintf(&sb, " OFFSET %d", b.offset)
 	}
 
-	// Locking clauses — only emitted for dialects that support row-level locking.
-	if b.lockStrength != "" && ctx.Dialect().SupportsForUpdate() {
+	// Locking clauses.
+	if b.lockStrength != "" {
+		switch b.lockStrength {
+		case LockForUpdate, LockForNoKeyUpdate, LockForShare, LockForKeyShare:
+		default:
+			return "", NewError(CodeBuildValidation, "build_select", "row-lock strength is invalid")
+		}
+		seenOpts := make(map[LockOption]struct{}, len(b.lockOpts))
+		for _, opt := range b.lockOpts {
+			if opt != NoWait && opt != SkipLocked {
+				return "", NewError(CodeBuildValidation, "build_select", "row-lock option is invalid")
+			}
+			if _, ok := seenOpts[opt]; ok {
+				return "", NewError(CodeBuildValidation, "build_select", "row-lock option is duplicated")
+			}
+			seenOpts[opt] = struct{}{}
+		}
+		if b.lockOfSet && len(b.lockOf) == 0 {
+			return "", NewError(CodeBuildValidation, "build_select", "row-lock table list is empty")
+		}
+		if !ctx.Dialect().SupportsForUpdate() {
+			return "", NewError(CodeUnsupportedFeature, "build_select", "row locking is not supported by this dialect")
+		}
 		switch b.lockStrength {
 		case LockForNoKeyUpdate, LockForKeyShare:
 			// PostgreSQL-only modes: gate on SupportsForNoKeyUpdate.
 			if !ctx.Dialect().SupportsForNoKeyUpdate() {
-				break
+				return "", NewError(CodeUnsupportedFeature, "build_select", "requested row-lock strength is not supported by this dialect")
 			}
 			sb.WriteString(" " + string(b.lockStrength))
 			// OF table list: PostgreSQL supports it for all modes.
 			if len(b.lockOf) > 0 {
 				sb.WriteString(" OF ")
 				for i, t := range b.lockOf {
+					if err := b.validateLockSource(t); err != nil {
+						return "", err
+					}
 					if i > 0 {
 						sb.WriteString(", ")
 					}
-					sb.WriteString(ctx.Quote(t.GrizTableAlias()))
+					alias, err := ctx.Quote(t.GrizTableAlias())
+					if err != nil {
+						return "", err
+					}
+					sb.WriteString(alias)
 				}
 			}
 			// NOWAIT / SKIP LOCKED modifiers.
@@ -597,13 +705,23 @@ func (b *SelectBuilder) buildWith(ctx *expr.BuildContext) string {
 			// OF table list: only emitted when the dialect declares support for it
 			// (e.g. PostgreSQL FOR SHARE). MySQL's LOCK IN SHARE MODE does not
 			// accept an OF clause, so SupportsForShareOf() returns false there.
-			if len(b.lockOf) > 0 && ctx.Dialect().SupportsForShareOf() {
+			if len(b.lockOf) > 0 && !ctx.Dialect().SupportsForShareOf() {
+				return "", NewError(CodeUnsupportedFeature, "build_select", "row-lock table lists are not supported by this dialect")
+			}
+			if len(b.lockOf) > 0 {
 				sb.WriteString(" OF ")
 				for i, t := range b.lockOf {
+					if err := b.validateLockSource(t); err != nil {
+						return "", err
+					}
 					if i > 0 {
 						sb.WriteString(", ")
 					}
-					sb.WriteString(ctx.Quote(t.GrizTableAlias()))
+					alias, err := ctx.Quote(t.GrizTableAlias())
+					if err != nil {
+						return "", err
+					}
+					sb.WriteString(alias)
 				}
 			}
 			// NOWAIT / SKIP LOCKED modifiers.
@@ -612,14 +730,24 @@ func (b *SelectBuilder) buildWith(ctx *expr.BuildContext) string {
 			}
 		default: // LockForUpdate (and any future modes)
 			sb.WriteString(" " + string(b.lockStrength))
-			// OF table list: supported by PostgreSQL and MySQL 8.0+ FOR UPDATE.
+			if len(b.lockOf) > 0 && !ctx.Dialect().SupportsForShareOf() {
+				return "", NewError(CodeUnsupportedFeature, "build_select", "row-lock table lists are not supported by this dialect")
+			}
+			// OF table lists are PostgreSQL-compatible.
 			if len(b.lockOf) > 0 {
 				sb.WriteString(" OF ")
 				for i, t := range b.lockOf {
+					if err := b.validateLockSource(t); err != nil {
+						return "", err
+					}
 					if i > 0 {
 						sb.WriteString(", ")
 					}
-					sb.WriteString(ctx.Quote(t.GrizTableAlias()))
+					alias, err := ctx.Quote(t.GrizTableAlias())
+					if err != nil {
+						return "", err
+					}
+					sb.WriteString(alias)
 				}
 			}
 			// NOWAIT / SKIP LOCKED modifiers.
@@ -627,9 +755,27 @@ func (b *SelectBuilder) buildWith(ctx *expr.BuildContext) string {
 				sb.WriteString(" " + string(opt))
 			}
 		}
+	} else if b.lockOfSet {
+		return "", NewError(CodeBuildValidation, "build_select", "row-lock table list requires a lock mode")
 	}
 
-	return sb.String()
+	return sb.String(), nil
+}
+
+func (b *SelectBuilder) validateLockSource(target TableSource) error {
+	if isNilValue(target) {
+		return NewError(CodeBuildValidation, "build_select", "row-lock table source is nil")
+	}
+	wantAlias := target.GrizTableAlias()
+	if b.from != nil && !isNilValue(b.from) && b.from.GrizTableAlias() == wantAlias {
+		return nil
+	}
+	for _, join := range b.joins {
+		if !isNilValue(join.table) && join.table.GrizTableAlias() == wantAlias {
+			return nil
+		}
+	}
+	return NewError(CodeBuildValidation, "build_select", "row-lock table source is not active in the query")
 }
 
 // isWindowFunction reports whether c is a window function expression.
@@ -661,11 +807,14 @@ func isWindowExprType(c expr.SelectableColumn) bool {
 
 // selectColSQL produces the SQL fragment for a selectable column.
 // For aggregate expressions (COUNT, SUM, …) that implement expr.Expression,
-// ToSQL is called directly so the aggregate function syntax is preserved.
+// RenderSQL is called directly so the aggregate function syntax is preserved.
 // For plain columns the standard quoted "table"."col" form is returned.
-func selectColSQL(ctx *expr.BuildContext, c expr.SelectableColumn) string {
+func selectColSQL(ctx *expr.BuildContext, c expr.SelectableColumn) (string, error) {
+	if isNilValue(c) {
+		return "", NewError(CodeBuildValidation, "render_select_column", "selectable column is nil")
+	}
 	if e, ok := c.(expr.Expression); ok {
-		return e.ToSQL(ctx)
+		return e.RenderSQL(ctx)
 	}
 	return ctx.ColRef(c.TableName(), c.ColumnName())
 }
@@ -673,8 +822,11 @@ func selectColSQL(ctx *expr.BuildContext, c expr.SelectableColumn) string {
 // distinctColSQL produces the SQL fragment for a column in non-SELECT positions
 // such as GROUP BY and DISTINCT ON where an AS alias clause is invalid.
 // AliasedCol values are unwrapped one level so only the bare column reference
-// is emitted; all other expression types are rendered via ToSQL as usual.
-func distinctColSQL(ctx *expr.BuildContext, c expr.SelectableColumn) string {
+// is emitted; all other expression types are rendered via RenderSQL as usual.
+func distinctColSQL(ctx *expr.BuildContext, c expr.SelectableColumn) (string, error) {
+	if isNilValue(c) {
+		return "", NewError(CodeBuildValidation, "render_select_column", "selectable column is nil")
+	}
 	// Unwrap one level of AliasedCol so we render the inner column, not the alias.
 	type unwrapper interface{ Unwrap() expr.SelectableColumn }
 	if u, ok := c.(unwrapper); ok {
