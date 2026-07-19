@@ -206,6 +206,29 @@ func TestTable_Build(t *testing.T) {
 	}
 }
 
+func TestTable_DialectAndDef(t *testing.T) {
+	tbl := sqlite.SchemaTable("archive", "events",
+		sqlite.C("id", sqlite.Integer().PrimaryKey()),
+	).Build()
+
+	if got := tbl.Dialect(); got != "sqlite" {
+		t.Errorf("Dialect: got %q, want %q", got, "sqlite")
+	}
+	def := tbl.Def()
+	if def == nil {
+		t.Fatal("Def: got nil, want underlying table definition")
+	}
+	if def != tbl.TableDef {
+		t.Error("Def: did not return the embedded table definition")
+	}
+	if def.Schema != "archive" || def.Name != "events" {
+		t.Errorf("Def table metadata: got %q.%q, want %q.%q", def.Schema, def.Name, "archive", "events")
+	}
+	if len(def.Columns) != 1 || def.Columns[0].Name != "id" {
+		t.Fatalf("Def columns: got %+v, want one id column", def.Columns)
+	}
+}
+
 func TestTable_WithConstraints(t *testing.T) {
 	tbl := sqlite.Table("users",
 		sqlite.C("id", sqlite.Integer().PrimaryKey()),

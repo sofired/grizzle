@@ -232,6 +232,29 @@ func TestTable_Build(t *testing.T) {
 	}
 }
 
+func TestTable_DialectAndDef(t *testing.T) {
+	tbl := mysql.SchemaTable("inventory", "widgets",
+		mysql.C("id", mysql.Integer().PrimaryKey()),
+	).Build()
+
+	if got := tbl.Dialect(); got != "mysql" {
+		t.Errorf("Dialect: got %q, want %q", got, "mysql")
+	}
+	def := tbl.Def()
+	if def == nil {
+		t.Fatal("Def: got nil, want underlying table definition")
+	}
+	if def != tbl.TableDef {
+		t.Error("Def: did not return the embedded table definition")
+	}
+	if def.Schema != "inventory" || def.Name != "widgets" {
+		t.Errorf("Def table metadata: got %q.%q, want %q.%q", def.Schema, def.Name, "inventory", "widgets")
+	}
+	if len(def.Columns) != 1 || def.Columns[0].Name != "id" {
+		t.Fatalf("Def columns: got %+v, want one id column", def.Columns)
+	}
+}
+
 func TestTable_WithConstraints(t *testing.T) {
 	tbl := mysql.Table("users",
 		mysql.C("id", mysql.UUID().PrimaryKey().DefaultRandom()),
