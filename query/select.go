@@ -135,10 +135,11 @@ func (b *SelectBuilder) ForUpdate() *SelectBuilder {
 	return b.For(LockForUpdate)
 }
 
-// ForShare appends FOR SHARE to the query, locking rows for read while allowing
-// other readers.
-// PostgreSQL and MySQL only; unsupported dialects cause Build to return
-// ErrUnsupportedFeature.
+// ForShare appends the dialect's shared row-lock clause to the query, locking
+// rows for read while allowing other readers.
+// The built-in PostgreSQL and MySQL dialects support it; custom dialects may
+// opt in through their row-locking capabilities. Unsupported dialects cause
+// Build to return ErrUnsupportedFeature.
 //
 // ForShare is a convenience wrapper around For(LockForShare).
 func (b *SelectBuilder) ForShare() *SelectBuilder {
