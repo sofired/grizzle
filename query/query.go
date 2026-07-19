@@ -140,5 +140,18 @@ func quoteTableSource(ctx *expr.BuildContext, table TableSource) (string, error)
 	if isNilValue(table) {
 		return "", NewError(CodeBuildValidation, "render_table_source", "table source is nil")
 	}
-	return ctx.Quote(table.GrizTableName())
+	name := table.GrizTableName()
+	quotedName, err := ctx.Quote(name)
+	if err != nil {
+		return "", err
+	}
+	if alias := table.GrizTableAlias(); alias != name {
+		// Mutation builders currently render only the base table name, but an
+		// alias is still identifier metadata supplied by the source. Validate it
+		// here so INSERT, UPDATE, and DELETE cannot silently accept unsafe aliases.
+		if _, err := ctx.Quote(alias); err != nil {
+			return "", err
+		}
+	}
+	return quotedName, nil
 }

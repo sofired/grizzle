@@ -28,6 +28,15 @@ func invalidSelectBuilder() *query.SelectBuilder {
 	return query.Select().Where(expr.RawArgs("x = $? AND y = $?", 1))
 }
 
+type invalidIdentifierTable string
+
+func (t invalidIdentifierTable) GrizTableName() string  { return string(t) }
+func (t invalidIdentifierTable) GrizTableAlias() string { return string(t) }
+
+func invalidIdentifierSelectBuilder() *query.SelectBuilder {
+	return query.Select().From(invalidIdentifierTable("unsafe\nidentifier"))
+}
+
 type typedNilBuilder struct{}
 
 func (*typedNilBuilder) Build(dialect.Dialect) (string, []any, error) {
@@ -53,6 +62,49 @@ func TestPreparedHelpers_PropagateBuildErrorsBeforeDatabaseUse(t *testing.T) {
 	}
 	if len(reg.entries) != 0 {
 		t.Fatalf("failed registrations mutated registry: %v", reg.entries)
+	}
+}
+
+func TestPreparedHelpers_PreserveInvalidIdentifierCodeAndRedaction(t *testing.T) {
+	ctx := context.Background()
+	builder := invalidIdentifierSelectBuilder()
+	_, _, normalErr := builder.Build(dialect.Postgres)
+	assertInvalidIdentifierError(t, normalErr)
+
+	if stmt, err := PrepareSelect[any](ctx, nil, "invalid_identifier", builder); stmt != nil {
+		t.Fatalf("PrepareSelect returned statement: %v", stmt)
+	} else {
+		assertInvalidIdentifierError(t, err)
+	}
+	if stmt, err := PrepareExec(ctx, nil, "invalid_identifier", builder); stmt != nil {
+		t.Fatalf("PrepareExec returned statement: %v", stmt)
+	} else {
+		assertInvalidIdentifierError(t, err)
+	}
+
+	reg := NewRegistry(nil)
+	if stmt, err := RegisterSelect[any](reg, "invalid_identifier", builder); stmt != nil {
+		t.Fatalf("RegisterSelect returned statement: %v", stmt)
+	} else {
+		assertInvalidIdentifierError(t, err)
+	}
+	if stmt, err := RegisterExec(reg, "invalid_identifier", builder); stmt != nil {
+		t.Fatalf("RegisterExec returned statement: %v", stmt)
+	} else {
+		assertInvalidIdentifierError(t, err)
+	}
+	if len(reg.entries) != 0 {
+		t.Fatalf("failed registrations mutated registry: %v", reg.entries)
+	}
+}
+
+func assertInvalidIdentifierError(t *testing.T, err error) {
+	t.Helper()
+	if !errors.Is(err, query.ErrInvalidIdentifier) {
+		t.Fatalf("error = %v, want ErrInvalidIdentifier", err)
+	}
+	if strings.Contains(err.Error(), "unsafe") || strings.ContainsAny(err.Error(), "\n\r\x00\x1b") {
+		t.Fatalf("error leaked unsafe identifier data: %q", err)
 	}
 }
 
