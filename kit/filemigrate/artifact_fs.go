@@ -276,21 +276,11 @@ func (s *FSArtifactStore) CreateArtifact(ctx context.Context, root ArtifactRoot,
 	if err != nil {
 		return nil, &Error{Code: CodeInvalidPath, Op: fsOp + ".create_artifact", Migration: artifact.Name, Err: err}
 	}
-	// Clean up the temp dir on any failure path.
-	committed := false
-	published := false
-	defer func() {
-		_ = staging.Close()
-		// Before rename, tmpName is the private entry this call created and is
-		// safe to remove handle-relatively. After rename, a failed identity
-		// check means artifact.Name is explicitly untrusted: another writer may
-		// have replaced it, so recursively deleting that pathname would create a
-		// privileged deletion primitive. Leave an unverified published target in
-		// place for discovery to reject and for an operator to inspect.
-		if !committed && !published {
-			_ = rootHandle.RemoveAll(tmpName)
-		}
-	}()
+	// Never recursively remove a failed staging pathname. Another writer may
+	// have replaced it after creation, so cleanup by name could delete an
+	// unverified target with this process's privileges. Successful publication
+	// consumes tmpName; failures leave it for operator inspection.
+	defer func() { _ = staging.Close() }()
 
 	if err := writeSecureNewFile(staging, "migration.sql", artifact.MigrationSQL); err != nil {
 		return nil, &Error{Code: CodeInvalidPath, Op: fsOp + ".create_artifact", Migration: artifact.Name, Err: err}
@@ -301,6 +291,11 @@ func (s *FSArtifactStore) CreateArtifact(ctx context.Context, root ArtifactRoot,
 	stagingInfo, err := staging.Stat(".")
 	if err != nil {
 		return nil, &Error{Code: CodeInvalidPath, Op: fsOp + ".create_artifact", Migration: artifact.Name, Err: err}
+	}
+	if hooks, ok := ctx.Value(secureFSTestHooksKey{}).(secureFSTestHooks); ok && hooks.beforeArtifactStagingVerify != nil {
+		// The test hook intentionally runs after capturing the opened staging
+		// identity and before verifying the parent-relative pathname.
+		hooks.beforeArtifactStagingVerify(tmpName)
 	}
 	if err := verifySecureDirIdentity(rootHandle, tmpName, stagingInfo); err != nil {
 		return nil, &Error{Code: CodeInvalidPath, Op: fsOp + ".create_artifact", Migration: artifact.Name, Err: err}
@@ -314,11 +309,9 @@ func (s *FSArtifactStore) CreateArtifact(ctx context.Context, root ArtifactRoot,
 	if err := rootHandle.Rename(tmpName, artifact.Name); err != nil {
 		return nil, &Error{Code: CodeInvalidPath, Op: fsOp + ".create_artifact", Migration: artifact.Name, Err: err}
 	}
-	published = true
 	if err := verifySecureDirIdentity(rootHandle, artifact.Name, stagingInfo); err != nil {
 		return nil, &Error{Code: CodeInvalidPath, Op: fsOp + ".create_artifact", Migration: artifact.Name, Err: err}
 	}
-	committed = true
 
 	digests := computeArtifactDigest(artifact.MigrationSQL, artifact.SnapshotJSON)
 	sql := bytes.Clone(artifact.MigrationSQL)

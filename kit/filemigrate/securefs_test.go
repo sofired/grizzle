@@ -394,3 +394,59 @@ func TestFSArtifactStore_CreateArtifact_StagingSwapLeavesUnverifiedTarget(t *tes
 		t.Fatalf("outside bytes changed: %q", outsideBytes)
 	}
 }
+
+func TestFSArtifactStore_CreateArtifact_StagingVerificationSwapLeavesReplacement(t *testing.T) {
+	if err := ensureSecureFilesystemSupported(); err != nil {
+		t.Skip(err)
+	}
+	store := NewFSArtifactStore()
+	rootDir := t.TempDir()
+	root, err := store.ResolveRoot(t.Context(), rootDir, ResolveArtifactRootOptions{Mode: RootEnsureForWrite})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var (
+		swapErr      error
+		stagingPath  string
+		originalPath string
+	)
+	hooks := secureFSTestHooks{beforeArtifactStagingVerify: func(stagingName string) {
+		stagingPath = filepath.Join(root.RealPath, stagingName)
+		originalPath = stagingPath + "-original"
+		if err := os.Rename(stagingPath, originalPath); err != nil {
+			swapErr = err
+			return
+		}
+		if err := os.Mkdir(stagingPath, 0o700); err != nil {
+			swapErr = err
+			return
+		}
+		swapErr = os.WriteFile(filepath.Join(stagingPath, "replacement.txt"), []byte("keep"), 0o600)
+	}}
+	ctx := context.WithValue(t.Context(), secureFSTestHooksKey{}, hooks)
+	loaded, err := store.CreateArtifact(ctx, root, NewArtifact{
+		Name:         "20240101000000_staging_verify_swap",
+		MigrationSQL: []byte("safe"),
+		SnapshotJSON: []byte("{}"),
+	}, CreateArtifactOptions{})
+	if swapErr != nil {
+		t.Fatalf("install race fixture: %v", swapErr)
+	}
+	if loaded != nil {
+		t.Fatalf("staging verification swap returned a loaded artifact: %+v", loaded)
+	}
+	if !errors.Is(err, ErrInvalidPath) {
+		t.Fatalf("got %v, want invalid_path", err)
+	}
+	replacement, err := os.ReadFile(filepath.Join(stagingPath, "replacement.txt"))
+	if err != nil {
+		t.Fatalf("unverified staging replacement was unexpectedly deleted: %v", err)
+	}
+	if !bytes.Equal(replacement, []byte("keep")) {
+		t.Fatalf("replacement bytes changed: %q", replacement)
+	}
+	if _, err := os.Stat(filepath.Join(originalPath, "migration.sql")); err != nil {
+		t.Fatalf("original staging directory was unexpectedly removed: %v", err)
+	}
+}

@@ -27,8 +27,9 @@ var (
 // methods without mutable package globals. The key and value are unexported,
 // so production callers cannot install hooks accidentally.
 type secureFSTestHooks struct {
-	afterArtifactFileLstat func(name string)
-	beforeArtifactPublish  func(stagingName string)
+	afterArtifactFileLstat      func(name string)
+	beforeArtifactStagingVerify func(stagingName string)
+	beforeArtifactPublish       func(stagingName string)
 }
 
 type secureFSTestHooksKey struct{}
