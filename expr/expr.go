@@ -16,7 +16,7 @@ type Expression interface {
 // Logical combinators
 // -------------------------------------------------------------------
 
-// And combines expressions with AND. Nil expressions are silently dropped,
+// And combines expressions with AND. Plain nil expressions are silently dropped,
 // so callers can write:
 //
 //	And(
@@ -37,7 +37,7 @@ func And(exprs ...Expression) Expression {
 	}
 }
 
-// Or combines expressions with OR. Nil expressions are silently dropped.
+// Or combines expressions with OR. Plain nil expressions are silently dropped.
 func Or(exprs ...Expression) Expression {
 	active := filterNil(exprs)
 	switch len(active) {
@@ -50,10 +50,13 @@ func Or(exprs ...Expression) Expression {
 	}
 }
 
-// Not negates an expression. Returns nil if expr is nil.
+// Not negates an expression. Returns nil if expr is a plain nil interface.
 func Not(expr Expression) Expression {
-	if isNilExpression(expr) {
+	if expr == nil {
 		return nil
+	}
+	if isNilExpression(expr) {
+		return invalidExpr{message: "negated expression is typed nil"}
 	}
 	return notExpr{expr: expr}
 }
@@ -61,9 +64,14 @@ func Not(expr Expression) Expression {
 func filterNil(exprs []Expression) []Expression {
 	out := exprs[:0:len(exprs)]
 	for _, e := range exprs {
-		if !isNilExpression(e) {
-			out = append(out, e)
+		if e == nil {
+			continue
 		}
+		if isNilExpression(e) {
+			out = append(out, invalidExpr{message: "logical expression is typed nil"})
+			continue
+		}
+		out = append(out, e)
 	}
 	return out
 }

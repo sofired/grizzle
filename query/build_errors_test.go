@@ -108,6 +108,21 @@ func TestBuild_RejectsTypedNilWherePredicates(t *testing.T) {
 	}
 }
 
+func TestBuild_LogicalCombinatorsPreserveTypedNilPredicates(t *testing.T) {
+	var typedNil *leakingExpression
+	table := unsafeTable("users")
+	builders := []query.Builder{
+		query.Select().From(table).Where(expr.And(typedNil, nil)),
+		query.Select().From(table).Where(expr.Or(nil, typedNil)),
+		query.Select().From(table).Where(expr.Not(typedNil)),
+		query.Update(table).Set("name", "alice").Where(typedNil).And(nil),
+		query.DeleteFrom(table).Where(typedNil).And(nil),
+	}
+	for _, b := range builders {
+		assertBuildError(t, b, dialect.Postgres, query.ErrBuildValidation)
+	}
+}
+
 func TestBuild_AllowsIntentionalNilWherePredicates(t *testing.T) {
 	table := unsafeTable("users")
 	builders := []query.Builder{
