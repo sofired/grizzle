@@ -3,6 +3,7 @@ package sql_test
 import (
 	"context"
 	gosql "database/sql"
+	"errors"
 	"testing"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -12,6 +13,62 @@ import (
 	"github.com/sofired/grizzle/expr"
 	"github.com/sofired/grizzle/query"
 )
+
+type typedNilBuilder struct{}
+
+func (*typedNilBuilder) Build(dialect.Dialect) (string, []any, error) {
+	panic("typed-nil builder must be rejected before Build")
+}
+
+func TestExecutionHelpers_PropagateBuildErrorsBeforeDatabaseUse(t *testing.T) {
+	db := sqldb.New(nil, dialect.Postgres)
+	b := query.Select().Where(expr.RawArgs("x = $? AND y = $?", 1))
+	if rows, err := db.Query(context.Background(), b); rows != nil || !errors.Is(err, query.ErrBuildValidation) {
+		t.Fatalf("Query = (%v, %v), want nil and ErrBuildValidation", rows, err)
+	}
+	if affected, err := db.Exec(context.Background(), b); affected != 0 || !errors.Is(err, query.ErrBuildValidation) {
+		t.Fatalf("Exec = (%d, %v), want zero and ErrBuildValidation", affected, err)
+	}
+}
+
+func TestExecutionHelpers_RejectTypedNilBuildersAndReceivers(t *testing.T) {
+	ctx := context.Background()
+	var b *typedNilBuilder
+	db := sqldb.New(nil, dialect.Postgres)
+	if rows, err := db.Query(ctx, b); rows != nil || !errors.Is(err, query.ErrBuildValidation) {
+		t.Fatalf("Query typed nil = (%v, %v), want nil and ErrBuildValidation", rows, err)
+	}
+	if affected, err := db.Exec(ctx, b); affected != 0 || !errors.Is(err, query.ErrBuildValidation) {
+		t.Fatalf("Exec typed nil = (%d, %v), want zero and ErrBuildValidation", affected, err)
+	}
+
+	var nilDB *sqldb.DB
+	if rows, err := nilDB.Query(ctx, query.Select()); rows != nil || !errors.Is(err, query.ErrInvalidReceiver) {
+		t.Fatalf("nil DB Query = (%v, %v), want nil and ErrInvalidReceiver", rows, err)
+	}
+	var nilTx *sqldb.Tx
+	if affected, err := nilTx.Exec(ctx, query.Select()); affected != 0 || !errors.Is(err, query.ErrInvalidReceiver) {
+		t.Fatalf("nil Tx Exec = (%d, %v), want zero and ErrInvalidReceiver", affected, err)
+	}
+}
+
+func TestTransactionExecutionHelpers_PropagateBuildErrorsBeforeDatabaseUse(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+	b := query.Select().Where(expr.RawArgs("x = $? AND y = $?", 1))
+	err := db.Transaction(ctx, func(tx *sqldb.Tx) error {
+		if rows, err := tx.Query(ctx, b); rows != nil || !errors.Is(err, query.ErrBuildValidation) {
+			t.Fatalf("Tx.Query = (%v, %v), want nil and ErrBuildValidation", rows, err)
+		}
+		if affected, err := tx.Exec(ctx, b); affected != 0 || !errors.Is(err, query.ErrBuildValidation) {
+			t.Fatalf("Tx.Exec = (%d, %v), want zero and ErrBuildValidation", affected, err)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Transaction = %v", err)
+	}
+}
 
 // -------------------------------------------------------------------
 // Schema helpers for tests

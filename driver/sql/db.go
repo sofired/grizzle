@@ -16,7 +16,7 @@
 //	raw, err := sql.Open("mysql", dsn)
 //	db := sqldb.New(raw, dialect.MySQL)
 //
-//	sql, args := query.Select(UsersT.ID, UsersT.Name).
+//	sql, args, err := query.Select(UsersT.ID, UsersT.Name).
 //	    From(UsersT).
 //	    Where(UsersT.DeletedAt.IsNull()).
 //	    Build(db.Dialect())
@@ -76,19 +76,39 @@ func (w *DB) Dialect() dialect.Dialect { return w.d }
 
 // Query executes a SELECT builder and returns the raw *sql.Rows.
 // Use ScanAll or ScanOne to collect results into typed structs.
-func (w *DB) Query(ctx context.Context, b interface {
-	Build(dialect.Dialect) (string, []any)
-}) (*sql.Rows, error) {
-	q, args := b.Build(w.d)
+func (w *DB) Query(ctx context.Context, b query.Builder) (*sql.Rows, error) {
+	if w == nil {
+		return nil, query.NewError(query.CodeInvalidReceiver, "sql_query", "database receiver is invalid")
+	}
+	if isNilValue(b) {
+		return nil, query.NewError(query.CodeBuildValidation, "sql_query", "query builder is nil")
+	}
+	q, args, err := b.Build(w.d)
+	if err != nil {
+		return nil, err
+	}
+	if w.db == nil {
+		return nil, query.NewError(query.CodeInvalidReceiver, "sql_query", "database receiver is invalid")
+	}
 	return w.db.QueryContext(ctx, q, args...)
 }
 
 // Exec executes an INSERT, UPDATE, or DELETE builder and returns the number
 // of rows affected.
-func (w *DB) Exec(ctx context.Context, b interface {
-	Build(dialect.Dialect) (string, []any)
-}) (int64, error) {
-	q, args := b.Build(w.d)
+func (w *DB) Exec(ctx context.Context, b query.Builder) (int64, error) {
+	if w == nil {
+		return 0, query.NewError(query.CodeInvalidReceiver, "sql_exec", "database receiver is invalid")
+	}
+	if isNilValue(b) {
+		return 0, query.NewError(query.CodeBuildValidation, "sql_exec", "query builder is nil")
+	}
+	q, args, err := b.Build(w.d)
+	if err != nil {
+		return 0, err
+	}
+	if w.db == nil {
+		return 0, query.NewError(query.CodeInvalidReceiver, "sql_exec", "database receiver is invalid")
+	}
 	res, err := w.db.ExecContext(ctx, q, args...)
 	if err != nil {
 		return 0, err
@@ -238,18 +258,38 @@ func (w *DB) Transaction(ctx context.Context, fn func(tx *Tx) error) error {
 func (tx *Tx) Dialect() dialect.Dialect { return tx.d }
 
 // Query executes a SELECT builder within the transaction.
-func (tx *Tx) Query(ctx context.Context, b interface {
-	Build(dialect.Dialect) (string, []any)
-}) (*sql.Rows, error) {
-	q, args := b.Build(tx.d)
+func (tx *Tx) Query(ctx context.Context, b query.Builder) (*sql.Rows, error) {
+	if tx == nil {
+		return nil, query.NewError(query.CodeInvalidReceiver, "sql_tx_query", "transaction receiver is invalid")
+	}
+	if isNilValue(b) {
+		return nil, query.NewError(query.CodeBuildValidation, "sql_tx_query", "query builder is nil")
+	}
+	q, args, err := b.Build(tx.d)
+	if err != nil {
+		return nil, err
+	}
+	if tx.tx == nil {
+		return nil, query.NewError(query.CodeInvalidReceiver, "sql_tx_query", "transaction receiver is invalid")
+	}
 	return tx.tx.QueryContext(ctx, q, args...)
 }
 
 // Exec executes an INSERT/UPDATE/DELETE builder within the transaction.
-func (tx *Tx) Exec(ctx context.Context, b interface {
-	Build(dialect.Dialect) (string, []any)
-}) (int64, error) {
-	q, args := b.Build(tx.d)
+func (tx *Tx) Exec(ctx context.Context, b query.Builder) (int64, error) {
+	if tx == nil {
+		return 0, query.NewError(query.CodeInvalidReceiver, "sql_tx_exec", "transaction receiver is invalid")
+	}
+	if isNilValue(b) {
+		return 0, query.NewError(query.CodeBuildValidation, "sql_tx_exec", "query builder is nil")
+	}
+	q, args, err := b.Build(tx.d)
+	if err != nil {
+		return 0, err
+	}
+	if tx.tx == nil {
+		return 0, query.NewError(query.CodeInvalidReceiver, "sql_tx_exec", "transaction receiver is invalid")
+	}
 	res, err := tx.tx.ExecContext(ctx, q, args...)
 	if err != nil {
 		return 0, err
@@ -294,6 +334,19 @@ func FromSelectOne[T any](ctx context.Context, db *DB, b *query.SelectBuilder) (
 func FromSelectOpt[T any](ctx context.Context, db *DB, b *query.SelectBuilder) (*T, error) {
 	rows, err := db.Query(ctx, b)
 	return ScanOneOpt[T](rows, err)
+}
+
+func isNilValue(value any) bool {
+	if value == nil {
+		return true
+	}
+	v := reflect.ValueOf(value)
+	switch v.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
+		return v.IsNil()
+	default:
+		return false
+	}
 }
 
 // -------------------------------------------------------------------

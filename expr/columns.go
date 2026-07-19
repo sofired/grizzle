@@ -18,7 +18,7 @@ type ColBase struct {
 	ColName    string // the SQL column name
 }
 
-func (c ColBase) colRef(ctx *BuildContext) string {
+func (c ColBase) colRef(ctx *BuildContext) (string, error) {
 	return ctx.ColRef(c.TableAlias, c.ColName)
 }
 
@@ -63,30 +63,43 @@ type OrderExpr struct {
 	nulls string // "NULLS FIRST", "NULLS LAST", or ""
 }
 
-func (o OrderExpr) ToSQL(ctx *BuildContext) string {
-	s := o.ref.colRef(ctx) + " " + o.dir
+func (o OrderExpr) RenderSQL(ctx *BuildContext) (string, error) {
+	if isNilInterface(o.ref) {
+		return "", NewError(CodeBuildValidation, "render_order", "order expression is empty")
+	}
+	ref, err := o.ref.colRef(ctx)
+	if err != nil {
+		return "", err
+	}
+	s := ref + " " + o.dir
 	if o.nulls != "" {
 		s += " " + o.nulls
 	}
-	return s
+	return s, nil
 }
 
-// ToSQLUnqualified renders the ORDER BY expression using only the column name,
+// RenderSQLUnqualified renders the ORDER BY expression using only the column name,
 // without a table qualifier. Required for set operation (UNION/INTERSECT/EXCEPT)
 // ORDER BY clauses, where table qualifiers are not valid SQL.
-func (o OrderExpr) ToSQLUnqualified(ctx *BuildContext) string {
-	name := unqualifiedColRef(o.ref, ctx)
+func (o OrderExpr) RenderSQLUnqualified(ctx *BuildContext) (string, error) {
+	if isNilInterface(o.ref) {
+		return "", NewError(CodeBuildValidation, "render_order", "order expression is empty")
+	}
+	name, err := unqualifiedColRef(o.ref, ctx)
+	if err != nil {
+		return "", err
+	}
 	s := name + " " + o.dir
 	if o.nulls != "" {
 		s += " " + o.nulls
 	}
-	return s
+	return s, nil
 }
 
 // unqualifiedColRef returns only the column name portion of a colRef,
 // stripping any table qualifier. Falls back to the full colRef for complex
 // expressions (window functions, arithmetic, etc.) that have no table prefix.
-func unqualifiedColRef(ref colRefer, ctx *BuildContext) string {
+func unqualifiedColRef(ref colRefer, ctx *BuildContext) (string, error) {
 	// For ColBase (the common case), we can access the column name directly.
 	type namedCol interface {
 		ColumnName() string
@@ -119,7 +132,7 @@ func (o OrderExpr) NullsLast() OrderExpr {
 // SelectableColumn can appear in a SELECT clause. Generated table types
 // expose their columns as SelectableColumn values.
 type SelectableColumn interface {
-	colRef(ctx *BuildContext) string
+	colRef(ctx *BuildContext) (string, error)
 	ColumnName() string
 	TableName() string
 }
@@ -141,7 +154,7 @@ func (c UUIDColumn) NEQ(val uuid.UUID) Expression {
 }
 func (c UUIDColumn) In(vals ...uuid.UUID) Expression {
 	if len(vals) == 0 {
-		return Raw("FALSE")
+		return invalidListExpression()
 	}
 	anys := make([]any, len(vals))
 	for i, v := range vals {
@@ -151,7 +164,7 @@ func (c UUIDColumn) In(vals ...uuid.UUID) Expression {
 }
 func (c UUIDColumn) NotIn(vals ...uuid.UUID) Expression {
 	if len(vals) == 0 {
-		return Raw("TRUE")
+		return invalidListExpression()
 	}
 	anys := make([]any, len(vals))
 	for i, v := range vals {
@@ -204,38 +217,36 @@ func (c StringColumn) NotILike(pattern string) Expression {
 }
 
 // RegexpMatch produces a case-sensitive regex match: col ~ $1 (PostgreSQL-specific).
-// On non-PostgreSQL dialects, emits FALSE and binds no arguments.
-// Check dialect.SupportsRegexpMatch() before using this operator for portability.
+// On unsupported dialects, rendering returns ErrUnsupportedFeature and binds
+// no arguments.
 func (c StringColumn) RegexpMatch(pattern string) Expression {
 	return regexpExpr{ref: c.ColBase, op: "~", pattern: pattern}
 }
 
 // RegexpMatchI produces a case-insensitive regex match: col ~* $1 (PostgreSQL-specific).
-// On non-PostgreSQL dialects, emits FALSE and binds no arguments.
-// Check dialect.SupportsRegexpMatch() before using this operator for portability.
+// On unsupported dialects, rendering returns ErrUnsupportedFeature and binds
+// no arguments.
 func (c StringColumn) RegexpMatchI(pattern string) Expression {
 	return regexpExpr{ref: c.ColBase, op: "~*", pattern: pattern}
 }
 
 // NotRegexpMatch produces a case-sensitive regex non-match: col !~ $1 (PostgreSQL-specific).
-// On non-PostgreSQL dialects, emits FALSE (no rows matched) — not TRUE — and binds no
-// arguments. This means expr.Not(col.NotRegexpMatch(...)) on a non-PG dialect yields TRUE.
-// Check dialect.SupportsRegexpMatch() before using this operator for portability.
+// On unsupported dialects, rendering returns ErrUnsupportedFeature and binds
+// no arguments.
 func (c StringColumn) NotRegexpMatch(pattern string) Expression {
 	return regexpExpr{ref: c.ColBase, op: "!~", pattern: pattern}
 }
 
 // NotRegexpMatchI produces a case-insensitive regex non-match: col !~* $1 (PostgreSQL-specific).
-// On non-PostgreSQL dialects, emits FALSE (no rows matched) — not TRUE — and binds no
-// arguments. This means expr.Not(col.NotRegexpMatchI(...)) on a non-PG dialect yields TRUE.
-// Check dialect.SupportsRegexpMatch() before using this operator for portability.
+// On unsupported dialects, rendering returns ErrUnsupportedFeature and binds
+// no arguments.
 func (c StringColumn) NotRegexpMatchI(pattern string) Expression {
 	return regexpExpr{ref: c.ColBase, op: "!~*", pattern: pattern}
 }
 
 func (c StringColumn) In(vals ...string) Expression {
 	if len(vals) == 0 {
-		return Raw("FALSE")
+		return invalidListExpression()
 	}
 	anys := make([]any, len(vals))
 	for i, v := range vals {
@@ -245,7 +256,7 @@ func (c StringColumn) In(vals ...string) Expression {
 }
 func (c StringColumn) NotIn(vals ...string) Expression {
 	if len(vals) == 0 {
-		return Raw("TRUE")
+		return invalidListExpression()
 	}
 	anys := make([]any, len(vals))
 	for i, v := range vals {
@@ -289,7 +300,7 @@ func (c IntColumn) Between(lo, hi int) Expression {
 }
 func (c IntColumn) In(vals ...int) Expression {
 	if len(vals) == 0 {
-		return Raw("FALSE")
+		return invalidListExpression()
 	}
 	anys := make([]any, len(vals))
 	for i, v := range vals {
@@ -299,7 +310,7 @@ func (c IntColumn) In(vals ...int) Expression {
 }
 func (c IntColumn) NotIn(vals ...int) Expression {
 	if len(vals) == 0 {
-		return Raw("TRUE")
+		return invalidListExpression()
 	}
 	anys := make([]any, len(vals))
 	for i, v := range vals {
@@ -366,7 +377,7 @@ func (c BigIntColumn) Between(lo, hi int64) Expression {
 }
 func (c BigIntColumn) In(vals ...int64) Expression {
 	if len(vals) == 0 {
-		return Raw("FALSE")
+		return invalidListExpression()
 	}
 	anys := make([]any, len(vals))
 	for i, v := range vals {
@@ -376,7 +387,7 @@ func (c BigIntColumn) In(vals ...int64) Expression {
 }
 func (c BigIntColumn) NotIn(vals ...int64) Expression {
 	if len(vals) == 0 {
-		return Raw("TRUE")
+		return invalidListExpression()
 	}
 	anys := make([]any, len(vals))
 	for i, v := range vals {
@@ -583,7 +594,7 @@ func (c FloatColumn) Between(lo, hi float64) Expression {
 }
 func (c FloatColumn) In(vals ...float64) Expression {
 	if len(vals) == 0 {
-		return Raw("FALSE")
+		return invalidListExpression()
 	}
 	anys := make([]any, len(vals))
 	for i, v := range vals {
@@ -593,7 +604,7 @@ func (c FloatColumn) In(vals ...float64) Expression {
 }
 func (c FloatColumn) NotIn(vals ...float64) Expression {
 	if len(vals) == 0 {
-		return Raw("TRUE")
+		return invalidListExpression()
 	}
 	anys := make([]any, len(vals))
 	for i, v := range vals {
@@ -720,7 +731,7 @@ func (c EnumColumn) NEQ(val string) Expression {
 }
 func (c EnumColumn) In(vals ...string) Expression {
 	if len(vals) == 0 {
-		return Raw("FALSE")
+		return invalidListExpression()
 	}
 	anys := make([]any, len(vals))
 	for i, v := range vals {
@@ -730,7 +741,7 @@ func (c EnumColumn) In(vals ...string) Expression {
 }
 func (c EnumColumn) NotIn(vals ...string) Expression {
 	if len(vals) == 0 {
-		return Raw("TRUE")
+		return invalidListExpression()
 	}
 	anys := make([]any, len(vals))
 	for i, v := range vals {
@@ -760,8 +771,8 @@ func (c InetColumn) NEQ(val string) Expression {
 
 // TsvectorColumn is a typed column handle for PostgreSQL TSVECTOR values.
 // It exposes PostgreSQL full-text search operators (@@ with various tsquery constructors).
-// These operators are PostgreSQL-specific; on non-PostgreSQL dialects all Matches* methods
-// emit FALSE and bind no arguments. Check dialect.SupportsFullTextSearch() for portability.
+// These operators are PostgreSQL-specific; on other dialects rendering returns
+// ErrUnsupportedFeature and binds no arguments.
 type TsvectorColumn struct{ ColBase }
 
 // Matches returns col @@ to_tsquery($1) — matches a tsquery string.

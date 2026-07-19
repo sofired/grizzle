@@ -379,7 +379,7 @@ Calling `Of(...)` without a lock mode must produce a build validation error, or 
 | `except(q1, q2)` | `query.Except(q1, q2)` | PARITY |
 | `exceptAll(q1, q2)` (PostgreSQL / MySQL) | `query.ExceptAll(q1, q2)` for PostgreSQL / MySQL | PARITY |
 | no SQLite `intersectAll` / `exceptAll` exports | no SQLite `IntersectAll` / `ExceptAll` parity surface, or SQLite fast-fail if a shared Go builder exposes them | PARITY for omission; **DEVIATION:LANGUAGE** if exposed only to fail fast |
-| `.orderBy()` on set op | `.OrderBy()` | PARITY — Drizzle strips table qualifiers from `PgColumn` refs automatically; Grizzle does the same via `ToSQLUnqualified` |
+| `.orderBy()` on set op | `.OrderBy()` | PARITY — Drizzle strips table qualifiers from `PgColumn` refs automatically; Grizzle does the same via `RenderSQLUnqualified` |
 | `.limit()` on set op | `.Limit()` | PARITY |
 
 ### Subqueries
@@ -862,7 +862,7 @@ If a shared `.IgnoreConflicts()` helper is retained, its render/error matrix mus
 - PostgreSQL: render `ON CONFLICT DO NOTHING` with no target
 - MySQL: render `INSERT IGNORE`
 - SQLite: render `ON CONFLICT DO NOTHING` with no target, matching RC.1's `onConflictDoNothing()` SQL form rather than broadening to unrelated SQLite conflict algorithms
-- unsupported/custom dialects: return a build error rather than silently changing insert behavior
+- unsupported/custom dialects whose no-op conflict semantics have not been explicitly classified: return a build error rather than silently changing insert behavior
 
 `Ignore()`, `DoNothing`, and optional `IgnoreConflicts()` can hide data-quality or integrity failures. MySQL `INSERT IGNORE` is especially broad because the database may downgrade additional constraint and data errors to warnings. Callers should observe row counts, warnings where the driver exposes them, or application-level reconciliation when skipped rows matter.
 

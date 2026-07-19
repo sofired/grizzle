@@ -23,7 +23,7 @@ func TestPreparedSelect_SQLBuiltOnce(t *testing.T) {
 
 	// NewRegistry(nil) is safe as long as PrepareAll is not called.
 	reg := pgxdb.NewRegistry(nil)
-	stmt := pgxdb.RegisterSelect[testschema.UserSelect](reg, "active_users", b)
+	stmt, _ := pgxdb.RegisterSelect[testschema.UserSelect](reg, "active_users", b)
 
 	if stmt.Name() != "active_users" {
 		t.Errorf("Name() = %q, want %q", stmt.Name(), "active_users")
@@ -55,7 +55,7 @@ func TestPreparedExec_SQLBuiltOnce(t *testing.T) {
 		Where(testschema.UsersT.ID.EQ(id))
 
 	reg := pgxdb.NewRegistry(nil)
-	stmt := pgxdb.RegisterExec(reg, "disable_user", b)
+	stmt, _ := pgxdb.RegisterExec(reg, "disable_user", b)
 
 	if stmt.Name() != "disable_user" {
 		t.Errorf("Name() = %q, want %q", stmt.Name(), "disable_user")
@@ -85,7 +85,7 @@ func TestPreparedSelect_SQLNotName(t *testing.T) {
 	b := query.Select(testschema.UsersT.ID).From(testschema.UsersT)
 
 	reg := pgxdb.NewRegistry(nil)
-	stmt := pgxdb.RegisterSelect[testschema.UserSelect](reg, "active_users", b)
+	stmt, _ := pgxdb.RegisterSelect[testschema.UserSelect](reg, "active_users", b)
 
 	if stmt.SQL() == stmt.Name() {
 		t.Errorf("SQL() must not equal Name(): got %q for both; "+
@@ -104,7 +104,7 @@ func TestPreparedExec_SQLNotName(t *testing.T) {
 		Where(testschema.UsersT.ID.EQ(id))
 
 	reg := pgxdb.NewRegistry(nil)
-	stmt := pgxdb.RegisterExec(reg, "disable_user", b)
+	stmt, _ := pgxdb.RegisterExec(reg, "disable_user", b)
 
 	if stmt.SQL() == stmt.Name() {
 		t.Errorf("SQL() must not equal Name(): got %q for both; "+
@@ -118,10 +118,10 @@ func TestPreparedExec_SQLNotName(t *testing.T) {
 func TestRegistry_MultipleStatements(t *testing.T) {
 	reg := pgxdb.NewRegistry(nil)
 
-	s1 := pgxdb.RegisterSelect[testschema.UserSelect](reg, "all_users",
+	s1, _ := pgxdb.RegisterSelect[testschema.UserSelect](reg, "all_users",
 		query.Select(testschema.UsersT.ID).From(testschema.UsersT))
 
-	s2 := pgxdb.RegisterSelect[testschema.RealmSelect](reg, "all_realms",
+	s2, _ := pgxdb.RegisterSelect[testschema.RealmSelect](reg, "all_realms",
 		query.Select(testschema.RealmsT.ID).From(testschema.RealmsT))
 
 	if s1.Name() != "all_users" {

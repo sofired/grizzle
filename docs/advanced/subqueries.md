@@ -1,8 +1,7 @@
 # Subqueries
 
-::: warning Target query API
-Examples on this page use the target error-returning `Build(dialect)` contract and target fail-fast dialect behavior. The current branch may still expose the older two-return shape; any silent omission of unsupported CTE SQL is non-conforming implementation debt until those query contracts land.
-:::
+Examples on this page use the error-returning `Build(dialect)` contract.
+Unsupported requested features fail with a build error rather than being omitted.
 
 Subquery helpers live in the `query` package. They let you compose SELECT builders into correlated or uncorrelated sub-expressions.
 

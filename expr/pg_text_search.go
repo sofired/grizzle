@@ -12,11 +12,15 @@ type regexpExpr struct {
 	pattern string
 }
 
-func (e regexpExpr) ToSQL(ctx *BuildContext) string {
+func (e regexpExpr) RenderSQL(ctx *BuildContext) (string, error) {
 	if !ctx.Dialect().SupportsRegexpMatch() {
-		return "FALSE"
+		return "", NewError(CodeUnsupportedFeature, "render_regexp", "regular expressions are not supported by this dialect")
 	}
-	return e.ref.colRef(ctx) + " " + e.op + " " + ctx.Add(e.pattern)
+	ref, err := e.ref.colRef(ctx)
+	if err != nil {
+		return "", err
+	}
+	return ref + " " + e.op + " " + ctx.Add(e.pattern), nil
 }
 
 // -------------------------------------------------------------------
@@ -36,9 +40,13 @@ type ftsMatchExpr struct {
 	hasConfig bool
 }
 
-func (e ftsMatchExpr) ToSQL(ctx *BuildContext) string {
+func (e ftsMatchExpr) RenderSQL(ctx *BuildContext) (string, error) {
 	if !ctx.Dialect().SupportsFullTextSearch() {
-		return "FALSE"
+		return "", NewError(CodeUnsupportedFeature, "render_full_text_search", "full-text search is not supported by this dialect")
+	}
+	ref, err := e.ref.colRef(ctx)
+	if err != nil {
+		return "", err
 	}
 	var tsq string
 	if e.hasConfig {
@@ -46,7 +54,7 @@ func (e ftsMatchExpr) ToSQL(ctx *BuildContext) string {
 	} else {
 		tsq = e.tsFn + "(" + ctx.Add(e.query) + ")"
 	}
-	return e.ref.colRef(ctx) + " @@ " + tsq
+	return ref + " @@ " + tsq, nil
 }
 
 // TsvectorExpr represents to_tsvector(col) or to_tsvector($config, col) —
@@ -62,9 +70,8 @@ func (e ftsMatchExpr) ToSQL(ctx *BuildContext) string {
 // (e.g. store it in a struct field, accept it as a parameter, or return it
 // from a helper).
 //
-// On dialects that do not support full-text search, ToSQL emits NULL; if an
-// alias is set via As, the output is NULL AS "alias" so that the SELECT
-// column position is preserved for struct/row mapping by column name.
+// On dialects that do not support full-text search, rendering returns an
+// unsupported-feature error without emitting SQL.
 type TsvectorExpr struct {
 	config    string
 	ref       colRefer
@@ -72,30 +79,43 @@ type TsvectorExpr struct {
 	hasConfig bool
 }
 
-func (e TsvectorExpr) renderCore(ctx *BuildContext) string {
+func (e TsvectorExpr) renderCore(ctx *BuildContext) (string, error) {
+	if isNilInterface(e.ref) {
+		return "", NewError(CodeBuildValidation, "render_tsvector", "full-text search column is nil")
+	}
+	ref, err := e.ref.colRef(ctx)
+	if err != nil {
+		return "", err
+	}
 	if e.hasConfig {
-		return "to_tsvector(" + ctx.Add(e.config) + ", " + e.ref.colRef(ctx) + ")"
+		return "to_tsvector(" + ctx.Add(e.config) + ", " + ref + ")", nil
 	}
-	return "to_tsvector(" + e.ref.colRef(ctx) + ")"
+	return "to_tsvector(" + ref + ")", nil
 }
 
-func (e TsvectorExpr) ToSQL(ctx *BuildContext) string {
+func (e TsvectorExpr) RenderSQL(ctx *BuildContext) (string, error) {
 	if !ctx.Dialect().SupportsFullTextSearch() {
-		if e.alias != "" {
-			return "NULL AS " + ctx.Quote(e.alias)
+		return "", NewError(CodeUnsupportedFeature, "render_tsvector", "full-text search is not supported by this dialect")
+	}
+	return renderAtomically(ctx, func() (string, error) {
+		s, err := e.renderCore(ctx)
+		if err != nil {
+			return "", err
 		}
-		return "NULL"
-	}
-	s := e.renderCore(ctx)
-	if e.alias != "" {
-		s += " AS " + ctx.Quote(e.alias)
-	}
-	return s
+		if e.alias != "" {
+			alias, err := ctx.Quote(e.alias)
+			if err != nil {
+				return "", err
+			}
+			s += " AS " + alias
+		}
+		return s, nil
+	})
 }
 
-func (e TsvectorExpr) colRef(ctx *BuildContext) string {
+func (e TsvectorExpr) colRef(ctx *BuildContext) (string, error) {
 	if !ctx.Dialect().SupportsFullTextSearch() {
-		return "NULL"
+		return "", NewError(CodeUnsupportedFeature, "render_tsvector", "full-text search is not supported by this dialect")
 	}
 	return e.renderCore(ctx)
 }
@@ -111,8 +131,7 @@ func (e TsvectorExpr) ColumnName() string {
 // TableName implements SelectableColumn.
 func (e TsvectorExpr) TableName() string { return "" }
 
-// As returns a copy with the given SELECT alias. The alias is retained in the
-// non-PG NULL fallback: ToSQL emits NULL AS "alias" so column mapping is stable.
+// As returns a copy with the given SELECT alias.
 func (e TsvectorExpr) As(alias string) TsvectorExpr { e.alias = alias; return e }
 
 // Matches returns an @@ expression: to_tsvector(...) @@ to_tsquery($1).
@@ -202,20 +221,23 @@ type ftsMatchExprOnExpr struct {
 	hasConfig bool
 }
 
-func (e ftsMatchExprOnExpr) ToSQL(ctx *BuildContext) string {
+func (e ftsMatchExprOnExpr) RenderSQL(ctx *BuildContext) (string, error) {
 	if !ctx.Dialect().SupportsFullTextSearch() {
-		return "FALSE"
+		return "", NewError(CodeUnsupportedFeature, "render_full_text_search", "full-text search is not supported by this dialect")
 	}
 	// Render the left side first so its args are bound before the tsquery args,
 	// preserving left-to-right parameter numbering ($1, $2, ...).
-	left := e.left.colRef(ctx)
+	left, err := e.left.colRef(ctx)
+	if err != nil {
+		return "", err
+	}
 	var tsq string
 	if e.hasConfig {
 		tsq = e.tsFn + "(" + ctx.Add(e.config) + ", " + ctx.Add(e.query) + ")"
 	} else {
 		tsq = e.tsFn + "(" + ctx.Add(e.query) + ")"
 	}
-	return left + " @@ " + tsq
+	return left + " @@ " + tsq, nil
 }
 
 // tsQueryFnExpr represents a standalone tsquery constructor: fn($query) or fn($config, $query).
@@ -230,12 +252,12 @@ type tsQueryFnExpr struct {
 	hasConfig bool
 }
 
-func (e tsQueryFnExpr) ToSQL(ctx *BuildContext) string {
+func (e tsQueryFnExpr) RenderSQL(ctx *BuildContext) (string, error) {
 	if !ctx.Dialect().SupportsFullTextSearch() {
-		return "NULL"
+		return "", NewError(CodeUnsupportedFeature, "render_tsquery", "full-text search is not supported by this dialect")
 	}
 	if e.hasConfig {
-		return e.fn + "(" + ctx.Add(e.config) + ", " + ctx.Add(e.query) + ")"
+		return e.fn + "(" + ctx.Add(e.config) + ", " + ctx.Add(e.query) + ")", nil
 	}
-	return e.fn + "(" + ctx.Add(e.query) + ")"
+	return e.fn + "(" + ctx.Add(e.query) + ")", nil
 }

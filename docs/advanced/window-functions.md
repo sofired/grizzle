@@ -1,8 +1,7 @@
 # Window Functions
 
-::: warning Target query API
-Examples on this page use the target error-returning `Build(dialect)` and fail-fast unsupported-feature behavior. The current branch may still expose older two-return builders; any silent dialect fallback is non-conforming implementation debt until those target query contracts land.
-:::
+Examples on this page use the error-returning `Build(dialect)` and fail-fast
+unsupported-feature behavior.
 
 Window expressions (`fn OVER (PARTITION BY … ORDER BY …)`) are in the `expr` package. They implement `SelectableColumn` so they can appear in SELECT and ORDER BY.
 

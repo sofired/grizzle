@@ -1,6 +1,7 @@
 package query
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 
@@ -15,7 +16,8 @@ type InsertBuilder struct {
 	rows           [][]any
 	returning      []expr.SelectableColumn
 	upsert         *upsertClause
-	ignoreConflict bool // emit INSERT IGNORE / INSERT OR IGNORE
+	ignoreConflict bool // emit dialect-specific no-op conflict handling
+	buildErr       error
 }
 
 // upsertClause holds the ON CONFLICT … DO … specification.
@@ -23,6 +25,7 @@ type upsertClause struct {
 	// conflict target — exactly one of these is set
 	conflictCols       []string // ON CONFLICT (col1, col2)
 	conflictConstraint string   // ON CONFLICT ON CONSTRAINT name
+	conflictTargetSet  bool
 
 	// conflict action — exactly one is set
 	doNothing bool        // DO NOTHING
@@ -42,10 +45,21 @@ func InsertInto(t TableSource) *InsertBuilder {
 //
 // For inserting multiple rows, call Values repeatedly or use ValueSlice.
 func (b *InsertBuilder) Values(row any) *InsertBuilder {
-	cols, vals := structToColVals(row)
+	cols, vals, err := structToColVals(row)
 	cp := *b
+	if err != nil {
+		if cp.buildErr == nil {
+			cp.buildErr = err
+		}
+		return &cp
+	}
 	if len(cp.colNames) == 0 {
 		cp.colNames = cols
+	} else if !equalStrings(cp.colNames, cols) {
+		if cp.buildErr == nil {
+			cp.buildErr = fmt.Errorf("insert rows have inconsistent columns")
+		}
+		return &cp
 	}
 	cp.rows = append(append([][]any(nil), cp.rows...), vals)
 	return &cp
@@ -53,15 +67,45 @@ func (b *InsertBuilder) Values(row any) *InsertBuilder {
 
 // ValueSlice accepts a slice of structs and adds a row for each element.
 func (b *InsertBuilder) ValueSlice(rows any) *InsertBuilder {
+	cp := *b
+	cp.rows = append([][]any(nil), b.rows...)
+	if rows == nil {
+		if cp.buildErr == nil {
+			cp.buildErr = fmt.Errorf("insert row slice is nil")
+		}
+		return &cp
+	}
 	rv := reflect.ValueOf(rows)
 	if rv.Kind() == reflect.Ptr {
+		if rv.IsNil() {
+			if cp.buildErr == nil {
+				cp.buildErr = fmt.Errorf("insert row slice is nil")
+			}
+			return &cp
+		}
 		rv = rv.Elem()
 	}
-	cp := *b
+	if rv.Kind() != reflect.Slice && rv.Kind() != reflect.Array {
+		if cp.buildErr == nil {
+			cp.buildErr = fmt.Errorf("insert rows must be a slice or array")
+		}
+		return &cp
+	}
 	for i := 0; i < rv.Len(); i++ {
-		cols, vals := structToColVals(rv.Index(i).Interface())
+		cols, vals, err := structToColVals(rv.Index(i).Interface())
+		if err != nil {
+			if cp.buildErr == nil {
+				cp.buildErr = err
+			}
+			return &cp
+		}
 		if len(cp.colNames) == 0 {
 			cp.colNames = cols
+		} else if !equalStrings(cp.colNames, cols) {
+			if cp.buildErr == nil {
+				cp.buildErr = fmt.Errorf("insert rows have inconsistent columns")
+			}
+			return &cp
 		}
 		cp.rows = append(cp.rows, vals)
 	}
@@ -79,6 +123,7 @@ func (b *InsertBuilder) OnConflict(cols ...string) *InsertBuilder {
 	u := b.upsertCopy()
 	u.conflictCols = cols
 	u.conflictConstraint = ""
+	u.conflictTargetSet = true
 	cp.upsert = u
 	return &cp
 }
@@ -92,6 +137,7 @@ func (b *InsertBuilder) OnConflictConstraint(name string) *InsertBuilder {
 	u := b.upsertCopy()
 	u.conflictConstraint = name
 	u.conflictCols = nil
+	u.conflictTargetSet = true
 	cp.upsert = u
 	return &cp
 }
@@ -137,24 +183,15 @@ func (b *InsertBuilder) DoUpdateSetExcluded(cols ...string) *InsertBuilder {
 // DoUpdateSetStruct extracts non-nil db-tagged fields and adds them to the
 // DO UPDATE SET clause as explicit col = val assignments. Nil pointer fields
 // are skipped (same semantics as UpdateBuilder.SetStruct).
-// If row is nil, a nil pointer, or not a struct, the conflict action falls back
-// to DO NOTHING to avoid emitting an invalid empty SET list. A valid struct
-// whose pointer fields are all nil adds no new assignments but does not clear
-// any assignments already accumulated via DoUpdateSet or DoUpdateSetExcluded;
-// the defense-in-depth guard in buildOnConflict / buildOnDuplicateKey handles
-// the case where the final merged set is still empty.
+// Invalid inputs are retained as build-validation errors and returned by Build.
 func (b *InsertBuilder) DoUpdateSetStruct(row any) *InsertBuilder {
 	cols, vals, err := structSetsForUpdate(row)
 	cp := *b
 	u := b.upsertCopy()
 	if err != nil {
-		// Invalid input (nil, nil pointer, non-struct): fall back to DO NOTHING
-		// rather than emitting a syntactically invalid DO UPDATE SET with no
-		// assignments.
-		u.doNothing = true
-		u.sets = nil
-		u.excluded = nil
-		cp.upsert = u
+		if cp.buildErr == nil {
+			cp.buildErr = err
+		}
 		return &cp
 	}
 	u.doNothing = false
@@ -179,9 +216,7 @@ func (b *InsertBuilder) upsertCopy() *upsertClause {
 //
 // Dialect behaviour:
 //   - MySQL:  emits INSERT IGNORE INTO …
-//   - SQLite: emits INSERT OR IGNORE INTO …
-//   - PostgreSQL: no direct equivalent; this flag is silently ignored.
-//     Use OnConflict(cols).DoNothing() for PostgreSQL instead.
+//   - PostgreSQL / SQLite: emits ON CONFLICT DO NOTHING
 func (b *InsertBuilder) IgnoreConflicts() *InsertBuilder {
 	cp := *b
 	cp.ignoreConflict = true
@@ -196,22 +231,46 @@ func (b *InsertBuilder) Returning(cols ...expr.SelectableColumn) *InsertBuilder 
 }
 
 // Build renders the INSERT statement.
-func (b *InsertBuilder) Build(d dialect.Dialect) (string, []any) {
-	ctx := expr.NewBuildContext(d)
+func (b *InsertBuilder) Build(d dialect.Dialect) (string, []any, error) {
+	ctx, err := newBuildContext(d)
+	if err != nil {
+		return buildFailure("build_insert", err)
+	}
+	if b == nil {
+		return buildFailure("build_insert", NewError(CodeBuildValidation, "build_insert", "insert builder is nil"))
+	}
+	if b.buildErr != nil {
+		return buildFailure("build_insert", b.buildErr)
+	}
+	if len(b.colNames) == 0 || len(b.rows) == 0 {
+		return buildFailure("build_insert", NewError(CodeBuildValidation, "build_insert", "insert contains no values"))
+	}
+	if b.ignoreConflict && b.upsert != nil {
+		return buildFailure("build_insert", NewError(CodeBuildValidation, "build_insert", "ignore conflicts cannot be combined with an upsert clause"))
+	}
 	var sb strings.Builder
 
 	// Choose INSERT keyword based on ignore flag and dialect support.
 	if b.ignoreConflict {
-		if clause := d.InsertIgnoreClause(); clause != "" {
+		if !d.SupportsIgnoreConflicts() {
+			return buildFailure("build_insert", NewError(CodeUnsupportedFeature, "build_insert", "ignore conflicts is not supported by this dialect"))
+		}
+		if d.UpsertStyle() == dialect.UpsertOnConflict {
+			sb.WriteString("INSERT INTO ")
+		} else if clause := d.InsertIgnoreClause(); clause != "" {
 			sb.WriteString(clause)
 			sb.WriteString(" INTO ")
 		} else {
-			sb.WriteString("INSERT INTO ")
+			return buildFailure("build_insert", NewError(CodeUnsupportedFeature, "build_insert", "ignore conflicts is not supported by this dialect"))
 		}
 	} else {
 		sb.WriteString("INSERT INTO ")
 	}
-	sb.WriteString(ctx.Quote(b.table.GrizTableName()))
+	table, err := quoteTableSource(ctx, b.table)
+	if err != nil {
+		return buildFailure("build_insert", err)
+	}
+	sb.WriteString(table)
 
 	// Column list
 	sb.WriteString(" (")
@@ -219,13 +278,20 @@ func (b *InsertBuilder) Build(d dialect.Dialect) (string, []any) {
 		if i > 0 {
 			sb.WriteString(", ")
 		}
-		sb.WriteString(ctx.Quote(c))
+		column, err := ctx.Quote(c)
+		if err != nil {
+			return buildFailure("build_insert", err)
+		}
+		sb.WriteString(column)
 	}
 	sb.WriteString(")")
 
 	// VALUES
 	sb.WriteString(" VALUES ")
 	for ri, row := range b.rows {
+		if len(row) != len(b.colNames) {
+			return buildFailure("build_insert", NewError(CodeBuildValidation, "build_insert", "insert row does not match column count"))
+		}
 		if ri > 0 {
 			sb.WriteString(", ")
 		}
@@ -239,29 +305,47 @@ func (b *InsertBuilder) Build(d dialect.Dialect) (string, []any) {
 		sb.WriteString(")")
 	}
 
+	if b.ignoreConflict && d.UpsertStyle() == dialect.UpsertOnConflict {
+		if err := buildOnConflict(&sb, ctx, &upsertClause{doNothing: true}); err != nil {
+			return buildFailure("build_insert", err)
+		}
+	}
+
 	// Upsert clause — dialect-specific
 	if b.upsert != nil {
 		switch d.UpsertStyle() {
 		case dialect.UpsertOnConflict:
-			buildOnConflict(&sb, ctx, b.upsert)
+			if err := buildOnConflict(&sb, ctx, b.upsert); err != nil {
+				return buildFailure("build_insert", err)
+			}
 		case dialect.UpsertDuplicateKey:
-			buildOnDuplicateKey(&sb, ctx, b.upsert)
-			// UpsertNone: silently drop the clause
+			if err := buildOnDuplicateKey(&sb, ctx, b.upsert); err != nil {
+				return buildFailure("build_insert", err)
+			}
+		default:
+			return buildFailure("build_insert", NewError(CodeUnsupportedFeature, "build_insert", "upsert is not supported by this dialect"))
 		}
 	}
 
 	// RETURNING — only for dialects that support it
-	if len(b.returning) > 0 && d.SupportsReturning() {
+	if len(b.returning) > 0 {
+		if !d.SupportsReturning() {
+			return buildFailure("build_insert", NewError(CodeUnsupportedFeature, "build_insert", "returning is not supported by this dialect"))
+		}
 		sb.WriteString(" RETURNING ")
 		for i, c := range b.returning {
 			if i > 0 {
 				sb.WriteString(", ")
 			}
-			sb.WriteString(selectColSQL(ctx, c))
+			column, err := selectColSQL(ctx, c)
+			if err != nil {
+				return buildFailure("build_insert", err)
+			}
+			sb.WriteString(column)
 		}
 	}
 
-	return sb.String(), ctx.Args()
+	return sb.String(), ctx.Args(), nil
 }
 
 // -------------------------------------------------------------------
@@ -271,7 +355,13 @@ func (b *InsertBuilder) Build(d dialect.Dialect) (string, []any) {
 // buildOnConflict emits PostgreSQL / SQLite style:
 //
 //	ON CONFLICT (cols) DO NOTHING | DO UPDATE SET …
-func buildOnConflict(sb *strings.Builder, ctx *expr.BuildContext, u *upsertClause) {
+func buildOnConflict(sb *strings.Builder, ctx *expr.BuildContext, u *upsertClause) error {
+	if u.conflictTargetSet && len(u.conflictCols) == 0 && u.conflictConstraint == "" {
+		return NewError(CodeBuildValidation, "build_insert", "conflict target is empty")
+	}
+	if !u.doNothing && !u.conflictTargetSet {
+		return NewError(CodeBuildValidation, "build_insert", "upsert update requires a conflict target")
+	}
 	sb.WriteString(" ON CONFLICT")
 
 	switch {
@@ -281,18 +371,26 @@ func buildOnConflict(sb *strings.Builder, ctx *expr.BuildContext, u *upsertClaus
 			if i > 0 {
 				sb.WriteString(", ")
 			}
-			sb.WriteString(ctx.Quote(c))
+			column, err := ctx.Quote(c)
+			if err != nil {
+				return err
+			}
+			sb.WriteString(column)
 		}
 		sb.WriteString(")")
 	case u.conflictConstraint != "":
 		sb.WriteString(" ON CONSTRAINT ")
-		sb.WriteString(ctx.Quote(u.conflictConstraint))
+		constraint, err := ctx.Quote(u.conflictConstraint)
+		if err != nil {
+			return err
+		}
+		sb.WriteString(constraint)
 	}
 
-	if u.doNothing || (len(u.sets) == 0 && len(u.excluded) == 0) {
-		// Emit DO NOTHING when explicitly requested or when there are no SET
-		// assignments — an empty DO UPDATE SET list is invalid SQL.
+	if u.doNothing {
 		sb.WriteString(" DO NOTHING")
+	} else if len(u.sets) == 0 && len(u.excluded) == 0 {
+		return NewError(CodeBuildValidation, "build_insert", "upsert update contains no assignments")
 	} else {
 		sb.WriteString(" DO UPDATE SET ")
 		first := true
@@ -300,7 +398,11 @@ func buildOnConflict(sb *strings.Builder, ctx *expr.BuildContext, u *upsertClaus
 			if !first {
 				sb.WriteString(", ")
 			}
-			sb.WriteString(ctx.Quote(s.col))
+			column, err := ctx.Quote(s.col)
+			if err != nil {
+				return err
+			}
+			sb.WriteString(column)
 			sb.WriteString(" = ")
 			sb.WriteString(ctx.Add(s.val))
 			first = false
@@ -309,12 +411,17 @@ func buildOnConflict(sb *strings.Builder, ctx *expr.BuildContext, u *upsertClaus
 			if !first {
 				sb.WriteString(", ")
 			}
-			sb.WriteString(ctx.Quote(col))
+			column, err := ctx.Quote(col)
+			if err != nil {
+				return err
+			}
+			sb.WriteString(column)
 			sb.WriteString(" = EXCLUDED.")
-			sb.WriteString(ctx.Quote(col))
+			sb.WriteString(column)
 			first = false
 		}
 	}
+	return nil
 }
 
 // buildOnDuplicateKey emits MySQL style:
@@ -323,14 +430,15 @@ func buildOnConflict(sb *strings.Builder, ctx *expr.BuildContext, u *upsertClaus
 //
 // Note: MySQL ignores the conflict-target columns — the conflict is determined
 // by the table's PRIMARY KEY and UNIQUE indexes automatically.
-func buildOnDuplicateKey(sb *strings.Builder, ctx *expr.BuildContext, u *upsertClause) {
-	if u.doNothing || (len(u.sets) == 0 && len(u.excluded) == 0) {
-		// MySQL has no DO NOTHING equivalent in ON DUPLICATE KEY UPDATE syntax.
-		// Callers should use IgnoreConflicts() to get INSERT IGNORE INTO instead.
-		// Also omit the clause when there are no SET assignments — an empty
-		// ON DUPLICATE KEY UPDATE list is invalid SQL.
-		// Emit nothing so the statement remains valid (just a regular INSERT).
-		return
+func buildOnDuplicateKey(sb *strings.Builder, ctx *expr.BuildContext, u *upsertClause) error {
+	if u.conflictTargetSet {
+		return NewError(CodeUnsupportedFeature, "build_insert", "conflict targets are not supported by this dialect")
+	}
+	if u.doNothing {
+		return NewError(CodeUnsupportedFeature, "build_insert", "do nothing upserts are not supported by this dialect")
+	}
+	if len(u.sets) == 0 && len(u.excluded) == 0 {
+		return NewError(CodeBuildValidation, "build_insert", "upsert update contains no assignments")
 	}
 	sb.WriteString(" ON DUPLICATE KEY UPDATE ")
 	first := true
@@ -338,7 +446,11 @@ func buildOnDuplicateKey(sb *strings.Builder, ctx *expr.BuildContext, u *upsertC
 		if !first {
 			sb.WriteString(", ")
 		}
-		sb.WriteString(ctx.Quote(s.col))
+		column, err := ctx.Quote(s.col)
+		if err != nil {
+			return err
+		}
+		sb.WriteString(column)
 		sb.WriteString(" = ")
 		sb.WriteString(ctx.Add(s.val))
 		first = false
@@ -347,12 +459,17 @@ func buildOnDuplicateKey(sb *strings.Builder, ctx *expr.BuildContext, u *upsertC
 		if !first {
 			sb.WriteString(", ")
 		}
-		sb.WriteString(ctx.Quote(col))
+		column, err := ctx.Quote(col)
+		if err != nil {
+			return err
+		}
+		sb.WriteString(column)
 		sb.WriteString(" = VALUES(")
-		sb.WriteString(ctx.Quote(col))
+		sb.WriteString(column)
 		sb.WriteString(")")
 		first = false
 	}
+	return nil
 }
 
 // -------------------------------------------------------------------
@@ -365,12 +482,22 @@ func buildOnDuplicateKey(sb *strings.Builder, ctx *expr.BuildContext, u *upsertC
 //   - Pointer fields: skip if nil
 //   - Map/slice fields: skip if nil or len == 0
 //   - Other fields: always included
-func structToColVals(row any) (cols []string, vals []any) {
+func structToColVals(row any) (cols []string, vals []any, err error) {
+	if row == nil {
+		return nil, nil, fmt.Errorf("insert row is nil")
+	}
 	rv := reflect.ValueOf(row)
 	if rv.Kind() == reflect.Ptr {
+		if rv.IsNil() {
+			return nil, nil, fmt.Errorf("insert row is nil")
+		}
 		rv = rv.Elem()
 	}
+	if rv.Kind() != reflect.Struct {
+		return nil, nil, fmt.Errorf("insert row must be a struct")
+	}
 	rt := rv.Type()
+	seen := make(map[string]struct{})
 
 	for i := 0; i < rt.NumField(); i++ {
 		field := rt.Field(i)
@@ -380,10 +507,28 @@ func structToColVals(row any) (cols []string, vals []any) {
 		if tag == "" || tag == "-" {
 			continue
 		}
+		if field.PkgPath != "" || !fv.CanInterface() {
+			return nil, nil, fmt.Errorf("insert row contains a tagged unexported field")
+		}
 
-		parts := strings.SplitN(tag, ",", 2)
+		parts := strings.Split(tag, ",")
 		colName := parts[0]
-		omitempty := len(parts) > 1 && strings.Contains(parts[1], "omitempty")
+		if colName == "" {
+			return nil, nil, fmt.Errorf("insert row contains an empty db tag")
+		}
+		if _, ok := seen[colName]; ok {
+			return nil, nil, fmt.Errorf("insert row contains duplicate db tags")
+		}
+		seen[colName] = struct{}{}
+		omitempty := false
+		for _, option := range parts[1:] {
+			switch option {
+			case "", "omitempty":
+				omitempty = omitempty || option == "omitempty"
+			default:
+				return nil, nil, fmt.Errorf("insert row contains an unsupported db tag option")
+			}
+		}
 
 		if omitempty && isEmptyValue(fv) {
 			continue
@@ -404,7 +549,19 @@ func structToColVals(row any) (cols []string, vals []any) {
 		cols = append(cols, colName)
 		vals = append(vals, fv.Interface())
 	}
-	return
+	return cols, vals, nil
+}
+
+func equalStrings(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // isEmptyValue returns true for values that omitempty should treat as absent:

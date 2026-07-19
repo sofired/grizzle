@@ -15,7 +15,7 @@ import (
 func TestToTsquery_ArgOrder(t *testing.T) {
 	ctx := expr.NewBuildContext(dialect.Postgres)
 	e := expr.ToTsquery("fat & rat")
-	sql := e.ToSQL(ctx)
+	sql, _ := e.RenderSQL(ctx)
 	args := ctx.Args()
 
 	if sql != "to_tsquery($1)" {
@@ -29,7 +29,7 @@ func TestToTsquery_ArgOrder(t *testing.T) {
 func TestToTsqueryWithConfig_ArgOrder(t *testing.T) {
 	ctx := expr.NewBuildContext(dialect.Postgres)
 	e := expr.ToTsqueryWithConfig("english", "fat & rat")
-	sql := e.ToSQL(ctx)
+	sql, _ := e.RenderSQL(ctx)
 	args := ctx.Args()
 
 	if sql != "to_tsquery($1, $2)" {
@@ -49,7 +49,7 @@ func TestToTsqueryWithConfig_ArgOrder(t *testing.T) {
 func TestPlainToTsquery_ArgOrder(t *testing.T) {
 	ctx := expr.NewBuildContext(dialect.Postgres)
 	e := expr.PlainToTsquery("fat rat")
-	sql := e.ToSQL(ctx)
+	sql, _ := e.RenderSQL(ctx)
 	args := ctx.Args()
 
 	if sql != "plainto_tsquery($1)" {
@@ -63,7 +63,7 @@ func TestPlainToTsquery_ArgOrder(t *testing.T) {
 func TestPlainToTsqueryWithConfig_ArgOrder(t *testing.T) {
 	ctx := expr.NewBuildContext(dialect.Postgres)
 	e := expr.PlainToTsqueryWithConfig("english", "fat rat")
-	sql := e.ToSQL(ctx)
+	sql, _ := e.RenderSQL(ctx)
 	args := ctx.Args()
 
 	if sql != "plainto_tsquery($1, $2)" {
@@ -83,7 +83,7 @@ func TestPlainToTsqueryWithConfig_ArgOrder(t *testing.T) {
 func TestPhraseToTsquery_ArgOrder(t *testing.T) {
 	ctx := expr.NewBuildContext(dialect.Postgres)
 	e := expr.PhraseToTsquery("fat cat")
-	sql := e.ToSQL(ctx)
+	sql, _ := e.RenderSQL(ctx)
 	args := ctx.Args()
 
 	if sql != "phraseto_tsquery($1)" {
@@ -97,7 +97,7 @@ func TestPhraseToTsquery_ArgOrder(t *testing.T) {
 func TestPhraseToTsqueryWithConfig_ArgOrder(t *testing.T) {
 	ctx := expr.NewBuildContext(dialect.Postgres)
 	e := expr.PhraseToTsqueryWithConfig("english", "fat cat")
-	sql := e.ToSQL(ctx)
+	sql, _ := e.RenderSQL(ctx)
 	args := ctx.Args()
 
 	if sql != "phraseto_tsquery($1, $2)" {
@@ -117,7 +117,7 @@ func TestPhraseToTsqueryWithConfig_ArgOrder(t *testing.T) {
 func TestWebsearchToTsquery_ArgOrder(t *testing.T) {
 	ctx := expr.NewBuildContext(dialect.Postgres)
 	e := expr.WebsearchToTsquery("fat cat")
-	sql := e.ToSQL(ctx)
+	sql, _ := e.RenderSQL(ctx)
 	args := ctx.Args()
 
 	if sql != "websearch_to_tsquery($1)" {
@@ -131,7 +131,7 @@ func TestWebsearchToTsquery_ArgOrder(t *testing.T) {
 func TestWebsearchToTsqueryWithConfig_ArgOrder(t *testing.T) {
 	ctx := expr.NewBuildContext(dialect.Postgres)
 	e := expr.WebsearchToTsqueryWithConfig("english", "fat cat")
-	sql := e.ToSQL(ctx)
+	sql, _ := e.RenderSQL(ctx)
 	args := ctx.Args()
 
 	if sql != "websearch_to_tsquery($1, $2)" {
