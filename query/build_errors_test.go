@@ -123,6 +123,25 @@ func TestBuild_LogicalCombinatorsPreserveTypedNilPredicates(t *testing.T) {
 	}
 }
 
+func TestBuild_CaseExpressionsRejectTypedNilFallbacks(t *testing.T) {
+	var typedNil *leakingExpression
+	username := expr.StringColumn{ColBase: expr.ColBase{TableAlias: "users", ColName: "username"}}
+	expressions := []expr.Expression{
+		expr.Case().When(expr.Raw("TRUE"), expr.Lit("matched")).Else(typedNil),
+		expr.SimpleCase(username).WhenVal("alice", expr.Lit("matched")).Else(typedNil),
+	}
+	for _, expression := range expressions {
+		ctx := expr.NewBuildContext(dialect.Postgres)
+		sql, err := expression.RenderSQL(ctx)
+		if sql != "" || !errors.Is(err, expr.ErrBuildValidation) {
+			t.Fatalf("RenderSQL = (%q, %v), want empty SQL and ErrBuildValidation", sql, err)
+		}
+		if len(ctx.Args()) != 0 {
+			t.Fatalf("Args = %v, want no orphaned arguments", ctx.Args())
+		}
+	}
+}
+
 func TestBuild_AllowsIntentionalNilWherePredicates(t *testing.T) {
 	table := unsafeTable("users")
 	builders := []query.Builder{

@@ -83,7 +83,10 @@ func (c *CaseExpr) RenderSQL(ctx *BuildContext) (string, error) {
 			}
 			sb.WriteString(then)
 		}
-		if !isNilExpression(c.else_) {
+		if c.else_ != nil {
+			if isNilExpression(c.else_) {
+				return "", NewError(CodeBuildValidation, "render_case", "case fallback is typed nil")
+			}
 			sb.WriteString(" ELSE ")
 			fallback, err := c.else_.RenderSQL(ctx)
 			if err != nil {
@@ -209,7 +212,10 @@ func (c *SimpleCaseExpr) RenderSQL(ctx *BuildContext) (string, error) {
 			}
 			sb.WriteString(then)
 		}
-		if !isNilExpression(c.else_) {
+		if c.else_ != nil {
+			if isNilExpression(c.else_) {
+				return "", NewError(CodeBuildValidation, "render_simple_case", "case fallback is typed nil")
+			}
 			sb.WriteString(" ELSE ")
 			fallback, err := c.else_.RenderSQL(ctx)
 			if err != nil {
