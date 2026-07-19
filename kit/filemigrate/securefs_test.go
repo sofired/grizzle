@@ -5,8 +5,10 @@ import (
 	"context"
 	"errors"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -156,6 +158,45 @@ func TestOpenSecureFile_IdentityReplacementRejected(t *testing.T) {
 	}
 }
 
+func TestFSArtifactStore_SecureErrorEscapesControlCharacters(t *testing.T) {
+	if err := ensureSecureFilesystemSupported(); err != nil {
+		t.Skip(err)
+	}
+	store := NewFSArtifactStore()
+	rootDir := t.TempDir()
+	root, err := store.ResolveRoot(t.Context(), rootDir, ResolveArtifactRootOptions{Mode: RootEnsureForWrite})
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := "20240101000000_bad\nname"
+	if err := os.WriteFile(filepath.Join(root.RealPath, name), []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = store.ReadArtifact(t.Context(), root, name, ReadArtifactOptions{})
+	if !errors.Is(err, ErrInvalidPath) {
+		t.Fatalf("got %v, want invalid_path", err)
+	}
+	rendered := err.Error()
+	if strings.ContainsAny(rendered, "\n\r\x1b") {
+		t.Fatalf("rendered error contains raw control characters: %q", rendered)
+	}
+	if !strings.Contains(rendered, `\n`) {
+		t.Fatalf("rendered error does not contain escaped migration name: %q", rendered)
+	}
+}
+
+func TestSanitizeSecureFSError_RemovesPathAndPreservesClassification(t *testing.T) {
+	rawPath := "untrusted\n\x1b[31mname"
+	err := sanitizeSecureFSError(&os.PathError{Op: "lstat", Path: rawPath, Err: fs.ErrNotExist})
+	if strings.Contains(err.Error(), rawPath) || strings.ContainsAny(err.Error(), "\n\r\x1b") {
+		t.Fatalf("sanitized error contains untrusted path data: %q", err)
+	}
+	if !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("sanitized error lost not-exist classification: %v", err)
+	}
+}
+
 func TestFSArtifactStore_ReadArtifact_SymlinkSwapCannotEscapeRoot(t *testing.T) {
 	if err := ensureSecureFilesystemSupported(); err != nil {
 		t.Skip(err)
@@ -207,7 +248,7 @@ func TestFSArtifactStore_ReadArtifact_SymlinkSwapCannotEscapeRoot(t *testing.T) 
 	}
 }
 
-func TestFSArtifactStore_CreateArtifact_StagingSwapFailsClosed(t *testing.T) {
+func TestFSArtifactStore_CreateArtifact_StagingSwapLeavesUnverifiedTarget(t *testing.T) {
 	if err := ensureSecureFilesystemSupported(); err != nil {
 		t.Skip(err)
 	}
@@ -254,8 +295,16 @@ func TestFSArtifactStore_CreateArtifact_StagingSwapFailsClosed(t *testing.T) {
 	if !errors.Is(err, ErrInvalidPath) {
 		t.Fatalf("got %v, want invalid_path", err)
 	}
-	if _, statErr := os.Lstat(filepath.Join(root.RealPath, name)); !errors.Is(statErr, os.ErrNotExist) {
-		t.Fatalf("failed publish left a target entry: %v", statErr)
+	target := filepath.Join(root.RealPath, name)
+	targetInfo, statErr := os.Lstat(target)
+	if statErr != nil {
+		t.Fatalf("unverified replacement was unexpectedly deleted: %v", statErr)
+	}
+	if targetInfo.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("target mode = %v, want symlink replacement", targetInfo.Mode())
+	}
+	if _, listErr := store.ListArtifacts(t.Context(), root, ListArtifactsOptions{}); !errors.Is(listErr, ErrInvalidPath) {
+		t.Fatalf("discovery accepted unverified replacement: %v", listErr)
 	}
 	outsideBytes, err := os.ReadFile(outsideSQL)
 	if err != nil {

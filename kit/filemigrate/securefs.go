@@ -16,7 +16,12 @@ import (
 // platforms where os.Root cannot provide a stable handle-relative boundary.
 var errSecureFilesystemUnsupported = errors.New("secure handle-relative filesystem operations are unsupported")
 
-var errSecurePathChanged = errors.New("filesystem entry changed during secure open")
+var (
+	errSecurePathChanged  = errors.New("filesystem entry changed during secure open")
+	errSecureSymlink      = errors.New("symlinks are not supported")
+	errSecureNotDirectory = errors.New("not a directory")
+	errSecureNotRegular   = errors.New("not a regular file")
+)
 
 // secureFSTestHooks permits deterministic race injection through public store
 // methods without mutable package globals. The key and value are unexported,
@@ -55,7 +60,7 @@ func openSecureRootPath(path string, create bool, perm fs.FileMode) (_ *os.Root,
 	}
 	abs, err := filepath.Abs(path)
 	if err != nil {
-		return nil, "", false, err
+		return nil, "", false, errors.New("could not make filesystem path absolute")
 	}
 	abs = filepath.Clean(abs)
 
@@ -63,12 +68,12 @@ func openSecureRootPath(path string, create bool, perm fs.FileMode) (_ *os.Root,
 	base := volume + string(filepath.Separator)
 	rel, err := filepath.Rel(base, abs)
 	if err != nil {
-		return nil, "", false, err
+		return nil, "", false, errors.New("could not resolve filesystem path relative to volume root")
 	}
 
 	current, err := os.OpenRoot(base)
 	if err != nil {
-		return nil, "", false, err
+		return nil, "", false, sanitizeSecureFSError(err)
 	}
 	defer func() {
 		if retErr != nil {
@@ -87,11 +92,11 @@ func openSecureRootPath(path string, create bool, perm fs.FileMode) (_ *os.Root,
 		info, statErr := current.Lstat(part)
 		if errors.Is(statErr, fs.ErrNotExist) {
 			if !create {
-				return nil, abs, false, statErr
+				return nil, abs, false, sanitizeSecureFSError(statErr)
 			}
 			mkdirErr := current.Mkdir(part, perm)
 			if mkdirErr != nil && !errors.Is(mkdirErr, fs.ErrExist) {
-				return nil, abs, false, mkdirErr
+				return nil, abs, false, sanitizeSecureFSError(mkdirErr)
 			}
 			info, statErr = current.Lstat(part)
 			if statErr == nil && mkdirErr == nil && i == len(parts)-1 {
@@ -99,7 +104,7 @@ func openSecureRootPath(path string, create bool, perm fs.FileMode) (_ *os.Root,
 			}
 		}
 		if statErr != nil {
-			return nil, abs, false, statErr
+			return nil, abs, false, sanitizeSecureFSError(statErr)
 		}
 
 		next, _, openErr := openSecureDirFromInfo(current, part, info, nil)
@@ -108,7 +113,7 @@ func openSecureRootPath(path string, create bool, perm fs.FileMode) (_ *os.Root,
 		}
 		if closeErr := current.Close(); closeErr != nil {
 			_ = next.Close()
-			return nil, abs, false, closeErr
+			return nil, abs, false, sanitizeSecureFSError(closeErr)
 		}
 		current = next
 	}
@@ -120,17 +125,17 @@ func openSecureRootPath(path string, create bool, perm fs.FileMode) (_ *os.Root,
 func openSecureDir(parent *os.Root, name string, afterLstat func()) (*os.Root, fs.FileInfo, error) {
 	info, err := parent.Lstat(name)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, sanitizeSecureFSError(err)
 	}
 	return openSecureDirFromInfo(parent, name, info, afterLstat)
 }
 
 func openSecureDirFromInfo(parent *os.Root, name string, info fs.FileInfo, afterLstat func()) (*os.Root, fs.FileInfo, error) {
 	if info.Mode()&fs.ModeSymlink != 0 {
-		return nil, nil, fmt.Errorf("%s: symlinks are not supported", name)
+		return nil, nil, errSecureSymlink
 	}
 	if !info.IsDir() {
-		return nil, nil, fmt.Errorf("%s: not a directory", name)
+		return nil, nil, errSecureNotDirectory
 	}
 	if afterLstat != nil {
 		afterLstat()
@@ -138,16 +143,16 @@ func openSecureDirFromInfo(parent *os.Root, name string, info fs.FileInfo, after
 
 	child, err := parent.OpenRoot(name)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, sanitizeSecureFSError(err)
 	}
 	openedInfo, err := child.Stat(".")
 	if err != nil {
 		_ = child.Close()
-		return nil, nil, err
+		return nil, nil, sanitizeSecureFSError(err)
 	}
 	if !os.SameFile(info, openedInfo) {
 		_ = child.Close()
-		return nil, nil, fmt.Errorf("%s: %w", name, errSecurePathChanged)
+		return nil, nil, errSecurePathChanged
 	}
 	return child, openedInfo, nil
 }
@@ -158,16 +163,16 @@ func openSecureDirFromInfo(parent *os.Root, name string, info fs.FileInfo, after
 func openSecureFile(parent *os.Root, name string, afterLstat func()) (*os.File, fs.FileInfo, error) {
 	info, err := parent.Lstat(name)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, sanitizeSecureFSError(err)
 	}
 	if info.Mode()&fs.ModeSymlink != 0 {
-		return nil, nil, fmt.Errorf("%s: symlinks are not supported", name)
+		return nil, nil, errSecureSymlink
 	}
 	// Reject FIFOs, devices, sockets, and directories before open. On Unix the
 	// open itself also uses O_NONBLOCK, so a regular-to-FIFO race cannot hang
 	// before the post-open type and identity checks run.
 	if !info.Mode().IsRegular() {
-		return nil, nil, fmt.Errorf("%s: not a regular file", name)
+		return nil, nil, errSecureNotRegular
 	}
 	if afterLstat != nil {
 		afterLstat()
@@ -175,20 +180,20 @@ func openSecureFile(parent *os.Root, name string, afterLstat func()) (*os.File, 
 
 	f, err := parent.OpenFile(name, secureReadOpenFlags, 0)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, sanitizeSecureFSError(err)
 	}
 	openedInfo, err := f.Stat()
 	if err != nil {
 		_ = f.Close()
-		return nil, nil, err
+		return nil, nil, sanitizeSecureFSError(err)
 	}
 	if !openedInfo.Mode().IsRegular() {
 		_ = f.Close()
-		return nil, nil, fmt.Errorf("%s: not a regular file", name)
+		return nil, nil, errSecureNotRegular
 	}
 	if !os.SameFile(info, openedInfo) {
 		_ = f.Close()
-		return nil, nil, fmt.Errorf("%s: %w", name, errSecurePathChanged)
+		return nil, nil, errSecurePathChanged
 	}
 	return f, openedInfo, nil
 }
@@ -200,7 +205,7 @@ func verifySecureDirIdentity(parent *os.Root, name string, want fs.FileInfo) err
 	}
 	defer func() { _ = child.Close() }()
 	if !os.SameFile(want, got) {
-		return fmt.Errorf("%s: %w", name, errSecurePathChanged)
+		return errSecurePathChanged
 	}
 	return nil
 }
@@ -240,10 +245,11 @@ func openSecureFilePath(root *os.Root, relpath string) (*os.File, fs.FileInfo, e
 func readSecureDir(root *os.Root) ([]fs.DirEntry, error) {
 	f, err := root.Open(".")
 	if err != nil {
-		return nil, err
+		return nil, sanitizeSecureFSError(err)
 	}
 	defer func() { _ = f.Close() }()
-	return f.ReadDir(-1)
+	entries, err := f.ReadDir(-1)
+	return entries, sanitizeSecureFSError(err)
 }
 
 // createSecureTempDir creates and opens an unpredictable private child
@@ -252,14 +258,14 @@ func createSecureTempDir(root *os.Root, prefix string) (string, *os.Root, error)
 	var random [16]byte
 	for range 100 {
 		if _, err := rand.Read(random[:]); err != nil {
-			return "", nil, err
+			return "", nil, sanitizeSecureFSError(err)
 		}
 		name := prefix + hex.EncodeToString(random[:])
 		if err := root.Mkdir(name, 0o700); err != nil {
 			if errors.Is(err, fs.ErrExist) {
 				continue
 			}
-			return "", nil, err
+			return "", nil, sanitizeSecureFSError(err)
 		}
 		child, _, err := openSecureDir(root, name, nil)
 		if err != nil {
@@ -274,14 +280,37 @@ func createSecureTempDir(root *os.Root, prefix string) (string, *os.Root, error)
 func writeSecureNewFile(root *os.Root, name string, data []byte) error {
 	f, err := root.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o640)
 	if err != nil {
-		return err
+		return sanitizeSecureFSError(err)
 	}
 	_, writeErr := f.Write(data)
 	closeErr := f.Close()
 	if writeErr != nil {
-		return writeErr
+		return sanitizeSecureFSError(writeErr)
 	}
-	return closeErr
+	return sanitizeSecureFSError(closeErr)
+}
+
+// sanitizeSecureFSError removes caller-controlled path strings from os errors
+// before they are stored in Error.Err, whose Error method renders the cause.
+// The wrapped errno is preserved so errors.Is classifications continue to
+// work, while operation names remain useful and are controlled by the runtime.
+func sanitizeSecureFSError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var pathErr *os.PathError
+	if errors.As(err, &pathErr) {
+		return fmt.Errorf("%s: %w", pathErr.Op, sanitizeSecureFSError(pathErr.Err))
+	}
+	var linkErr *os.LinkError
+	if errors.As(err, &linkErr) {
+		return fmt.Errorf("%s: %w", linkErr.Op, sanitizeSecureFSError(linkErr.Err))
+	}
+	var syscallErr *os.SyscallError
+	if errors.As(err, &syscallErr) {
+		return fmt.Errorf("%s: %w", syscallErr.Syscall, sanitizeSecureFSError(syscallErr.Err))
+	}
+	return err
 }
 
 func securePathComponents(path string) ([]string, error) {

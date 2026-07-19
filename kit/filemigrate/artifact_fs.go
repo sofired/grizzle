@@ -278,12 +278,14 @@ func (s *FSArtifactStore) CreateArtifact(ctx context.Context, root ArtifactRoot,
 	published := false
 	defer func() {
 		_ = staging.Close()
-		if !committed {
-			cleanupName := tmpName
-			if published {
-				cleanupName = artifact.Name
-			}
-			_ = rootHandle.RemoveAll(cleanupName)
+		// Before rename, tmpName is the private entry this call created and is
+		// safe to remove handle-relatively. After rename, a failed identity
+		// check means artifact.Name is explicitly untrusted: another writer may
+		// have replaced it, so recursively deleting that pathname would create a
+		// privileged deletion primitive. Leave an unverified published target in
+		// place for discovery to reject and for an operator to inspect.
+		if !committed && !published {
+			_ = rootHandle.RemoveAll(tmpName)
 		}
 	}()
 
