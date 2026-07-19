@@ -1,6 +1,7 @@
 package expr_test
 
 import (
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -15,6 +16,10 @@ var (
 	testScoreCol    = expr.IntColumn{ColBase: expr.ColBase{TableAlias: "users", ColName: "score"}}
 )
 
+type noWindowDialect struct{ dialect.Dialect }
+
+func (noWindowDialect) SupportsWindowFunctions() bool { return false }
+
 // -------------------------------------------------------------------
 // Fix #93 — LeadWithDefault / LagWithDefault bind default as param
 // -------------------------------------------------------------------
@@ -22,7 +27,7 @@ var (
 func TestLeadWithDefault_DefaultBoundAsParam(t *testing.T) {
 	ctx := expr.NewBuildContext(dialect.Postgres)
 	w := expr.LeadWithDefault(testUsernameCol, 1, "N/A").OrderBy(testScoreCol.Asc())
-	sql := w.ToSQL(ctx)
+	sql, _ := w.RenderSQL(ctx)
 	args := ctx.Args()
 
 	// The default value must appear as a bound parameter, not literal text.
@@ -48,11 +53,14 @@ func TestLeadWithDefault_DefaultBoundAsParam(t *testing.T) {
 func TestLeadWithDefault_NumericDefaultBoundAsParams(t *testing.T) {
 	ctx := expr.NewBuildContext(dialect.Postgres)
 	w := expr.LeadWithDefault(testScoreCol, 1, 0).OrderBy(testScoreCol.Asc())
-	sql := w.ToSQL(ctx)
+	sql, err := w.RenderSQL(ctx)
+	if err != nil {
+		t.Fatalf("RenderSQL() error = %v", err)
+	}
 
 	wantSQL := `LEAD("users"."score", $1, $2) OVER (ORDER BY "users"."score" ASC)`
 	if sql != wantSQL {
-		t.Errorf("ToSQL() = %q, want %q", sql, wantSQL)
+		t.Errorf("RenderSQL() = %q, want %q", sql, wantSQL)
 	}
 	if placeholderCount := strings.Count(sql, "$"); placeholderCount != 2 {
 		t.Errorf("placeholder count = %d, want 2 in SQL %q", placeholderCount, sql)
@@ -68,7 +76,7 @@ func TestLeadWithDefault_NumericDefaultBoundAsParams(t *testing.T) {
 func TestLagWithDefault_DefaultBoundAsParam(t *testing.T) {
 	ctx := expr.NewBuildContext(dialect.Postgres)
 	w := expr.LagWithDefault(testScoreCol, 1, 0).OrderBy(testScoreCol.Asc())
-	sql := w.ToSQL(ctx)
+	sql, _ := w.RenderSQL(ctx)
 	args := ctx.Args()
 
 	if !strings.Contains(sql, "LAG(") {
@@ -90,8 +98,7 @@ func TestLagWithDefault_StringDefault_NotInterpolated(t *testing.T) {
 	ctx := expr.NewBuildContext(dialect.Postgres)
 	// A string with single quotes must be handled safely.
 	w := expr.LagWithDefault(testUsernameCol, 1, "it's fine").OrderBy(testScoreCol.Asc())
-	sql := w.ToSQL(ctx)
-
+	sql, _ := w.RenderSQL(ctx)
 	if strings.Contains(sql, "it's fine") {
 		t.Errorf("default string must not be interpolated into SQL, got: %s", sql)
 	}
@@ -116,33 +123,83 @@ func TestNthValue_ValidN(t *testing.T) {
 	// Should not panic.
 	ctx := expr.NewBuildContext(dialect.Postgres)
 	w := expr.NthValue(testUsernameCol, 1)
-	sql := w.ToSQL(ctx)
+	sql, _ := w.RenderSQL(ctx)
 	if !strings.Contains(sql, "NTH_VALUE(") {
 		t.Errorf("expected NTH_VALUE in SQL, got: %s", sql)
 	}
 }
 
-func TestNthValue_InvalidN_Panics(t *testing.T) {
-	defer func() {
-		r := recover()
-		if r == nil {
-			t.Error("expected panic for NthValue(col, 0)")
-		}
-		msg, ok := r.(string)
-		if !ok || !strings.Contains(msg, "n must be >= 1") {
-			t.Errorf("unexpected panic message: %v", r)
-		}
-	}()
-	expr.NthValue(testUsernameCol, 0)
+func TestNthValue_InvalidN_ReturnsBuildError(t *testing.T) {
+	ctx := expr.NewBuildContext(dialect.Postgres)
+	got, err := expr.NthValue(testUsernameCol, 0).RenderSQL(ctx)
+	if got != "" {
+		t.Errorf("SQL = %q, want empty", got)
+	}
+	if !errors.Is(err, expr.ErrBuildValidation) {
+		t.Fatalf("error = %v, want ErrBuildValidation", err)
+	}
 }
 
-func TestNthValue_NegativeN_Panics(t *testing.T) {
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("expected panic for NthValue(col, -1)")
+func TestNthValue_NegativeN_ReturnsBuildError(t *testing.T) {
+	ctx := expr.NewBuildContext(dialect.Postgres)
+	got, err := expr.NthValue(testUsernameCol, -1).RenderSQL(ctx)
+	if got != "" {
+		t.Errorf("SQL = %q, want empty", got)
+	}
+	if !errors.Is(err, expr.ErrBuildValidation) {
+		t.Fatalf("error = %v, want ErrBuildValidation", err)
+	}
+}
+
+func TestWindowExpr_UnsupportedDialectReturnsError(t *testing.T) {
+	ctx := expr.NewBuildContext(noWindowDialect{Dialect: dialect.Postgres})
+	got, err := expr.RowNumber().RenderSQL(ctx)
+	if got != "" || !errors.Is(err, expr.ErrUnsupportedFeature) {
+		t.Fatalf("RenderSQL = (%q, %v), want empty SQL and ErrUnsupportedFeature", got, err)
+	}
+	if len(ctx.Args()) != 0 {
+		t.Fatalf("Args = %v, want no orphaned arguments", ctx.Args())
+	}
+}
+
+func TestWindowExpr_RequiredColumnsRejectNil(t *testing.T) {
+	var typedNil *expr.StringColumn
+	columns := []struct {
+		name string
+		col  expr.SelectableColumn
+	}{
+		{"plain nil", nil},
+		{"typed nil", typedNil},
+	}
+	factories := []struct {
+		name string
+		new  func(expr.SelectableColumn) expr.WindowExpr
+	}{
+		{"lead", expr.Lead},
+		{"lead with default", func(col expr.SelectableColumn) expr.WindowExpr { return expr.LeadWithDefault(col, 1, "default") }},
+		{"lag", expr.Lag},
+		{"lag with default", func(col expr.SelectableColumn) expr.WindowExpr { return expr.LagWithDefault(col, 1, "default") }},
+		{"first value", expr.FirstValue},
+		{"last value", expr.LastValue},
+		{"nth value", func(col expr.SelectableColumn) expr.WindowExpr { return expr.NthValue(col, 1) }},
+		{"sum", expr.WinSum},
+		{"avg", expr.WinAvg},
+	}
+
+	for _, column := range columns {
+		for _, factory := range factories {
+			t.Run(column.name+"/"+factory.name, func(t *testing.T) {
+				ctx := expr.NewBuildContext(dialect.Postgres)
+				got, err := factory.new(column.col).RenderSQL(ctx)
+				if got != "" || !errors.Is(err, expr.ErrBuildValidation) {
+					t.Fatalf("RenderSQL = (%q, %v), want empty SQL and ErrBuildValidation", got, err)
+				}
+				if len(ctx.Args()) != 0 {
+					t.Fatalf("Args = %v, want no orphaned arguments", ctx.Args())
+				}
+			})
 		}
-	}()
-	expr.NthValue(testUsernameCol, -1)
+	}
 }
 
 // -------------------------------------------------------------------
@@ -182,22 +239,22 @@ func TestWindowFrameBound_Immutable(t *testing.T) {
 // Fix #131 — AliasedCol does not emit AS in GROUP BY / ORDER BY
 // -------------------------------------------------------------------
 
-func TestAliasedCol_ToSQL_EmitsAlias(t *testing.T) {
+func TestAliasedCol_RenderSQL_EmitsAlias(t *testing.T) {
 	ctx := expr.NewBuildContext(dialect.Postgres)
 	col := expr.ColAs(testUsernameCol, "uname")
-	got := col.ToSQL(ctx)
+	got, _ := col.RenderSQL(ctx)
 	want := `"users"."username" AS "uname"`
 	if got != want {
-		t.Errorf("ToSQL: got %q, want %q", got, want)
+		t.Errorf("RenderSQL: got %q, want %q", got, want)
 	}
 }
 
 func TestAliasedCol_colRef_NoAlias(t *testing.T) {
 	ctx := expr.NewBuildContext(dialect.Postgres)
 	col := expr.ColAs(testUsernameCol, "uname")
-	// OrderExpr.ToSQL calls colRef internally — should not include the alias.
+	// OrderExpr.RenderSQL calls colRef internally — should not include the alias.
 	orderExpr := col.Asc()
-	got := orderExpr.ToSQL(ctx)
+	got, _ := orderExpr.RenderSQL(ctx)
 	// Check for " AS " with surrounding spaces, not just "AS" (which appears in "ASC").
 	if strings.Contains(got, " AS ") {
 		t.Errorf("ORDER BY must not include AS alias clause, got: %s", got)
@@ -214,7 +271,7 @@ func TestAliasedCol_colRef_NoAlias(t *testing.T) {
 func TestRawArgs_MatchingPlaceholders(t *testing.T) {
 	ctx := expr.NewBuildContext(dialect.Postgres)
 	e := expr.RawArgs("col = $? AND other = $?", 42, "hello")
-	got := e.ToSQL(ctx)
+	got, _ := e.RenderSQL(ctx)
 	want := "col = $1 AND other = $2"
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
@@ -225,40 +282,32 @@ func TestRawArgs_MatchingPlaceholders(t *testing.T) {
 	}
 }
 
-func TestRawArgs_TooFewArgs_Panics(t *testing.T) {
-	defer func() {
-		r := recover()
-		if r == nil {
-			t.Error("expected panic for too few args (2 placeholders, 1 arg)")
-		}
-		msg, ok := r.(string)
-		if !ok || !strings.Contains(msg, "placeholder count") {
-			t.Errorf("unexpected panic message: %v", r)
-		}
-	}()
+func TestRawArgs_TooFewArgs_ReturnsBuildError(t *testing.T) {
 	ctx := expr.NewBuildContext(dialect.Postgres)
-	expr.RawArgs("col = $? AND other = $?", 42).ToSQL(ctx) // 2 placeholders, 1 arg
+	got, err := expr.RawArgs("col = $? AND other = $?", 42).RenderSQL(ctx)
+	if got != "" || !errors.Is(err, expr.ErrBuildValidation) {
+		t.Fatalf("got (%q, %v), want empty SQL and ErrBuildValidation", got, err)
+	}
+	if len(ctx.Args()) != 0 {
+		t.Fatalf("orphaned args: %v", ctx.Args())
+	}
 }
 
-func TestRawArgs_TooManyArgs_Panics(t *testing.T) {
-	defer func() {
-		r := recover()
-		if r == nil {
-			t.Error("expected panic for too many args (1 placeholder, 2 args)")
-		}
-		msg, ok := r.(string)
-		if !ok || !strings.Contains(msg, "placeholder count") {
-			t.Errorf("unexpected panic message: %v", r)
-		}
-	}()
+func TestRawArgs_TooManyArgs_ReturnsBuildError(t *testing.T) {
 	ctx := expr.NewBuildContext(dialect.Postgres)
-	expr.RawArgs("col = $?", 42, "extra").ToSQL(ctx) // 1 placeholder, 2 args
+	got, err := expr.RawArgs("col = $?", 42, "extra").RenderSQL(ctx)
+	if got != "" || !errors.Is(err, expr.ErrBuildValidation) {
+		t.Fatalf("got (%q, %v), want empty SQL and ErrBuildValidation", got, err)
+	}
+	if len(ctx.Args()) != 0 {
+		t.Fatalf("orphaned args: %v", ctx.Args())
+	}
 }
 
 func TestRawArgs_NoPlaceholders_NoArgs(t *testing.T) {
 	ctx := expr.NewBuildContext(dialect.Postgres)
 	e := expr.RawArgs("TRUE")
-	got := e.ToSQL(ctx)
+	got, _ := e.RenderSQL(ctx)
 	if got != "TRUE" {
 		t.Errorf("got %q, want %q", got, "TRUE")
 	}

@@ -18,11 +18,14 @@ func ExamplePreloadUUIDs() {
 		uuid.MustParse("00000000-0000-0000-0000-000000000001"),
 		uuid.MustParse("00000000-0000-0000-0000-000000000002"),
 	}
-	sql, _ := query.PreloadUUIDs(
+	sql, _, err := query.PreloadUUIDs(
 		query.Select().From(ts.RealmsT),
 		ts.RealmsT.ID,
 		ids,
 	).Build(dialect.Postgres)
+	if err != nil {
+		panic(err)
+	}
 	fmt.Println(sql)
 	// Output:
 	// SELECT * FROM "realms" WHERE "realms"."id" IN ($1, $2)

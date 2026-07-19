@@ -66,14 +66,28 @@ func (s *SubquerySource) GrizTableAlias() string { return s.alias }
 
 type existsExpr struct{ sub *SelectBuilder }
 
-func (e existsExpr) ToSQL(ctx *expr.BuildContext) string {
-	return "EXISTS (" + e.sub.buildWith(ctx) + ")"
+func (e existsExpr) RenderSQL(ctx *expr.BuildContext) (string, error) {
+	if e.sub == nil {
+		return "", NewError(CodeBuildValidation, "render_subquery", "exists subquery is nil")
+	}
+	sub, err := e.sub.buildWith(ctx)
+	if err != nil {
+		return "", err
+	}
+	return "EXISTS (" + sub + ")", nil
 }
 
 type notExistsExpr struct{ sub *SelectBuilder }
 
-func (e notExistsExpr) ToSQL(ctx *expr.BuildContext) string {
-	return "NOT EXISTS (" + e.sub.buildWith(ctx) + ")"
+func (e notExistsExpr) RenderSQL(ctx *expr.BuildContext) (string, error) {
+	if e.sub == nil {
+		return "", NewError(CodeBuildValidation, "render_subquery", "not-exists subquery is nil")
+	}
+	sub, err := e.sub.buildWith(ctx)
+	if err != nil {
+		return "", err
+	}
+	return "NOT EXISTS (" + sub + ")", nil
 }
 
 type subqueryInExpr struct {
@@ -81,10 +95,21 @@ type subqueryInExpr struct {
 	sub *SelectBuilder
 }
 
-func (e subqueryInExpr) ToSQL(ctx *expr.BuildContext) string {
+func (e subqueryInExpr) RenderSQL(ctx *expr.BuildContext) (string, error) {
 	// Use distinctColSQL to strip any AS alias from an AliasedCol; the IN
 	// left-hand side is a column reference, not a SELECT-list position (#131).
-	return distinctColSQL(ctx, e.col) + " IN (" + e.sub.buildWith(ctx) + ")"
+	column, err := distinctColSQL(ctx, e.col)
+	if err != nil {
+		return "", err
+	}
+	if e.sub == nil {
+		return "", NewError(CodeBuildValidation, "render_subquery", "in subquery is nil")
+	}
+	sub, err := e.sub.buildWith(ctx)
+	if err != nil {
+		return "", err
+	}
+	return column + " IN (" + sub + ")", nil
 }
 
 type subqueryNotInExpr struct {
@@ -92,8 +117,19 @@ type subqueryNotInExpr struct {
 	sub *SelectBuilder
 }
 
-func (e subqueryNotInExpr) ToSQL(ctx *expr.BuildContext) string {
+func (e subqueryNotInExpr) RenderSQL(ctx *expr.BuildContext) (string, error) {
 	// Use distinctColSQL to strip any AS alias from an AliasedCol; the NOT IN
 	// left-hand side is a column reference, not a SELECT-list position (#131).
-	return distinctColSQL(ctx, e.col) + " NOT IN (" + e.sub.buildWith(ctx) + ")"
+	column, err := distinctColSQL(ctx, e.col)
+	if err != nil {
+		return "", err
+	}
+	if e.sub == nil {
+		return "", NewError(CodeBuildValidation, "render_subquery", "not-in subquery is nil")
+	}
+	sub, err := e.sub.buildWith(ctx)
+	if err != nil {
+		return "", err
+	}
+	return column + " NOT IN (" + sub + ")", nil
 }

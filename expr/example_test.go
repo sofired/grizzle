@@ -8,6 +8,14 @@ import (
 	ts "github.com/sofired/grizzle/internal/testschema"
 )
 
+func mustRender(e expr.Expression, ctx *expr.BuildContext) string {
+	sql, err := e.RenderSQL(ctx)
+	if err != nil {
+		panic(err)
+	}
+	return sql
+}
+
 // ExampleAnd demonstrates nil-safe AND: nil expressions are silently dropped,
 // making dynamic WHERE clauses safe to construct without explicit nil checks.
 func ExampleAnd() {
@@ -19,7 +27,7 @@ func ExampleAnd() {
 		emailFilter, // nil — silently dropped
 	)
 	ctx := expr.NewBuildContext(dialect.Postgres)
-	fmt.Println(cond.ToSQL(ctx))
+	fmt.Println(mustRender(cond, ctx))
 	// Output:
 	// ("users"."deleted_at" IS NULL AND "users"."enabled" = $1)
 }
@@ -31,7 +39,7 @@ func ExampleOr() {
 		ts.UsersT.Email.EQ("alice@example.com"),
 	)
 	ctx := expr.NewBuildContext(dialect.Postgres)
-	fmt.Println(cond.ToSQL(ctx))
+	fmt.Println(mustRender(cond, ctx))
 	// Output:
 	// ("users"."email" IS NULL OR "users"."email" = $1)
 }
@@ -40,7 +48,7 @@ func ExampleOr() {
 func ExampleNot() {
 	cond := expr.Not(ts.UsersT.DeletedAt.IsNull())
 	ctx := expr.NewBuildContext(dialect.Postgres)
-	fmt.Println(cond.ToSQL(ctx))
+	fmt.Println(mustRender(cond, ctx))
 	// Output:
 	// NOT ("users"."deleted_at" IS NULL)
 }
@@ -54,7 +62,7 @@ func ExampleCase() {
 		Else(expr.Lit("inactive")).
 		As("status")
 	ctx := expr.NewBuildContext(dialect.Postgres)
-	fmt.Println(status.ToSQL(ctx))
+	fmt.Println(mustRender(status, ctx))
 	// Output:
 	// CASE WHEN "users"."deleted_at" IS NOT NULL THEN $1 WHEN "users"."enabled" = $2 THEN $3 ELSE $4 END AS "status"
 }
@@ -65,7 +73,7 @@ func ExampleCase() {
 func ExampleLit() {
 	v := expr.Lit(42)
 	ctx := expr.NewBuildContext(dialect.Postgres)
-	fmt.Println(v.ToSQL(ctx))
+	fmt.Println(mustRender(v, ctx))
 	// Output:
 	// $1
 }
@@ -75,7 +83,7 @@ func ExampleLit() {
 func ExampleRaw() {
 	e := expr.Raw("now()")
 	ctx := expr.NewBuildContext(dialect.Postgres)
-	fmt.Println(e.ToSQL(ctx))
+	fmt.Println(mustRender(e, ctx))
 	// Output:
 	// now()
 }
@@ -88,7 +96,7 @@ func ExampleRawArgs() {
 	lon, lat, radius := -97.7431, 30.2672, 5000.0
 	e := expr.RawArgs("ST_DWithin(location, ST_MakePoint($?, $?), $?)", lon, lat, radius)
 	ctx := expr.NewBuildContext(dialect.Postgres)
-	fmt.Println(e.ToSQL(ctx))
+	fmt.Println(mustRender(e, ctx))
 	fmt.Println(ctx.Args())
 	// Output:
 	// ST_DWithin(location, ST_MakePoint($1, $2), $3)

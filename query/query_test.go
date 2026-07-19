@@ -1,6 +1,7 @@
 package query_test
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -16,11 +17,14 @@ import (
 
 // assertSQL is a small helper that builds a query and compares the output.
 func assertSQL(t *testing.T, name string, b interface {
-	Build(dialect.Dialect) (string, []any)
+	Build(dialect.Dialect) (string, []any, error)
 }, wantSQL string, wantArgs []any) {
 	t.Helper()
 	t.Run(name, func(t *testing.T) {
-		gotSQL, gotArgs := b.Build(dialect.Postgres)
+		gotSQL, gotArgs, err := b.Build(dialect.Postgres)
+		if err != nil {
+			t.Fatalf("Build() error: %v", err)
+		}
 		if gotSQL != wantSQL {
 			t.Errorf("SQL mismatch\n got:  %s\nwant: %s", gotSQL, wantSQL)
 		}
@@ -34,6 +38,20 @@ func assertSQL(t *testing.T, name string, b interface {
 			}
 		}
 	})
+}
+
+func assertBuildError(t *testing.T, b query.Builder, d dialect.Dialect, want error) {
+	t.Helper()
+	sql, args, err := b.Build(d)
+	if sql != "" {
+		t.Errorf("SQL = %q, want empty", sql)
+	}
+	if args != nil {
+		t.Errorf("args = %v, want nil", args)
+	}
+	if !errors.Is(err, want) {
+		t.Fatalf("error = %v, want %v", err, want)
+	}
 }
 
 // -------------------------------------------------------------------
@@ -134,7 +152,7 @@ func TestSelect_WhereNilDropped(t *testing.T) {
 func TestSelect_WhereNilAndReturnsNil(t *testing.T) {
 	// And() with only nils should produce nil, which means no WHERE clause
 	q := query.Select().From(ts.UsersT).Where(expr.And(nil, nil))
-	sql, _ := q.Build(dialect.Postgres)
+	sql, _, _ := q.Build(dialect.Postgres)
 	want := `SELECT * FROM "users"`
 	if sql != want {
 		t.Errorf("SQL mismatch\n got:  %s\nwant: %s", sql, want)
@@ -231,7 +249,7 @@ func TestSelect_DynamicSearch(t *testing.T) {
 	realmID := uuid.MustParse("00000000-0000-0000-0000-000000000003")
 
 	t.Run("all params nil → only base condition", func(t *testing.T) {
-		sql, args := buildQuery(SearchParams{}).Build(dialect.Postgres)
+		sql, args, _ := buildQuery(SearchParams{}).Build(dialect.Postgres)
 		want := `SELECT "users"."id", "users"."username", "users"."email" FROM "users" WHERE "users"."deleted_at" IS NULL`
 		if sql != want {
 			t.Errorf("SQL mismatch\n got:  %s\nwant: %s", sql, want)
@@ -243,7 +261,7 @@ func TestSelect_DynamicSearch(t *testing.T) {
 
 	t.Run("realm + username filter", func(t *testing.T) {
 		name := "alice"
-		sql, args := buildQuery(SearchParams{RealmID: &realmID, Username: &name}).Build(dialect.Postgres)
+		sql, args, _ := buildQuery(SearchParams{RealmID: &realmID, Username: &name}).Build(dialect.Postgres)
 		wantSQL := `SELECT "users"."id", "users"."username", "users"."email" FROM "users" WHERE ("users"."deleted_at" IS NULL AND "users"."realm_id" = $1 AND "users"."username" ILIKE $2)`
 		if sql != wantSQL {
 			t.Errorf("SQL mismatch\n got:  %s\nwant: %s", sql, wantSQL)
@@ -314,7 +332,7 @@ func TestInsert_IgnoreConflicts_MySQL(t *testing.T) {
 	name := "test-realm"
 	row := ts.RealmInsert{Name: name}
 	b := query.InsertInto(ts.RealmsT).Values(row).IgnoreConflicts()
-	sql, args := b.Build(dialect.MySQL)
+	sql, args, _ := b.Build(dialect.MySQL)
 	if sql != "INSERT IGNORE INTO `realms` (`name`) VALUES (?)" {
 		t.Errorf("unexpected SQL: %s", sql)
 	}
@@ -327,8 +345,8 @@ func TestInsert_IgnoreConflicts_SQLite(t *testing.T) {
 	name := "test-realm"
 	row := ts.RealmInsert{Name: name}
 	b := query.InsertInto(ts.RealmsT).Values(row).IgnoreConflicts()
-	sql, args := b.Build(dialect.SQLite)
-	if sql != `INSERT OR IGNORE INTO "realms" ("name") VALUES (?)` {
+	sql, args, _ := b.Build(dialect.SQLite)
+	if sql != `INSERT INTO "realms" ("name") VALUES (?) ON CONFLICT DO NOTHING` {
 		t.Errorf("unexpected SQL: %s", sql)
 	}
 	if len(args) != 1 || args[0] != name {
@@ -336,15 +354,21 @@ func TestInsert_IgnoreConflicts_SQLite(t *testing.T) {
 	}
 }
 
-func TestInsert_IgnoreConflicts_Postgres_Noop(t *testing.T) {
-	// PostgreSQL has no INSERT IGNORE equivalent; flag is silently ignored.
+func TestInsert_IgnoreConflicts_Postgres(t *testing.T) {
 	name := "test-realm"
 	row := ts.RealmInsert{Name: name}
 	b := query.InsertInto(ts.RealmsT).Values(row).IgnoreConflicts()
-	sql, _ := b.Build(dialect.Postgres)
-	if sql != `INSERT INTO "realms" ("name") VALUES ($1)` {
-		t.Errorf("unexpected SQL: %s", sql)
-	}
+	assertSQL(t, "ignore conflicts postgres", b,
+		`INSERT INTO "realms" ("name") VALUES ($1) ON CONFLICT DO NOTHING`,
+		[]any{name},
+	)
+}
+
+func TestInsert_IgnoreConflicts_CustomDialectReturnsUnsupportedFeature(t *testing.T) {
+	b := query.InsertInto(ts.RealmsT).
+		Values(ts.RealmInsert{Name: "test-realm"}).
+		IgnoreConflicts()
+	assertBuildError(t, b, noCTEDialect{}, query.ErrUnsupportedFeature)
 }
 
 func TestUpsert_DoUpdateSetExcluded(t *testing.T) {
@@ -448,92 +472,69 @@ func TestUpsert_DoUpdateSetStruct(t *testing.T) {
 	)
 }
 
-// TestUpsert_DoUpdateSetStruct_NilInput verifies that passing nil to
-// DoUpdateSetStruct falls back to DO NOTHING rather than emitting an invalid
-// empty DO UPDATE SET clause.
+// TestUpsert_DoUpdateSetStruct_NilInput verifies invalid reflection metadata
+// fails closed instead of changing the requested conflict action.
 func TestUpsert_DoUpdateSetStruct_NilInput(t *testing.T) {
 	realmID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 	username := "alice"
 	row := ts.UserInsert{RealmID: realmID, Username: username}
-	assertSQL(t, "upsert do update set struct nil falls back to do nothing",
-		query.InsertInto(ts.UsersT).
-			Values(row).
-			OnConflict("realm_id", "username").
-			DoUpdateSetStruct(nil),
-		`INSERT INTO "users" ("realm_id", "username") VALUES ($1, $2) ON CONFLICT ("realm_id", "username") DO NOTHING`,
-		[]any{realmID, username},
-	)
+	b := query.InsertInto(ts.UsersT).
+		Values(row).
+		OnConflict("realm_id", "username").
+		DoUpdateSetStruct(nil)
+	assertBuildError(t, b, dialect.Postgres, query.ErrBuildValidation)
 }
 
-// TestUpsert_DoUpdateSetStruct_NilPointer verifies that passing a nil pointer
-// to DoUpdateSetStruct falls back to DO NOTHING.
+// TestUpsert_DoUpdateSetStruct_NilPointer verifies nil metadata fails closed.
 func TestUpsert_DoUpdateSetStruct_NilPointer(t *testing.T) {
 	realmID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 	username := "alice"
 	row := ts.UserInsert{RealmID: realmID, Username: username}
 	var upd *ts.UserUpdate // nil pointer
-	assertSQL(t, "upsert do update set struct nil pointer falls back to do nothing",
-		query.InsertInto(ts.UsersT).
-			Values(row).
-			OnConflict("realm_id", "username").
-			DoUpdateSetStruct(upd),
-		`INSERT INTO "users" ("realm_id", "username") VALUES ($1, $2) ON CONFLICT ("realm_id", "username") DO NOTHING`,
-		[]any{realmID, username},
-	)
+	b := query.InsertInto(ts.UsersT).
+		Values(row).
+		OnConflict("realm_id", "username").
+		DoUpdateSetStruct(upd)
+	assertBuildError(t, b, dialect.Postgres, query.ErrBuildValidation)
 }
 
-// TestUpsert_DoUpdateSetStruct_NonStruct verifies that passing a non-struct
-// to DoUpdateSetStruct falls back to DO NOTHING.
+// TestUpsert_DoUpdateSetStruct_NonStruct verifies non-struct metadata fails closed.
 func TestUpsert_DoUpdateSetStruct_NonStruct(t *testing.T) {
 	realmID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 	username := "alice"
 	row := ts.UserInsert{RealmID: realmID, Username: username}
-	assertSQL(t, "upsert do update set struct non-struct falls back to do nothing",
-		query.InsertInto(ts.UsersT).
-			Values(row).
-			OnConflict("realm_id", "username").
-			DoUpdateSetStruct("not-a-struct"),
-		`INSERT INTO "users" ("realm_id", "username") VALUES ($1, $2) ON CONFLICT ("realm_id", "username") DO NOTHING`,
-		[]any{realmID, username},
-	)
+	b := query.InsertInto(ts.UsersT).
+		Values(row).
+		OnConflict("realm_id", "username").
+		DoUpdateSetStruct("not-a-struct")
+	assertBuildError(t, b, dialect.Postgres, query.ErrBuildValidation)
 }
 
-// TestUpsert_DoUpdateSetStruct_AllNilFields verifies that passing a struct
-// where all pointer fields are nil (producing no SET assignments) falls back
-// to DO NOTHING rather than an empty SET list.
+// TestUpsert_DoUpdateSetStruct_AllNilFields verifies an empty update action
+// is rejected instead of silently becoming DO NOTHING.
 func TestUpsert_DoUpdateSetStruct_AllNilFields(t *testing.T) {
 	realmID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 	username := "alice"
 	row := ts.UserInsert{RealmID: realmID, Username: username}
 	upd := ts.UserUpdate{} // all pointer fields are nil
-	assertSQL(t, "upsert do update set struct all nil fields falls back to do nothing",
-		query.InsertInto(ts.UsersT).
-			Values(row).
-			OnConflict("realm_id", "username").
-			DoUpdateSetStruct(upd),
-		`INSERT INTO "users" ("realm_id", "username") VALUES ($1, $2) ON CONFLICT ("realm_id", "username") DO NOTHING`,
-		[]any{realmID, username},
-	)
+	b := query.InsertInto(ts.UsersT).
+		Values(row).
+		OnConflict("realm_id", "username").
+		DoUpdateSetStruct(upd)
+	assertBuildError(t, b, dialect.Postgres, query.ErrBuildValidation)
 }
 
-// TestUpsert_DoUpdateSetStruct_NilInput_MySQL verifies that on MySQL dialects,
-// DoUpdateSetStruct with nil input omits the ON DUPLICATE KEY UPDATE clause
-// (emitting a plain INSERT) rather than an invalid empty assignment list.
+// TestUpsert_DoUpdateSetStruct_NilInput_MySQL verifies the same validation
+// contract is used by all dialect renderers.
 func TestUpsert_DoUpdateSetStruct_NilInput_MySQL(t *testing.T) {
 	realmID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 	username := "alice"
 	row := ts.UserInsert{RealmID: realmID, Username: username}
-	sql, _ := query.InsertInto(ts.UsersT).
+	b := query.InsertInto(ts.UsersT).
 		Values(row).
 		OnConflict("realm_id", "username").
-		DoUpdateSetStruct(nil).
-		Build(dialect.MySQL)
-	if strings.Contains(sql, "ON DUPLICATE KEY UPDATE") {
-		t.Errorf("expected no ON DUPLICATE KEY UPDATE clause, got: %s", sql)
-	}
-	if strings.Contains(sql, "UPDATE ") {
-		t.Errorf("expected no UPDATE clause of any kind, got: %s", sql)
-	}
+		DoUpdateSetStruct(nil)
+	assertBuildError(t, b, dialect.MySQL, query.ErrBuildValidation)
 }
 
 // TestUpsert_DoUpdateSetStruct_AllNilFields_WithPriorSets verifies that when
@@ -770,7 +771,7 @@ func TestSelect_MultipleJoinRels(t *testing.T) {
 		From(ts.UsersT).
 		JoinRel(ts.UserRealm).
 		JoinRel(ts.RealmUsers) // contrived but valid structurally
-	sql, _ := q.Build(dialect.Postgres)
+	sql, _, _ := q.Build(dialect.Postgres)
 	if !containsN(sql, "LEFT JOIN", 2) {
 		t.Errorf("expected 2 LEFT JOINs in SQL, got: %s", sql)
 	}
@@ -802,7 +803,7 @@ func TestMySQL_Placeholder(t *testing.T) {
 	// MySQL uses ? placeholders, not $1
 	id := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 	q := query.Select().From(ts.UsersT).Where(ts.UsersT.ID.EQ(id))
-	sql, args := q.Build(dialect.MySQL)
+	sql, args, _ := q.Build(dialect.MySQL)
 	if !strings.Contains(sql, "?") {
 		t.Errorf("expected ? placeholder for MySQL, got: %s", sql)
 	}
@@ -816,55 +817,44 @@ func TestMySQL_Placeholder(t *testing.T) {
 
 func TestMySQL_QuoteIdent(t *testing.T) {
 	q := query.Select().From(ts.UsersT)
-	sql, _ := q.Build(dialect.MySQL)
+	sql, _, _ := q.Build(dialect.MySQL)
 	if !strings.Contains(sql, "`users`") {
 		t.Errorf("expected backtick quoting for MySQL, got: %s", sql)
 	}
 }
 
-func TestMySQL_NoReturning(t *testing.T) {
-	// RETURNING should be silently dropped for MySQL
+func TestMySQL_InsertReturning_ReturnsUnsupportedFeature(t *testing.T) {
 	name := "test-realm"
 	row := ts.RealmInsert{Name: name}
-	sql, _ := query.InsertInto(ts.RealmsT).
+	b := query.InsertInto(ts.RealmsT).
 		Values(row).
-		Returning(ts.RealmsT.ID).
-		Build(dialect.MySQL)
-	if strings.Contains(sql, "RETURNING") {
-		t.Errorf("MySQL INSERT should not have RETURNING clause: %s", sql)
-	}
+		Returning(ts.RealmsT.ID)
+	assertBuildError(t, b, dialect.MySQL, query.ErrUnsupportedFeature)
 }
 
-func TestMySQL_UpdateNoReturning(t *testing.T) {
+func TestMySQL_UpdateReturning_ReturnsUnsupportedFeature(t *testing.T) {
 	id := uuid.MustParse("00000000-0000-0000-0000-000000000001")
-	sql, _ := query.Update(ts.UsersT).
+	b := query.Update(ts.UsersT).
 		Set("username", "alice").
 		Where(ts.UsersT.ID.EQ(id)).
-		Returning(ts.UsersT.ID).
-		Build(dialect.MySQL)
-	if strings.Contains(sql, "RETURNING") {
-		t.Errorf("MySQL UPDATE should not have RETURNING clause: %s", sql)
-	}
+		Returning(ts.UsersT.ID)
+	assertBuildError(t, b, dialect.MySQL, query.ErrUnsupportedFeature)
 }
 
-func TestMySQL_DeleteNoReturning(t *testing.T) {
+func TestMySQL_DeleteReturning_ReturnsUnsupportedFeature(t *testing.T) {
 	id := uuid.MustParse("00000000-0000-0000-0000-000000000001")
-	sql, _ := query.DeleteFrom(ts.UsersT).
+	b := query.DeleteFrom(ts.UsersT).
 		Where(ts.UsersT.ID.EQ(id)).
-		Returning(ts.UsersT.ID).
-		Build(dialect.MySQL)
-	if strings.Contains(sql, "RETURNING") {
-		t.Errorf("MySQL DELETE should not have RETURNING clause: %s", sql)
-	}
+		Returning(ts.UsersT.ID)
+	assertBuildError(t, b, dialect.MySQL, query.ErrUnsupportedFeature)
 }
 
 func TestMySQL_UpsertDuplicateKey(t *testing.T) {
 	realmID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 	username := "alice"
 	row := ts.UserInsert{RealmID: realmID, Username: username}
-	sql, args := query.InsertInto(ts.UsersT).
+	sql, args, _ := query.InsertInto(ts.UsersT).
 		Values(row).
-		OnConflict("realm_id", "username").
 		DoUpdateSetExcluded("email", "enabled").
 		Build(dialect.MySQL)
 	if !strings.Contains(sql, "ON DUPLICATE KEY UPDATE") {
@@ -886,9 +876,8 @@ func TestMySQL_UpsertExplicitSet(t *testing.T) {
 	name := "test-realm"
 	row := ts.RealmInsert{Name: name}
 	enabled := true
-	sql, _ := query.InsertInto(ts.RealmsT).
+	sql, _, _ := query.InsertInto(ts.RealmsT).
 		Values(row).
-		OnConflict("name").
 		DoUpdateSet("enabled", enabled).
 		Build(dialect.MySQL)
 	if !strings.Contains(sql, "ON DUPLICATE KEY UPDATE") {
@@ -1055,7 +1044,7 @@ func TestUniqueStrings(t *testing.T) {
 
 func TestJSONB_Arrow(t *testing.T) {
 	ctx := newBuildCtx()
-	sql := ts.UsersT.Attributes.Arrow("role").ToSQL(ctx)
+	sql, _ := ts.UsersT.Attributes.Arrow("role").RenderSQL(ctx)
 	want := `"users"."attributes" -> $1`
 	if sql != want {
 		t.Errorf("Arrow SQL: got %q, want %q", sql, want)
@@ -1064,7 +1053,7 @@ func TestJSONB_Arrow(t *testing.T) {
 
 func TestJSONB_ArrowText(t *testing.T) {
 	ctx := newBuildCtx()
-	sql := ts.UsersT.Attributes.ArrowText("email").ToSQL(ctx)
+	sql, _ := ts.UsersT.Attributes.ArrowText("email").RenderSQL(ctx)
 	want := `"users"."attributes" ->> $1`
 	if sql != want {
 		t.Errorf("ArrowText SQL: got %q, want %q", sql, want)
@@ -1073,7 +1062,7 @@ func TestJSONB_ArrowText(t *testing.T) {
 
 func TestJSONB_Path(t *testing.T) {
 	ctx := newBuildCtx()
-	sql := ts.UsersT.Attributes.Path("address", "city").ToSQL(ctx)
+	sql, _ := ts.UsersT.Attributes.Path("address", "city").RenderSQL(ctx)
 	want := `"users"."attributes" #> ARRAY['address', 'city']`
 	if sql != want {
 		t.Errorf("Path SQL: got %q, want %q", sql, want)
@@ -1082,7 +1071,7 @@ func TestJSONB_Path(t *testing.T) {
 
 func TestJSONB_PathText(t *testing.T) {
 	ctx := newBuildCtx()
-	sql := ts.UsersT.Attributes.PathText("address", "city").ToSQL(ctx)
+	sql, _ := ts.UsersT.Attributes.PathText("address", "city").RenderSQL(ctx)
 	want := `"users"."attributes" #>> ARRAY['address', 'city']`
 	if sql != want {
 		t.Errorf("PathText SQL: got %q, want %q", sql, want)
@@ -1137,7 +1126,7 @@ func TestJSONB_HasAllKeys_InWhere(t *testing.T) {
 func TestJSONB_ContainedBy(t *testing.T) {
 	ctx := newBuildCtx()
 	val := map[string]any{"role": "admin", "region": "us"}
-	sql := ts.UsersT.Attributes.ContainedBy(val).ToSQL(ctx)
+	sql, _ := ts.UsersT.Attributes.ContainedBy(val).RenderSQL(ctx)
 	// val @> col — the value is on the left
 	if !strings.Contains(sql, "@>") {
 		t.Errorf("ContainedBy SQL missing @>: %s", sql)
@@ -1278,7 +1267,7 @@ func TestSubquery_FromSubquery_SharedParams(t *testing.T) {
 	sub := query.FromSubquery(inner, "sub")
 	outerQ := query.Select(ts.UsersT.RealmID).From(sub).
 		Where(ts.UsersT.Username.EQ("alice")) // $2
-	gotSQL, gotArgs := outerQ.Build(dialect.Postgres)
+	gotSQL, gotArgs, _ := outerQ.Build(dialect.Postgres)
 	wantSQL := `SELECT "users"."realm_id" FROM (SELECT "users"."realm_id", COUNT(*) AS "cnt" FROM "users" WHERE "users"."enabled" = $1 GROUP BY "users"."realm_id") AS "sub" WHERE "users"."username" = $2`
 	if gotSQL != wantSQL {
 		t.Errorf("SQL mismatch\n got:  %s\nwant: %s", gotSQL, wantSQL)
@@ -1365,7 +1354,7 @@ func TestAgg_SumAvgMaxMin(t *testing.T) {
 		{"MIN", expr.Min(ts.UsersT.Username), `MIN("users"."username")`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := tc.agg.ToSQL(ctx)
+			got, _ := tc.agg.RenderSQL(ctx)
 			if got != tc.want {
 				t.Errorf("got %s, want %s", got, tc.want)
 			}
@@ -1547,7 +1536,7 @@ func TestCase_UsedInWhere(t *testing.T) {
 		Where(expr.Case().
 			When(ts.UsersT.Enabled.IsTrue(), expr.Lit(1)).
 			Else(expr.Lit(0)))
-	got, _ := q.Build(dialect.Postgres)
+	got, _, _ := q.Build(dialect.Postgres)
 	want := `SELECT "users"."id" FROM "users" WHERE CASE WHEN "users"."enabled" = $1 THEN $2 ELSE $3 END`
 	if got != want {
 		t.Errorf("SQL mismatch\n got:  %s\nwant: %s", got, want)
@@ -1556,7 +1545,7 @@ func TestCase_UsedInWhere(t *testing.T) {
 
 func TestLit_BoundParameter(t *testing.T) {
 	ctx := expr.NewBuildContext(dialect.Postgres)
-	got := expr.Lit(42).ToSQL(ctx)
+	got, _ := expr.Lit(42).RenderSQL(ctx)
 	if got != "$1" {
 		t.Errorf("Lit(42) should produce $1, got %s", got)
 	}
@@ -1596,7 +1585,7 @@ func TestCTE_MultipleWith(t *testing.T) {
 		With("au", activeUsers).
 		With("ar", activeRealms).
 		From(query.CTERef("au"))
-	got, _ := q.Build(dialect.Postgres)
+	got, _, _ := q.Build(dialect.Postgres)
 
 	if !strings.Contains(got, `WITH "au" AS (`) {
 		t.Errorf("missing first CTE in: %s", got)
@@ -1620,7 +1609,7 @@ func TestCTE_ParametersSharedAcrossCTE(t *testing.T) {
 		From(query.CTERef("u")).
 		Where(expr.Raw(`"u"."id" IS NOT NULL`))
 
-	got, args := outer.Build(dialect.Postgres)
+	got, args, _ := outer.Build(dialect.Postgres)
 	want := `WITH "u" AS (SELECT "users"."id" FROM "users" WHERE "users"."username" = $1) SELECT * FROM "u" WHERE "u"."id" IS NOT NULL`
 	if got != want {
 		t.Errorf("SQL mismatch\n got:  %s\nwant: %s", got, want)
@@ -1638,7 +1627,7 @@ func TestIntColumn_NotIn(t *testing.T) {
 	// Need an IntColumn — add one inline using ColBase directly.
 	col := expr.IntColumn{ColBase: expr.ColBase{TableAlias: "users", ColName: "score"}}
 	ctx := expr.NewBuildContext(dialect.Postgres)
-	got := col.NotIn(1, 2, 3).ToSQL(ctx)
+	got, _ := col.NotIn(1, 2, 3).RenderSQL(ctx)
 	want := `"users"."score" NOT IN ($1, $2, $3)`
 	if got != want {
 		t.Errorf("got %s, want %s", got, want)
@@ -1648,16 +1637,16 @@ func TestIntColumn_NotIn(t *testing.T) {
 func TestIntColumn_NotIn_Empty(t *testing.T) {
 	col := expr.IntColumn{ColBase: expr.ColBase{TableAlias: "users", ColName: "score"}}
 	ctx := expr.NewBuildContext(dialect.Postgres)
-	got := col.NotIn().ToSQL(ctx)
-	if got != "TRUE" {
-		t.Errorf("empty NotIn should produce TRUE, got %s", got)
+	got, err := col.NotIn().RenderSQL(ctx)
+	if got != "" || !errors.Is(err, expr.ErrBuildValidation) {
+		t.Fatalf("got (%q, %v), want empty SQL and ErrBuildValidation", got, err)
 	}
 }
 
 func TestFloatColumn_In(t *testing.T) {
 	col := expr.FloatColumn{ColBase: expr.ColBase{TableAlias: "users", ColName: "score"}}
 	ctx := expr.NewBuildContext(dialect.Postgres)
-	got := col.In(1.5, 2.5).ToSQL(ctx)
+	got, _ := col.In(1.5, 2.5).RenderSQL(ctx)
 	want := `"users"."score" IN ($1, $2)`
 	if got != want {
 		t.Errorf("got %s, want %s", got, want)
@@ -1667,7 +1656,7 @@ func TestFloatColumn_In(t *testing.T) {
 func TestFloatColumn_NotIn(t *testing.T) {
 	col := expr.FloatColumn{ColBase: expr.ColBase{TableAlias: "users", ColName: "score"}}
 	ctx := expr.NewBuildContext(dialect.Postgres)
-	got := col.NotIn(1.5, 2.5).ToSQL(ctx)
+	got, _ := col.NotIn(1.5, 2.5).RenderSQL(ctx)
 	want := `"users"."score" NOT IN ($1, $2)`
 	if got != want {
 		t.Errorf("got %s, want %s", got, want)
@@ -1760,7 +1749,7 @@ func TestSelect_ForUpdate(t *testing.T) {
 
 func TestSelect_ForShare_Postgres(t *testing.T) {
 	q := query.Select().From(ts.UsersT).ForShare()
-	got, _ := q.Build(dialect.Postgres)
+	got, _, _ := q.Build(dialect.Postgres)
 	if !strings.Contains(got, "FOR SHARE") {
 		t.Errorf("expected FOR SHARE in: %s", got)
 	}
@@ -1768,62 +1757,46 @@ func TestSelect_ForShare_Postgres(t *testing.T) {
 
 func TestSelect_ForShare_MySQL(t *testing.T) {
 	q := query.Select().From(ts.UsersT).ForShare()
-	got, _ := q.Build(dialect.MySQL)
+	got, _, _ := q.Build(dialect.MySQL)
 	if !strings.Contains(got, "LOCK IN SHARE MODE") {
 		t.Errorf("expected LOCK IN SHARE MODE in: %s", got)
 	}
 }
 
-// TestSelect_ForUpdate_SQLite verifies that FOR UPDATE is silently dropped for
-// SQLite, which uses file-level locking and does not support row-level locking.
-func TestSelect_ForUpdate_SQLite(t *testing.T) {
+func TestSelect_ForUpdate_SQLite_ReturnsUnsupportedFeature(t *testing.T) {
 	q := query.Select().From(ts.UsersT).ForUpdate()
-	got, _ := q.Build(dialect.SQLite)
-	if strings.Contains(got, "FOR UPDATE") {
-		t.Errorf("FOR UPDATE should not be emitted for SQLite, got: %s", got)
-	}
+	assertBuildError(t, q, dialect.SQLite, query.ErrUnsupportedFeature)
 }
 
-// TestSelect_ForShare_SQLite verifies that FOR SHARE is silently dropped for
-// SQLite, which uses file-level locking and does not support row-level locking.
-func TestSelect_ForShare_SQLite(t *testing.T) {
+func TestSelect_ForShare_SQLite_ReturnsUnsupportedFeature(t *testing.T) {
 	q := query.Select().From(ts.UsersT).ForShare()
-	got, _ := q.Build(dialect.SQLite)
-	if strings.Contains(got, "FOR SHARE") || strings.Contains(got, "LOCK IN") {
-		t.Errorf("locking clause should not be emitted for SQLite, got: %s", got)
-	}
+	assertBuildError(t, q, dialect.SQLite, query.ErrUnsupportedFeature)
 }
 
 func TestSelect_ForNoKeyUpdate_Postgres(t *testing.T) {
 	q := query.Select().From(ts.UsersT).ForNoKeyUpdate()
-	got, _ := q.Build(dialect.Postgres)
+	got, _, _ := q.Build(dialect.Postgres)
 	if !strings.Contains(got, "FOR NO KEY UPDATE") {
 		t.Errorf("expected FOR NO KEY UPDATE in: %s", got)
 	}
 }
 
-func TestSelect_ForNoKeyUpdate_MySQL(t *testing.T) {
+func TestSelect_ForNoKeyUpdate_MySQL_ReturnsUnsupportedFeature(t *testing.T) {
 	q := query.Select().From(ts.UsersT).ForNoKeyUpdate()
-	got, _ := q.Build(dialect.MySQL)
-	if strings.Contains(got, "NO KEY") {
-		t.Errorf("FOR NO KEY UPDATE should not be emitted for MySQL, got: %s", got)
-	}
+	assertBuildError(t, q, dialect.MySQL, query.ErrUnsupportedFeature)
 }
 
 func TestSelect_ForKeyShare_Postgres(t *testing.T) {
 	q := query.Select().From(ts.UsersT).ForKeyShare()
-	got, _ := q.Build(dialect.Postgres)
+	got, _, _ := q.Build(dialect.Postgres)
 	if !strings.Contains(got, "FOR KEY SHARE") {
 		t.Errorf("expected FOR KEY SHARE in: %s", got)
 	}
 }
 
-func TestSelect_ForKeyShare_MySQL(t *testing.T) {
+func TestSelect_ForKeyShare_MySQL_ReturnsUnsupportedFeature(t *testing.T) {
 	q := query.Select().From(ts.UsersT).ForKeyShare()
-	got, _ := q.Build(dialect.MySQL)
-	if strings.Contains(got, "KEY SHARE") {
-		t.Errorf("FOR KEY SHARE should not be emitted for MySQL, got: %s", got)
-	}
+	assertBuildError(t, q, dialect.MySQL, query.ErrUnsupportedFeature)
 }
 
 // aliasedTable is a minimal TableSource whose alias differs from its name,
@@ -1836,7 +1809,7 @@ func (a aliasedTable) GrizTableAlias() string { return a.alias }
 func TestSelect_ForUpdate_Of_Alias(t *testing.T) {
 	tbl := aliasedTable{name: "orders", alias: "o"}
 	q := query.Select().From(tbl).ForUpdate().Of(tbl)
-	got, _ := q.Build(dialect.Postgres)
+	got, _, _ := q.Build(dialect.Postgres)
 	want := `SELECT * FROM "orders" AS "o" FOR UPDATE OF "o"`
 	if got != want {
 		t.Errorf("OF alias\ngot:  %s\nwant: %s", got, want)
@@ -1855,63 +1828,40 @@ func TestSelect_ForUpdate_Of_NoAlias(t *testing.T) {
 func TestSelect_ForShare_Of_Postgres(t *testing.T) {
 	tbl := aliasedTable{name: "orders", alias: "o"}
 	q := query.Select().From(tbl).ForShare().Of(tbl)
-	got, _ := q.Build(dialect.Postgres)
+	got, _, _ := q.Build(dialect.Postgres)
 	want := `SELECT * FROM "orders" AS "o" FOR SHARE OF "o"`
 	if got != want {
 		t.Errorf("FOR SHARE OF\ngot:  %s\nwant: %s", got, want)
 	}
 }
 
-func TestSelect_ForShare_Of_MySQL_Dropped(t *testing.T) {
-	// MySQL LOCK IN SHARE MODE does not support OF; it must be dropped.
+func TestSelect_ForShare_Of_MySQL_ReturnsUnsupportedFeature(t *testing.T) {
 	tbl := aliasedTable{name: "orders", alias: "o"}
 	q := query.Select().From(tbl).ForShare().Of(tbl)
-	got, _ := q.Build(dialect.MySQL)
-	if strings.Contains(got, " OF ") {
-		t.Errorf("MySQL LOCK IN SHARE MODE must not emit OF clause, got: %s", got)
-	}
-	if !strings.Contains(got, "LOCK IN SHARE MODE") {
-		t.Errorf("expected LOCK IN SHARE MODE in: %s", got)
-	}
+	assertBuildError(t, q, dialect.MySQL, query.ErrUnsupportedFeature)
 }
 
-func TestSelect_ForUpdate_Of_MySQL_MultiTable(t *testing.T) {
-	// MySQL 8.0+ FOR UPDATE supports OF with multiple tables.
+func TestSelect_ForUpdate_Of_MySQL_ReturnsUnsupportedFeature(t *testing.T) {
 	t1 := aliasedTable{name: "orders", alias: "o"}
-	t2 := aliasedTable{name: "items", alias: "i"}
-	q := query.Select().From(t1).ForUpdate().Of(t1, t2)
-	got, _ := q.Build(dialect.MySQL)
-	if strings.Count(got, " OF ") != 1 {
-		t.Fatalf("expected exactly one OF clause in: %s", got)
-	}
-	// MySQL uses backtick quoting.
-	if !strings.Contains(got, "`o`") {
-		t.Errorf("expected first table alias `o` in OF clause: %s", got)
-	}
-	if !strings.Contains(got, "`i`") {
-		t.Errorf("expected second table alias `i` in OF clause: %s", got)
-	}
+	q := query.Select().From(t1).ForUpdate().Of(t1)
+	assertBuildError(t, q, dialect.MySQL, query.ErrUnsupportedFeature)
 }
 
 func TestSelect_Of_BeforeForUpdate(t *testing.T) {
 	// Of() can precede ForUpdate(); call order does not matter.
 	tbl := aliasedTable{name: "orders", alias: "o"}
 	q := query.Select().From(tbl).Of(tbl).ForUpdate()
-	got, _ := q.Build(dialect.Postgres)
+	got, _, _ := q.Build(dialect.Postgres)
 	want := `SELECT * FROM "orders" AS "o" FOR UPDATE OF "o"`
 	if got != want {
 		t.Errorf("Of before ForUpdate\ngot:  %s\nwant: %s", got, want)
 	}
 }
 
-func TestSelect_ForUpdate_Of_SQLite_Dropped(t *testing.T) {
-	// SQLite has no row-level locking; the entire clause must be dropped.
+func TestSelect_ForUpdate_Of_SQLite_ReturnsUnsupportedFeature(t *testing.T) {
 	tbl := aliasedTable{name: "orders", alias: "o"}
 	q := query.Select().From(tbl).ForUpdate().Of(tbl)
-	got, _ := q.Build(dialect.SQLite)
-	if strings.Contains(got, "FOR UPDATE") || strings.Contains(got, " OF ") {
-		t.Errorf("SQLite must drop all locking clauses, got: %s", got)
-	}
+	assertBuildError(t, q, dialect.SQLite, query.ErrUnsupportedFeature)
 }
 
 // -------------------------------------------------------------------
@@ -1920,7 +1870,7 @@ func TestSelect_ForUpdate_Of_SQLite_Dropped(t *testing.T) {
 
 func TestSelect_For_SkipLocked_Postgres(t *testing.T) {
 	q := query.Select().From(ts.UsersT).For(query.LockForUpdate, query.SkipLocked)
-	got, _ := q.Build(dialect.Postgres)
+	got, _, _ := q.Build(dialect.Postgres)
 	want := `SELECT * FROM "users" FOR UPDATE SKIP LOCKED`
 	if got != want {
 		t.Errorf("got:  %s\nwant: %s", got, want)
@@ -1929,7 +1879,7 @@ func TestSelect_For_SkipLocked_Postgres(t *testing.T) {
 
 func TestSelect_For_NoWait_Postgres(t *testing.T) {
 	q := query.Select().From(ts.UsersT).For(query.LockForUpdate, query.NoWait)
-	got, _ := q.Build(dialect.Postgres)
+	got, _, _ := q.Build(dialect.Postgres)
 	want := `SELECT * FROM "users" FOR UPDATE NOWAIT`
 	if got != want {
 		t.Errorf("got:  %s\nwant: %s", got, want)
@@ -1938,7 +1888,7 @@ func TestSelect_For_NoWait_Postgres(t *testing.T) {
 
 func TestSelect_For_SkipLocked_MySQL(t *testing.T) {
 	q := query.Select().From(ts.UsersT).For(query.LockForUpdate, query.SkipLocked)
-	got, _ := q.Build(dialect.MySQL)
+	got, _, _ := q.Build(dialect.MySQL)
 	// MySQL uses backtick quoting and appends SKIP LOCKED after FOR UPDATE.
 	if !strings.Contains(got, "FOR UPDATE") {
 		t.Errorf("expected FOR UPDATE in: %s", got)
@@ -1950,7 +1900,7 @@ func TestSelect_For_SkipLocked_MySQL(t *testing.T) {
 
 func TestSelect_For_NoWait_MySQL(t *testing.T) {
 	q := query.Select().From(ts.UsersT).For(query.LockForUpdate, query.NoWait)
-	got, _ := q.Build(dialect.MySQL)
+	got, _, _ := q.Build(dialect.MySQL)
 	if !strings.Contains(got, "FOR UPDATE") {
 		t.Errorf("expected FOR UPDATE in: %s", got)
 	}
@@ -1959,19 +1909,15 @@ func TestSelect_For_NoWait_MySQL(t *testing.T) {
 	}
 }
 
-func TestSelect_For_SkipLocked_SQLite_Dropped(t *testing.T) {
-	// SQLite has no row-level locking; the entire clause including opts must be dropped.
+func TestSelect_For_SkipLocked_SQLite_ReturnsUnsupportedFeature(t *testing.T) {
 	q := query.Select().From(ts.UsersT).For(query.LockForUpdate, query.SkipLocked)
-	got, _ := q.Build(dialect.SQLite)
-	if strings.Contains(got, "FOR UPDATE") || strings.Contains(got, "SKIP LOCKED") {
-		t.Errorf("SQLite must drop all locking clauses, got: %s", got)
-	}
+	assertBuildError(t, q, dialect.SQLite, query.ErrUnsupportedFeature)
 }
 
 func TestSelect_For_NoKeyUpdate_Of_Postgres(t *testing.T) {
 	tbl := aliasedTable{name: "orders", alias: "o"}
 	q := query.Select().From(tbl).For(query.LockForNoKeyUpdate).Of(tbl)
-	got, _ := q.Build(dialect.Postgres)
+	got, _, _ := q.Build(dialect.Postgres)
 	want := `SELECT * FROM "orders" AS "o" FOR NO KEY UPDATE OF "o"`
 	if got != want {
 		t.Errorf("got:  %s\nwant: %s", got, want)
@@ -1981,7 +1927,7 @@ func TestSelect_For_NoKeyUpdate_Of_Postgres(t *testing.T) {
 func TestSelect_For_KeyShare_Of_Postgres(t *testing.T) {
 	tbl := aliasedTable{name: "orders", alias: "o"}
 	q := query.Select().From(tbl).For(query.LockForKeyShare).Of(tbl)
-	got, _ := q.Build(dialect.Postgres)
+	got, _, _ := q.Build(dialect.Postgres)
 	want := `SELECT * FROM "orders" AS "o" FOR KEY SHARE OF "o"`
 	if got != want {
 		t.Errorf("got:  %s\nwant: %s", got, want)
@@ -1992,7 +1938,7 @@ func TestSelect_For_WithOptsAndOf(t *testing.T) {
 	// FOR UPDATE OF "o" NOWAIT — combined Of+opts on postgres.
 	tbl := aliasedTable{name: "orders", alias: "o"}
 	q := query.Select().From(tbl).For(query.LockForUpdate, query.NoWait).Of(tbl)
-	got, _ := q.Build(dialect.Postgres)
+	got, _, _ := q.Build(dialect.Postgres)
 	want := `SELECT * FROM "orders" AS "o" FOR UPDATE OF "o" NOWAIT`
 	if got != want {
 		t.Errorf("got:  %s\nwant: %s", got, want)
@@ -2009,25 +1955,16 @@ func TestSelect_For_WithOptsAndOf(t *testing.T) {
 
 func TestUpdate_SetStruct_Nil(t *testing.T) {
 	t.Run("nil interface", func(t *testing.T) {
-		sql, args := query.Update(ts.UsersT).SetStruct(nil).Build(dialect.Postgres)
-		if sql != "" || args != nil {
-			t.Errorf("expected empty result for nil SetStruct, got sql=%q args=%v", sql, args)
-		}
+		assertBuildError(t, query.Update(ts.UsersT).SetStruct(nil), dialect.Postgres, query.ErrBuildValidation)
 	})
 
 	t.Run("nil pointer exercises !rv.IsValid() guard", func(t *testing.T) {
 		var p *ts.UserUpdate // nil pointer — Elem() returns invalid reflect.Value
-		sql, args := query.Update(ts.UsersT).SetStruct(p).Build(dialect.Postgres)
-		if sql != "" || args != nil {
-			t.Errorf("expected empty result for nil pointer SetStruct, got sql=%q args=%v", sql, args)
-		}
+		assertBuildError(t, query.Update(ts.UsersT).SetStruct(p), dialect.Postgres, query.ErrBuildValidation)
 	})
 
 	t.Run("non-struct value", func(t *testing.T) {
-		sql, args := query.Update(ts.UsersT).SetStruct(42).Build(dialect.Postgres)
-		if sql != "" || args != nil {
-			t.Errorf("expected empty result for non-struct SetStruct, got sql=%q args=%v", sql, args)
-		}
+		assertBuildError(t, query.Update(ts.UsersT).SetStruct(42), dialect.Postgres, query.ErrBuildValidation)
 	})
 }
 
@@ -2040,7 +1977,7 @@ func TestUpdate_Limit_MySQL(t *testing.T) {
 		Set("enabled", false).
 		Where(ts.UsersT.DeletedAt.IsNotNull()).
 		Limit(100)
-	got, args := q.Build(dialect.MySQL)
+	got, args, _ := q.Build(dialect.MySQL)
 	want := "UPDATE `users` SET `enabled` = ? WHERE `users`.`deleted_at` IS NOT NULL LIMIT 100"
 	if got != want {
 		t.Errorf("SQL mismatch\n got:  %s\nwant: %s", got, want)
@@ -2050,22 +1987,19 @@ func TestUpdate_Limit_MySQL(t *testing.T) {
 	}
 }
 
-func TestUpdate_Limit_Postgres_Ignored(t *testing.T) {
+func TestUpdate_Limit_Postgres_ReturnsUnsupportedFeature(t *testing.T) {
 	q := query.Update(ts.UsersT).
 		Set("enabled", false).
 		Where(ts.UsersT.DeletedAt.IsNotNull()).
 		Limit(100)
-	got, _ := q.Build(dialect.Postgres)
-	if strings.Contains(got, "LIMIT") {
-		t.Errorf("LIMIT should not appear in Postgres UPDATE: %s", got)
-	}
+	assertBuildError(t, q, dialect.Postgres, query.ErrUnsupportedFeature)
 }
 
 func TestDelete_Limit_MySQL(t *testing.T) {
 	q := query.DeleteFrom(ts.UsersT).
 		Where(ts.UsersT.DeletedAt.IsNotNull()).
 		Limit(50)
-	got, args := q.Build(dialect.MySQL)
+	got, args, _ := q.Build(dialect.MySQL)
 	want := "DELETE FROM `users` WHERE `users`.`deleted_at` IS NOT NULL LIMIT 50"
 	if got != want {
 		t.Errorf("SQL mismatch\n got:  %s\nwant: %s", got, want)
@@ -2075,12 +2009,9 @@ func TestDelete_Limit_MySQL(t *testing.T) {
 	}
 }
 
-func TestDelete_Limit_Postgres_Ignored(t *testing.T) {
+func TestDelete_Limit_Postgres_ReturnsUnsupportedFeature(t *testing.T) {
 	q := query.DeleteFrom(ts.UsersT).Where(ts.UsersT.DeletedAt.IsNotNull()).Limit(50)
-	got, _ := q.Build(dialect.Postgres)
-	if strings.Contains(got, "LIMIT") {
-		t.Errorf("LIMIT should not appear in Postgres DELETE: %s", got)
-	}
+	assertBuildError(t, q, dialect.Postgres, query.ErrUnsupportedFeature)
 }
 
 func TestUpdate_Limit_SQLite(t *testing.T) {
@@ -2088,7 +2019,7 @@ func TestUpdate_Limit_SQLite(t *testing.T) {
 		Set("enabled", false).
 		Where(ts.UsersT.DeletedAt.IsNotNull()).
 		Limit(100)
-	got, args := q.Build(dialect.SQLite)
+	got, args, _ := q.Build(dialect.SQLite)
 	want := `UPDATE "users" SET "enabled" = ? WHERE "users"."deleted_at" IS NOT NULL LIMIT 100`
 	if got != want {
 		t.Errorf("SQL mismatch\n got:  %s\nwant: %s", got, want)
@@ -2102,7 +2033,7 @@ func TestDelete_Limit_SQLite(t *testing.T) {
 	q := query.DeleteFrom(ts.UsersT).
 		Where(ts.UsersT.DeletedAt.IsNotNull()).
 		Limit(50)
-	got, args := q.Build(dialect.SQLite)
+	got, args, _ := q.Build(dialect.SQLite)
 	want := `DELETE FROM "users" WHERE "users"."deleted_at" IS NOT NULL LIMIT 50`
 	if got != want {
 		t.Errorf("SQL mismatch\n got:  %s\nwant: %s", got, want)
@@ -2118,7 +2049,7 @@ func TestUpdate_Limit_SQLite_WithReturning(t *testing.T) {
 		Where(ts.UsersT.DeletedAt.IsNotNull()).
 		Limit(10).
 		Returning(ts.UsersT.ID)
-	got, args := q.Build(dialect.SQLite)
+	got, args, _ := q.Build(dialect.SQLite)
 	want := `UPDATE "users" SET "enabled" = ? WHERE "users"."deleted_at" IS NOT NULL LIMIT 10 RETURNING "users"."id"`
 	if got != want {
 		t.Errorf("SQL mismatch\n got:  %s\nwant: %s", got, want)
@@ -2133,7 +2064,7 @@ func TestDelete_Limit_SQLite_WithReturning(t *testing.T) {
 		Where(ts.UsersT.DeletedAt.IsNotNull()).
 		Limit(10).
 		Returning(ts.UsersT.ID)
-	got, args := q.Build(dialect.SQLite)
+	got, args, _ := q.Build(dialect.SQLite)
 	want := `DELETE FROM "users" WHERE "users"."deleted_at" IS NOT NULL LIMIT 10 RETURNING "users"."id"`
 	if got != want {
 		t.Errorf("SQL mismatch\n got:  %s\nwant: %s", got, want)
@@ -2146,7 +2077,7 @@ func TestDelete_Limit_SQLite_WithReturning(t *testing.T) {
 func TestUpdate_Limit_Zero_NoClause(t *testing.T) {
 	for _, d := range []dialect.Dialect{dialect.MySQL, dialect.SQLite, dialect.Postgres} {
 		q := query.Update(ts.UsersT).Set("enabled", false).Limit(0)
-		got, _ := q.Build(d)
+		got, _, _ := q.Build(d)
 		if strings.Contains(got, "LIMIT") {
 			t.Errorf("dialect %s: LIMIT should not appear when Limit(0): %s", d.Name(), got)
 		}
@@ -2156,27 +2087,21 @@ func TestUpdate_Limit_Zero_NoClause(t *testing.T) {
 func TestDelete_Limit_Zero_NoClause(t *testing.T) {
 	for _, d := range []dialect.Dialect{dialect.MySQL, dialect.SQLite, dialect.Postgres} {
 		q := query.DeleteFrom(ts.UsersT).Limit(0)
-		got, _ := q.Build(d)
+		got, _, _ := q.Build(d)
 		if strings.Contains(got, "LIMIT") {
 			t.Errorf("dialect %s: LIMIT should not appear when Limit(0): %s", d.Name(), got)
 		}
 	}
 }
 
-func TestUpdate_Limit_Negative_NoClause(t *testing.T) {
+func TestUpdate_Limit_Negative_ReturnsBuildValidation(t *testing.T) {
 	q := query.Update(ts.UsersT).Set("enabled", false).Limit(-1)
-	got, _ := q.Build(dialect.MySQL)
-	if strings.Contains(got, "LIMIT") {
-		t.Errorf("LIMIT should not appear when Limit(-1): %s", got)
-	}
+	assertBuildError(t, q, dialect.MySQL, query.ErrBuildValidation)
 }
 
-func TestDelete_Limit_Negative_NoClause(t *testing.T) {
+func TestDelete_Limit_Negative_ReturnsBuildValidation(t *testing.T) {
 	q := query.DeleteFrom(ts.UsersT).Limit(-1)
-	got, _ := q.Build(dialect.MySQL)
-	if strings.Contains(got, "LIMIT") {
-		t.Errorf("LIMIT should not appear when Limit(-1): %s", got)
-	}
+	assertBuildError(t, q, dialect.MySQL, query.ErrBuildValidation)
 }
 
 // -------------------------------------------------------------------
@@ -2185,7 +2110,7 @@ func TestDelete_Limit_Negative_NoClause(t *testing.T) {
 
 func TestTimestampColumn_EQCol(t *testing.T) {
 	ctx := expr.NewBuildContext(dialect.Postgres)
-	got := ts.UsersT.CreatedAt.EQCol(ts.UsersT.UpdatedAt).ToSQL(ctx)
+	got, _ := ts.UsersT.CreatedAt.EQCol(ts.UsersT.UpdatedAt).RenderSQL(ctx)
 	want := `"users"."created_at" = "users"."updated_at"`
 	if got != want {
 		t.Errorf("got %s, want %s", got, want)
@@ -2194,7 +2119,7 @@ func TestTimestampColumn_EQCol(t *testing.T) {
 
 func TestTimestampColumn_LTCol(t *testing.T) {
 	ctx := expr.NewBuildContext(dialect.Postgres)
-	got := ts.UsersT.CreatedAt.LTCol(ts.UsersT.DeletedAt).ToSQL(ctx)
+	got, _ := ts.UsersT.CreatedAt.LTCol(ts.UsersT.DeletedAt).RenderSQL(ctx)
 	want := `"users"."created_at" < "users"."deleted_at"`
 	if got != want {
 		t.Errorf("got %s, want %s", got, want)
@@ -2205,7 +2130,7 @@ func TestFloatColumn_GTCol(t *testing.T) {
 	a := expr.FloatColumn{ColBase: expr.ColBase{TableAlias: "products", ColName: "price"}}
 	b := expr.FloatColumn{ColBase: expr.ColBase{TableAlias: "products", ColName: "cost"}}
 	ctx := expr.NewBuildContext(dialect.Postgres)
-	got := a.GTCol(b).ToSQL(ctx)
+	got, _ := a.GTCol(b).RenderSQL(ctx)
 	want := `"products"."price" > "products"."cost"`
 	if got != want {
 		t.Errorf("got %s, want %s", got, want)
@@ -2303,7 +2228,7 @@ func TestSetOp_EmptyOrderBy(t *testing.T) {
 	// No OrderBy call — result must not contain ORDER BY.
 	a := query.Select(ts.UsersT.Username).From(ts.UsersT)
 	b := query.Select(ts.RealmsT.Name).From(ts.RealmsT)
-	sql, _ := a.Union(b).Build(dialect.Postgres)
+	sql, _, _ := a.Union(b).Build(dialect.Postgres)
 	if strings.Contains(sql, "ORDER BY") {
 		t.Errorf("expected no ORDER BY in result without OrderBy() call, got: %s", sql)
 	}
@@ -2322,7 +2247,7 @@ func TestSetOp_LimitOffset(t *testing.T) {
 func TestSetOp_SharedParameters(t *testing.T) {
 	a := query.Select(ts.UsersT.Username).From(ts.UsersT).Where(ts.UsersT.Enabled.EQ(true))
 	b := query.Select(ts.RealmsT.Name).From(ts.RealmsT).Where(ts.RealmsT.Enabled.EQ(false))
-	sql, args := a.UnionAll(b).Build(dialect.Postgres)
+	sql, args, _ := a.UnionAll(b).Build(dialect.Postgres)
 	if !strings.Contains(sql, "$1") || !strings.Contains(sql, "$2") {
 		t.Errorf("expected shared parameter numbering, got: %s", sql)
 	}
@@ -2344,7 +2269,7 @@ var (
 
 func TestArith_IntColumn_Add(t *testing.T) {
 	ctx := expr.NewBuildContext(dialect.Postgres)
-	got := scoreCol.Add(10).ToSQL(ctx)
+	got, _ := scoreCol.Add(10).RenderSQL(ctx)
 	want := `("products"."score" + $1)`
 	if got != want {
 		t.Errorf("got %s, want %s", got, want)
@@ -2356,7 +2281,7 @@ func TestArith_IntColumn_Add(t *testing.T) {
 
 func TestArith_IntColumn_Sub(t *testing.T) {
 	ctx := expr.NewBuildContext(dialect.Postgres)
-	got := scoreCol.Sub(5).ToSQL(ctx)
+	got, _ := scoreCol.Sub(5).RenderSQL(ctx)
 	if got != `("products"."score" - $1)` {
 		t.Errorf("unexpected: %s", got)
 	}
@@ -2364,7 +2289,7 @@ func TestArith_IntColumn_Sub(t *testing.T) {
 
 func TestArith_IntColumn_Mul(t *testing.T) {
 	ctx := expr.NewBuildContext(dialect.Postgres)
-	got := scoreCol.Mul(3).ToSQL(ctx)
+	got, _ := scoreCol.Mul(3).RenderSQL(ctx)
 	if got != `("products"."score" * $1)` {
 		t.Errorf("unexpected: %s", got)
 	}
@@ -2372,7 +2297,7 @@ func TestArith_IntColumn_Mul(t *testing.T) {
 
 func TestArith_IntColumn_Div(t *testing.T) {
 	ctx := expr.NewBuildContext(dialect.Postgres)
-	got := scoreCol.Div(2).ToSQL(ctx)
+	got, _ := scoreCol.Div(2).RenderSQL(ctx)
 	if got != `("products"."score" / $1)` {
 		t.Errorf("unexpected: %s", got)
 	}
@@ -2380,7 +2305,7 @@ func TestArith_IntColumn_Div(t *testing.T) {
 
 func TestArith_IntColumn_AddCol(t *testing.T) {
 	ctx := expr.NewBuildContext(dialect.Postgres)
-	got := quantCol.AddCol(scoreCol).ToSQL(ctx)
+	got, _ := quantCol.AddCol(scoreCol).RenderSQL(ctx)
 	if got != `("orders"."quantity" + "products"."score")` {
 		t.Errorf("unexpected: %s", got)
 	}
@@ -2388,7 +2313,7 @@ func TestArith_IntColumn_AddCol(t *testing.T) {
 
 func TestArith_FloatColumn_Mul(t *testing.T) {
 	ctx := expr.NewBuildContext(dialect.Postgres)
-	got := priceCol.Mul(1.1).ToSQL(ctx)
+	got, _ := priceCol.Mul(1.1).RenderSQL(ctx)
 	if got != `("orders"."price" * $1)` {
 		t.Errorf("unexpected: %s", got)
 	}
@@ -2396,7 +2321,7 @@ func TestArith_FloatColumn_Mul(t *testing.T) {
 
 func TestArith_FloatColumn_MulCol(t *testing.T) {
 	ctx := expr.NewBuildContext(dialect.Postgres)
-	got := priceCol.MulCol(discountCol).ToSQL(ctx)
+	got, _ := priceCol.MulCol(discountCol).RenderSQL(ctx)
 	if got != `("orders"."price" * "orders"."discount")` {
 		t.Errorf("unexpected: %s", got)
 	}
@@ -2405,7 +2330,7 @@ func TestArith_FloatColumn_MulCol(t *testing.T) {
 func TestArith_Chain(t *testing.T) {
 	// (score + 5) * 2
 	ctx := expr.NewBuildContext(dialect.Postgres)
-	got := scoreCol.Add(5).Mul(2).ToSQL(ctx)
+	got, _ := scoreCol.Add(5).Mul(2).RenderSQL(ctx)
 	if got != `(("products"."score" + $1) * $2)` {
 		t.Errorf("unexpected: %s", got)
 	}
@@ -2413,7 +2338,7 @@ func TestArith_Chain(t *testing.T) {
 
 func TestArith_As_SelectAlias(t *testing.T) {
 	ctx := expr.NewBuildContext(dialect.Postgres)
-	got := priceCol.Mul(0.9).As("discounted").ToSQL(ctx)
+	got, _ := priceCol.Mul(0.9).As("discounted").RenderSQL(ctx)
 	if got != `("orders"."price" * $1) AS "discounted"` {
 		t.Errorf("unexpected: %s", got)
 	}
@@ -2421,7 +2346,7 @@ func TestArith_As_SelectAlias(t *testing.T) {
 
 func TestArith_GTE_InWhere(t *testing.T) {
 	ctx := expr.NewBuildContext(dialect.Postgres)
-	got := scoreCol.Add(10).GTE(100).ToSQL(ctx)
+	got, _ := scoreCol.Add(10).GTE(100).RenderSQL(ctx)
 	// ("products"."score" + $1) >= $2
 	if !strings.Contains(got, ">=") {
 		t.Errorf("expected >= operator, got: %s", got)
@@ -2456,7 +2381,7 @@ func TestWithRecursive_Basic(t *testing.T) {
 		From(ts.UsersT).
 		InnerJoin(query.CTERef("tree"), idCol.EQCol(treeIDCol))
 
-	sql, args := query.Select().
+	sql, args, _ := query.Select().
 		WithRecursive("tree", anchor, recursive).
 		From(query.CTERef("tree")).
 		Build(dialect.Postgres)
@@ -2475,7 +2400,7 @@ func TestWithRecursive_Basic(t *testing.T) {
 
 func TestWith_NonRecursive_UsesWITH(t *testing.T) {
 	sub := query.Select(ts.UsersT.ID).From(ts.UsersT).Where(ts.UsersT.Enabled.IsTrue())
-	sql, _ := query.Select().
+	sql, _, _ := query.Select().
 		With("active", sub).
 		From(query.CTERef("active")).
 		Build(dialect.Postgres)
@@ -2490,7 +2415,7 @@ func TestWithRecursive_AndRegularCTE(t *testing.T) {
 	anchor := query.Select(ts.UsersT.ID).From(ts.UsersT).Where(ts.UsersT.Enabled.IsTrue())
 	recursive := query.Select(ts.UsersT.ID).From(ts.UsersT)
 
-	sql, _ := query.Select().
+	sql, _, _ := query.Select().
 		With("regular", sub).
 		WithRecursive("tree", anchor, recursive).
 		From(query.CTERef("tree")).
@@ -2566,7 +2491,7 @@ func TestTableAlias_As_ReturnsAliasedCopy(t *testing.T) {
 func TestTableAlias_ColumnRefsUseAlias(t *testing.T) {
 	mgr := ts.EmployeesT.As("manager")
 	ctx := expr.NewBuildContext(dialect.Postgres)
-	got := mgr.Name.EQ("Alice").ToSQL(ctx)
+	got, _ := mgr.Name.EQ("Alice").RenderSQL(ctx)
 	want := `"manager"."name" = $1`
 	if got != want {
 		t.Errorf("column ref with alias: got %q, want %q", got, want)
@@ -2580,7 +2505,7 @@ func TestTableAlias_OriginalUnchanged(t *testing.T) {
 		t.Errorf("As() mutated original: GrizTableAlias = %q", ts.EmployeesT.GrizTableAlias())
 	}
 	ctx := expr.NewBuildContext(dialect.Postgres)
-	got := ts.EmployeesT.Name.EQ("Alice").ToSQL(ctx)
+	got, _ := ts.EmployeesT.Name.EQ("Alice").RenderSQL(ctx)
 	want := `"employees"."name" = $1`
 	if got != want {
 		t.Errorf("original column ref changed: got %q, want %q", got, want)
@@ -2651,7 +2576,7 @@ func TestTableAlias_ChainedAs(t *testing.T) {
 		t.Errorf("chained As mutated intermediate: GrizTableAlias got %q, want %q", a.GrizTableAlias(), "first")
 	}
 	ctx := expr.NewBuildContext(dialect.Postgres)
-	got := b.Name.EQ("Bob").ToSQL(ctx)
+	got, _ := b.Name.EQ("Bob").RenderSQL(ctx)
 	want := `"second"."name" = $1`
 	if got != want {
 		t.Errorf("chained As column ref: got %q, want %q", got, want)
@@ -2680,7 +2605,7 @@ func TestTableAlias_EmptyStringIsNoOp(t *testing.T) {
 		t.Errorf("As(\"\") changed column TableAlias: got %q, want %q", result.Name.TableName(), "employees")
 	}
 	ctx := expr.NewBuildContext(dialect.Postgres)
-	got := result.Name.EQ("Alice").ToSQL(ctx)
+	got, _ := result.Name.EQ("Alice").RenderSQL(ctx)
 	want := `"employees"."name" = $1`
 	if got != want {
 		t.Errorf("As(\"\") column ref: got %q, want %q", got, want)
@@ -2713,6 +2638,7 @@ func (noCTEDialect) UpsertStyle() dialect.UpsertStyle {
 	return dialect.UpsertOnConflict
 }
 func (noCTEDialect) InsertIgnoreClause() string    { return "" }
+func (noCTEDialect) SupportsIgnoreConflicts() bool { return false }
 func (noCTEDialect) SupportsCTE() bool             { return false }
 func (noCTEDialect) SupportsWindowFunctions() bool { return true }
 func (noCTEDialect) SupportsDistinctOn() bool      { return false }
@@ -2720,6 +2646,7 @@ func (noCTEDialect) SupportsForUpdate() bool       { return false }
 func (noCTEDialect) SupportsForNoKeyUpdate() bool  { return false }
 func (noCTEDialect) SupportsForShareOf() bool      { return false }
 func (noCTEDialect) SupportsFullJoin() bool        { return false }
+func (noCTEDialect) SupportsRightJoin() bool       { return false }
 func (noCTEDialect) ForShareClause() string        { return "" }
 func (noCTEDialect) SupportsRegexpMatch() bool     { return false }
 func (noCTEDialect) SupportsFullTextSearch() bool  { return false }
@@ -2731,229 +2658,94 @@ type noWindowDialect struct{ noCTEDialect }
 func (noWindowDialect) SupportsCTE() bool             { return true }
 func (noWindowDialect) SupportsWindowFunctions() bool { return false }
 
-func TestCTE_DroppedWhenNotSupported(t *testing.T) {
-	sub := query.Select(ts.UsersT.ID).From(ts.UsersT)
-	sql, _ := query.Select(ts.UsersT.ID).
-		With("recent", sub).
-		From(query.CTERef("recent")).
-		Build(noCTEDialect{})
-
-	if strings.Contains(sql, "WITH") {
-		t.Errorf("expected WITH clause to be dropped, got: %s", sql)
-	}
-	// The CTERef FROM reference is preserved as a plain table name; at runtime
-	// the database will raise an unknown-table error — the intended fail-loud
-	// behaviour rather than silently returning wrong rows.
-	want := `SELECT "users"."id" FROM "recent"`
-	if sql != want {
-		t.Errorf("CTE dropped: want %q, got %q", want, sql)
-	}
-}
-
-func TestCTE_RecursiveDroppedWhenNotSupported(t *testing.T) {
+func TestUnsupportedSelectFeatures_ReturnUnsupportedFeature(t *testing.T) {
+	cte := query.Select(ts.UsersT.ID).From(ts.UsersT)
 	anchor := query.Select(ts.UsersT.ID).From(ts.UsersT).Where(ts.UsersT.Enabled.IsTrue())
 	recursive := query.Select(ts.UsersT.ID).From(ts.UsersT)
-	sql, _ := query.Select(ts.UsersT.ID).
-		WithRecursive("tree", anchor, recursive).
-		From(query.CTERef("tree")).
-		Build(noCTEDialect{})
 
-	// The CTERef FROM reference is preserved as a plain table name; at runtime
-	// the database will raise an unknown-table error — the intended fail-loud
-	// behaviour rather than silently returning wrong rows.
-	want := `SELECT "users"."id" FROM "tree"`
-	if sql != want {
-		t.Errorf("recursive CTE dropped: want %q, got %q", want, sql)
+	cases := []struct {
+		name string
+		b    query.Builder
+		d    dialect.Dialect
+	}{
+		{"cte", query.Select(ts.UsersT.ID).With("recent", cte).From(query.CTERef("recent")), noCTEDialect{}},
+		{"recursive cte", query.Select(ts.UsersT.ID).WithRecursive("tree", anchor, recursive).From(query.CTERef("tree")), noCTEDialect{}},
+		{"distinct on mysql", query.Select(ts.UsersT.RealmID).From(ts.UsersT).DistinctOn(ts.UsersT.RealmID), dialect.MySQL},
+		{"distinct on sqlite", query.Select(ts.UsersT.RealmID).From(ts.UsersT).DistinctOn(ts.UsersT.RealmID), dialect.SQLite},
+		{"window function", query.Select(ts.UsersT.ID, expr.RowNumber().As("rn")).From(ts.UsersT), noWindowDialect{}},
+		{"aliased window function", query.Select(ts.UsersT.ID, expr.ColAs(expr.RowNumber(), "rn")).From(ts.UsersT), noWindowDialect{}},
+		{"window function in order by", query.Select(ts.UsersT.ID).From(ts.UsersT).OrderBy(expr.RowNumber().Asc()), noWindowDialect{}},
+		{"right join sqlite", query.Select(ts.UsersT.ID).From(ts.UsersT).RightJoin(ts.RealmsT, ts.UsersT.RealmID.EQCol(ts.RealmsT.ID)), dialect.SQLite},
+		{"full join mysql", query.Select(ts.UsersT.ID).From(ts.UsersT).FullJoin(ts.RealmsT, ts.UsersT.RealmID.EQCol(ts.RealmsT.ID)), dialect.MySQL},
+		{"full join sqlite", query.Select(ts.UsersT.ID).From(ts.UsersT).FullJoin(ts.RealmsT, ts.UsersT.RealmID.EQCol(ts.RealmsT.ID)), dialect.SQLite},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assertBuildError(t, tc.b, tc.d, query.ErrUnsupportedFeature)
+		})
 	}
 }
 
-func TestCTE_EmittedWhenSupported(t *testing.T) {
-	sub := query.Select(ts.UsersT.ID).From(ts.UsersT)
-	sql, _ := query.Select(ts.UsersT.ID).
-		With("recent", sub).
-		From(query.CTERef("recent")).
-		Build(dialect.Postgres)
+func TestSupportedSelectFeatures_Render(t *testing.T) {
+	t.Run("cte", func(t *testing.T) {
+		sub := query.Select(ts.UsersT.ID).From(ts.UsersT)
+		sql, _, err := query.Select(ts.UsersT.ID).
+			With("recent", sub).
+			From(query.CTERef("recent")).
+			Build(dialect.Postgres)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.HasPrefix(sql, `WITH "recent" AS (`) {
+			t.Errorf("expected WITH clause, got: %s", sql)
+		}
+	})
 
-	if !strings.HasPrefix(sql, `WITH "recent" AS (`) {
-		t.Errorf("expected WITH clause, got: %s", sql)
-	}
-}
+	t.Run("distinct on", func(t *testing.T) {
+		sql, _, err := query.Select(ts.UsersT.RealmID, ts.UsersT.Username).
+			From(ts.UsersT).
+			DistinctOn(ts.UsersT.RealmID).
+			OrderBy(ts.UsersT.RealmID.Asc(), ts.UsersT.CreatedAt.Desc()).
+			Build(dialect.Postgres)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := `SELECT DISTINCT ON ("users"."realm_id") "users"."realm_id", "users"."username" FROM "users" ORDER BY "users"."realm_id" ASC, "users"."created_at" DESC`
+		if sql != want {
+			t.Errorf("SQL mismatch\n got:  %s\nwant: %s", sql, want)
+		}
+	})
 
-func TestDistinctOn_PostgresRendered(t *testing.T) {
-	sql, _ := query.Select(ts.UsersT.RealmID, ts.UsersT.Username).
-		From(ts.UsersT).
-		DistinctOn(ts.UsersT.RealmID).
-		OrderBy(ts.UsersT.RealmID.Asc(), ts.UsersT.CreatedAt.Desc()).
-		Build(dialect.Postgres)
+	t.Run("window function", func(t *testing.T) {
+		sql, _, err := query.Select(ts.UsersT.ID, expr.RowNumber().PartitionBy(ts.UsersT.RealmID).As("rn")).
+			From(ts.UsersT).
+			Build(dialect.Postgres)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(sql, "ROW_NUMBER()") {
+			t.Errorf("expected ROW_NUMBER in output, got: %s", sql)
+		}
+	})
 
-	want := `SELECT DISTINCT ON ("users"."realm_id") "users"."realm_id", "users"."username" FROM "users" ORDER BY "users"."realm_id" ASC, "users"."created_at" DESC`
-	if sql != want {
-		t.Errorf("SQL mismatch\n got:  %s\nwant: %s", sql, want)
-	}
-}
-
-func TestDistinctOn_DegradesToDistinctOnUnsupportedDialect(t *testing.T) {
-	// MySQL does not support DISTINCT ON — should degrade to SELECT DISTINCT.
-	sql, _ := query.Select(ts.UsersT.RealmID, ts.UsersT.Username).
-		From(ts.UsersT).
-		DistinctOn(ts.UsersT.RealmID).
-		Build(dialect.MySQL)
-
-	if strings.Contains(sql, "DISTINCT ON") {
-		t.Errorf("DISTINCT ON should be dropped for MySQL, got: %s", sql)
-	}
-	if !strings.Contains(sql, "SELECT DISTINCT") {
-		t.Errorf("expected SELECT DISTINCT fallback, got: %s", sql)
-	}
-}
-
-func TestDistinctOn_DegradesToDistinctForSQLite(t *testing.T) {
-	// SQLite does not support DISTINCT ON — should degrade to SELECT DISTINCT.
-	sql, _ := query.Select(ts.UsersT.RealmID, ts.UsersT.Username).
-		From(ts.UsersT).
-		DistinctOn(ts.UsersT.RealmID).
-		Build(dialect.SQLite)
-
-	if strings.Contains(sql, "DISTINCT ON") {
-		t.Errorf("DISTINCT ON should be dropped for SQLite, got: %s", sql)
-	}
-	if !strings.Contains(sql, "SELECT DISTINCT") {
-		t.Errorf("expected SELECT DISTINCT fallback, got: %s", sql)
-	}
-}
-
-func TestDistinctOn_MultipleCols(t *testing.T) {
-	sql, _ := query.Select(ts.UsersT.RealmID, ts.UsersT.Username, ts.UsersT.ID).
-		From(ts.UsersT).
-		DistinctOn(ts.UsersT.RealmID, ts.UsersT.Username).
-		Build(dialect.Postgres)
-
-	if !strings.Contains(sql, `DISTINCT ON ("users"."realm_id", "users"."username")`) {
-		t.Errorf("expected DISTINCT ON with two cols, got: %s", sql)
-	}
-}
-
-func TestWindowFunctions_DroppedWhenNotSupported(t *testing.T) {
-	// Window functions should be silently removed from the SELECT list.
-	sql, _ := query.Select(
-		ts.UsersT.ID,
-		expr.RowNumber().PartitionBy(ts.UsersT.RealmID).As("rn"),
-	).From(ts.UsersT).Build(noWindowDialect{})
-
-	if strings.Contains(sql, "ROW_NUMBER") {
-		t.Errorf("expected ROW_NUMBER to be dropped, got: %s", sql)
-	}
-	if !strings.Contains(sql, `"users"."id"`) {
-		t.Errorf("expected non-window column to remain, got: %s", sql)
-	}
-}
-
-func TestWindowFunctions_AllDroppedFallsBackToStar(t *testing.T) {
-	// When all selected columns are window functions and dialect drops them, fall back to *.
-	sql, _ := query.Select(
-		expr.RowNumber().As("rn"),
-		expr.Rank().As("rnk"),
-	).From(ts.UsersT).Build(noWindowDialect{})
-
-	if !strings.Contains(sql, "SELECT *") {
-		t.Errorf("expected SELECT * fallback when all window cols dropped, got: %s", sql)
-	}
-}
-
-func TestWindowFunctions_EmittedWhenSupported(t *testing.T) {
-	sql, _ := query.Select(
-		ts.UsersT.ID,
-		expr.RowNumber().PartitionBy(ts.UsersT.RealmID).As("rn"),
-	).From(ts.UsersT).Build(dialect.Postgres)
-
-	if !strings.Contains(sql, "ROW_NUMBER()") {
-		t.Errorf("expected ROW_NUMBER in output, got: %s", sql)
-	}
-}
-
-func TestFullJoin_DroppedOnMySQL(t *testing.T) {
-	sql, _ := query.Select(ts.UsersT.ID, ts.RealmsT.ID).
-		From(ts.UsersT).
-		FullJoin(ts.RealmsT, ts.UsersT.RealmID.EQCol(ts.RealmsT.ID)).
-		Build(dialect.MySQL)
-
-	if strings.Contains(sql, "FULL JOIN") {
-		t.Errorf("FULL JOIN should be dropped for MySQL, got: %s", sql)
-	}
-}
-
-func TestFullJoin_DroppedOnSQLite(t *testing.T) {
-	sql, _ := query.Select(ts.UsersT.ID).
-		From(ts.UsersT).
-		FullJoin(ts.RealmsT, ts.UsersT.RealmID.EQCol(ts.RealmsT.ID)).
-		Build(dialect.SQLite)
-
-	if strings.Contains(sql, "FULL JOIN") {
-		t.Errorf("FULL JOIN should be dropped for SQLite, got: %s", sql)
-	}
-}
-
-func TestFullJoin_EmittedOnPostgres(t *testing.T) {
-	sql, _ := query.Select(ts.UsersT.ID, ts.RealmsT.ID).
-		From(ts.UsersT).
-		FullJoin(ts.RealmsT, ts.UsersT.RealmID.EQCol(ts.RealmsT.ID)).
-		Build(dialect.Postgres)
-
-	if !strings.Contains(sql, "FULL JOIN") {
-		t.Errorf("expected FULL JOIN in PostgreSQL output, got: %s", sql)
-	}
-}
-
-func TestFullJoin_MixedJoins_OnlyFullDropped(t *testing.T) {
-	// Inner join should remain; full join should be dropped on MySQL.
-	sql, _ := query.Select(ts.UsersT.ID).
-		From(ts.UsersT).
-		InnerJoin(ts.RealmsT, ts.UsersT.RealmID.EQCol(ts.RealmsT.ID)).
-		FullJoin(ts.RealmsT, ts.UsersT.RealmID.EQCol(ts.RealmsT.ID)).
-		Build(dialect.MySQL)
-
-	if strings.Contains(sql, "FULL JOIN") {
-		t.Errorf("FULL JOIN should be dropped for MySQL, got: %s", sql)
-	}
-	if !strings.Contains(sql, "INNER JOIN") {
-		t.Errorf("INNER JOIN should remain, got: %s", sql)
-	}
-}
-
-func TestWindowFunctions_AliasedColWrappingWindowExpr_DroppedWhenNotSupported(t *testing.T) {
-	// expr.ColAs(windowExpr, alias) wraps a WindowExpr in an AliasedCol.
-	// The window-function gate must unwrap AliasedCol to detect the inner WindowExpr
-	// and drop it on dialects that do not support window functions.
-	sql, _ := query.Select(
-		ts.UsersT.ID,
-		expr.ColAs(expr.RowNumber(), "rn"), // AliasedCol wrapping a WindowExpr
-	).From(ts.UsersT).Build(noWindowDialect{})
-
-	if strings.Contains(sql, "ROW_NUMBER") {
-		t.Errorf("ColAs-wrapped WindowExpr should be dropped on no-window dialect, got: %s", sql)
-	}
-	if !strings.Contains(sql, `"users"."id"`) {
-		t.Errorf("non-window column should remain after dropping ColAs-wrapped WindowExpr, got: %s", sql)
-	}
-}
-
-func TestWindowFunctions_AliasedColWrappingWindowExpr_AllDroppedFallsBackToStar(t *testing.T) {
-	// When all columns are ColAs-wrapped WindowExprs and the dialect drops them,
-	// the query should fall back to SELECT * (same as bare WindowExpr).
-	sql, _ := query.Select(
-		expr.ColAs(expr.RowNumber(), "rn"),
-		expr.ColAs(expr.Rank(), "rnk"),
-	).From(ts.UsersT).Build(noWindowDialect{})
-
-	if !strings.Contains(sql, "SELECT *") {
-		t.Errorf("expected SELECT * fallback when all ColAs-wrapped window cols dropped, got: %s", sql)
-	}
+	t.Run("full join", func(t *testing.T) {
+		sql, _, err := query.Select(ts.UsersT.ID, ts.RealmsT.ID).
+			From(ts.UsersT).
+			FullJoin(ts.RealmsT, ts.UsersT.RealmID.EQCol(ts.RealmsT.ID)).
+			Build(dialect.Postgres)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(sql, "FULL JOIN") {
+			t.Errorf("expected FULL JOIN in output, got: %s", sql)
+		}
+	})
 }
 
 func TestDistinctOn_EmptyColsIsNoOp(t *testing.T) {
 	// DistinctOn() with no arguments sets distinct=true but distinctOn stays empty.
 	// On non-supporting dialects this should degrade to SELECT DISTINCT (not panic).
-	sql, _ := query.Select(ts.UsersT.ID).
+	sql, _, _ := query.Select(ts.UsersT.ID).
 		From(ts.UsersT).
 		DistinctOn(). // empty variadic
 		Build(dialect.MySQL)

@@ -1,8 +1,8 @@
 # Querying
 
-::: warning Target query API
-This guide describes the RC.1-parity target query API. The current branch still has implementation gaps: `Build(dialect)` may return only `(sql, args)`, and any silent degradation of unsupported dialect features is non-conforming implementation debt until the error-returning build contract and fail-fast dialect gates are implemented.
-:::
+All query builders return `(sql, args, err)` from `Build(dialect)`. Callers must
+check `err` before using the SQL or arguments; failed builds return no executable
+SQL or argument slice.
 
 All query builders are in the `query` and `expr` packages. The target Go API may keep immutable/value-copy builders for aliasing safety, but receiver mutability is a Go implementation choice; the parity requirement is the rendered SQL behavior.
 
@@ -204,7 +204,7 @@ rows, err := d.Query(ctx, query.Select().From(db.UsersT))
 users, err := pgxdb.ScanAll[db.UserSelect](rows, err)
 ```
 
-`ScanAll`, `ScanOne`, and `ScanOneOpt` own and close non-nil, non-typed-nil row sets. They return build/query errors before scanning, preserve context cancellation/deadline sentinels, and return redacted stable cardinality errors for zero-or-many rows where the helper requires exactly one row.
+`ScanAll`, `ScanOne`, and `ScanOneOpt` accept the error returned by `Query` and return it before scanning. Consult each driver helper's API for its current row-closing and cardinality behavior.
 
 ## Prepared queries
 

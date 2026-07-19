@@ -9,16 +9,112 @@ package pgx
 
 import (
 	"context"
+	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/sofired/grizzle/dialect"
+	"github.com/sofired/grizzle/expr"
 	"github.com/sofired/grizzle/internal/testschema"
 	"github.com/sofired/grizzle/query"
 )
+
+func invalidSelectBuilder() *query.SelectBuilder {
+	return query.Select().Where(expr.RawArgs("x = $? AND y = $?", 1))
+}
+
+type typedNilBuilder struct{}
+
+func (*typedNilBuilder) Build(dialect.Dialect) (string, []any, error) {
+	panic("typed-nil builder must be rejected before Build")
+}
+
+func TestPreparedHelpers_PropagateBuildErrorsBeforeDatabaseUse(t *testing.T) {
+	ctx := context.Background()
+
+	if stmt, err := PrepareSelect[any](ctx, nil, "invalid", invalidSelectBuilder()); stmt != nil || !errors.Is(err, query.ErrBuildValidation) {
+		t.Fatalf("PrepareSelect = (%v, %v), want nil and ErrBuildValidation", stmt, err)
+	}
+	if stmt, err := PrepareExec(ctx, nil, "invalid", invalidSelectBuilder()); stmt != nil || !errors.Is(err, query.ErrBuildValidation) {
+		t.Fatalf("PrepareExec = (%v, %v), want nil and ErrBuildValidation", stmt, err)
+	}
+
+	reg := NewRegistry(nil)
+	if stmt, err := RegisterSelect[any](reg, "invalid", invalidSelectBuilder()); stmt != nil || !errors.Is(err, query.ErrBuildValidation) {
+		t.Fatalf("RegisterSelect = (%v, %v), want nil and ErrBuildValidation", stmt, err)
+	}
+	if stmt, err := RegisterExec(reg, "invalid", invalidSelectBuilder()); stmt != nil || !errors.Is(err, query.ErrBuildValidation) {
+		t.Fatalf("RegisterExec = (%v, %v), want nil and ErrBuildValidation", stmt, err)
+	}
+	if len(reg.entries) != 0 {
+		t.Fatalf("failed registrations mutated registry: %v", reg.entries)
+	}
+}
+
+func TestExecutionHelpers_PropagateBuildErrorsBeforePoolUse(t *testing.T) {
+	ctx := context.Background()
+	db := New(nil)
+	if rows, err := db.Query(ctx, invalidSelectBuilder()); rows != nil || !errors.Is(err, query.ErrBuildValidation) {
+		t.Fatalf("Query = (%v, %v), want nil and ErrBuildValidation", rows, err)
+	}
+	if affected, err := db.Exec(ctx, invalidSelectBuilder()); affected != 0 || !errors.Is(err, query.ErrBuildValidation) {
+		t.Fatalf("Exec = (%d, %v), want zero and ErrBuildValidation", affected, err)
+	}
+
+	tx := &Tx{}
+	if rows, err := tx.Query(ctx, invalidSelectBuilder()); rows != nil || !errors.Is(err, query.ErrBuildValidation) {
+		t.Fatalf("Tx.Query = (%v, %v), want nil and ErrBuildValidation", rows, err)
+	}
+	if affected, err := tx.Exec(ctx, invalidSelectBuilder()); affected != 0 || !errors.Is(err, query.ErrBuildValidation) {
+		t.Fatalf("Tx.Exec = (%d, %v), want zero and ErrBuildValidation", affected, err)
+	}
+}
+
+func TestExecutionHelpers_RejectTypedNilBuildersAndReceivers(t *testing.T) {
+	ctx := context.Background()
+	var b *typedNilBuilder
+	db := New(nil)
+	if rows, err := db.Query(ctx, b); rows != nil || !errors.Is(err, query.ErrBuildValidation) {
+		t.Fatalf("Query typed nil = (%v, %v), want nil and ErrBuildValidation", rows, err)
+	}
+	if affected, err := db.Exec(ctx, b); affected != 0 || !errors.Is(err, query.ErrBuildValidation) {
+		t.Fatalf("Exec typed nil = (%d, %v), want zero and ErrBuildValidation", affected, err)
+	}
+	if stmt, err := PrepareExec(ctx, nil, "typed_nil", b); stmt != nil || !errors.Is(err, query.ErrBuildValidation) {
+		t.Fatalf("PrepareExec typed nil = (%v, %v), want nil and ErrBuildValidation", stmt, err)
+	}
+	if stmt, err := RegisterExec(NewRegistry(nil), "typed_nil", b); stmt != nil || !errors.Is(err, query.ErrBuildValidation) {
+		t.Fatalf("RegisterExec typed nil = (%v, %v), want nil and ErrBuildValidation", stmt, err)
+	}
+
+	var nilDB *DB
+	if rows, err := nilDB.Query(ctx, query.Select()); rows != nil || !errors.Is(err, query.ErrInvalidReceiver) {
+		t.Fatalf("nil DB Query = (%v, %v), want nil and ErrInvalidReceiver", rows, err)
+	}
+	var nilTx *Tx
+	if affected, err := nilTx.Exec(ctx, query.Select()); affected != 0 || !errors.Is(err, query.ErrInvalidReceiver) {
+		t.Fatalf("nil Tx Exec = (%d, %v), want zero and ErrInvalidReceiver", affected, err)
+	}
+}
+
+func TestPreparedValidationErrorIsRedacted(t *testing.T) {
+	err := preparedValidationError("validate_prepared_statement", errors.New("secret statement and SQL"))
+	if !errors.Is(err, query.ErrPreparedNotReady) {
+		t.Fatalf("error = %v, want ErrPreparedNotReady", err)
+	}
+	if strings.Contains(err.Error(), "secret") || strings.Contains(err.Error(), "SQL") {
+		t.Fatalf("error leaked driver detail: %q", err)
+	}
+	canceled := preparedValidationError("validate_prepared_statement", context.Canceled)
+	if !errors.Is(canceled, query.ErrPreparedNotReady) || !errors.Is(canceled, context.Canceled) {
+		t.Fatalf("canceled error lost stable or context sentinel: %v", canceled)
+	}
+}
 
 // stubQuerier is a poolQuerier stub that records the SQL string and args
 // passed to Query and returns pgx.ErrNoRows. Tests verify both the SQL string
@@ -56,7 +152,7 @@ func TestPreparedSelect_QueryAllUsesSQLNotName(t *testing.T) {
 		From(testschema.UsersT).
 		Where(testschema.UsersT.RealmID.EQ(realmID))
 	reg := NewRegistry(nil)
-	stmt := RegisterSelect[testschema.UserSelect](reg, "active_users", b)
+	stmt, _ := RegisterSelect[testschema.UserSelect](reg, "active_users", b)
 
 	stub := &stubQuerier{}
 	// queryAllWith returns pgx.ErrNoRows from the stub — ignore the scan error.
@@ -81,7 +177,7 @@ func TestPreparedSelect_QueryOneUsesSQLNotName(t *testing.T) {
 		From(testschema.UsersT).
 		Where(testschema.UsersT.RealmID.EQ(realmID))
 	reg := NewRegistry(nil)
-	stmt := RegisterSelect[testschema.UserSelect](reg, "active_users", b)
+	stmt, _ := RegisterSelect[testschema.UserSelect](reg, "active_users", b)
 
 	stub := &stubQuerier{}
 	_, _ = stmt.queryOneWith(context.Background(), stub)
@@ -105,7 +201,7 @@ func TestPreparedSelect_QueryOptUsesSQLNotName(t *testing.T) {
 		From(testschema.UsersT).
 		Where(testschema.UsersT.RealmID.EQ(realmID))
 	reg := NewRegistry(nil)
-	stmt := RegisterSelect[testschema.UserSelect](reg, "active_users", b)
+	stmt, _ := RegisterSelect[testschema.UserSelect](reg, "active_users", b)
 
 	stub := &stubQuerier{}
 	_, _ = stmt.queryOptWith(context.Background(), stub)
@@ -131,7 +227,7 @@ func TestPreparedExec_ExecUsesSQLNotName(t *testing.T) {
 		Where(testschema.UsersT.RealmID.EQ(realmID))
 
 	reg := NewRegistry(nil)
-	stmt := RegisterExec(reg, "disable_users", b)
+	stmt, _ := RegisterExec(reg, "disable_users", b)
 
 	stub := &stubExecer{}
 	_, err := stmt.execWith(context.Background(), stub)
@@ -189,7 +285,7 @@ func TestPreparedExec_ExecTxUsesSQLNotName(t *testing.T) {
 		Where(testschema.UsersT.RealmID.EQ(realmID))
 
 	reg := NewRegistry(nil)
-	stmt := RegisterExec(reg, "disable_users", b)
+	stmt, _ := RegisterExec(reg, "disable_users", b)
 
 	fake := &fakePgxTx{}
 	tx := &Tx{tx: fake}

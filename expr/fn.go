@@ -14,7 +14,10 @@ func Col(col SelectableColumn) Expression { return colAsExpr{col: col} }
 
 type colAsExpr struct{ col SelectableColumn }
 
-func (e colAsExpr) ToSQL(ctx *BuildContext) string {
+func (e colAsExpr) RenderSQL(ctx *BuildContext) (string, error) {
+	if isNilInterface(e.col) {
+		return "", NewError(CodeBuildValidation, "render_column", "column is nil")
+	}
 	// Use internal colRef when available (preserves complex expressions like
 	// window functions, aggregates, arithmetic) — fall back to ColRef otherwise.
 	if cr, ok := e.col.(colRefer); ok {
@@ -31,14 +34,17 @@ func (e colAsExpr) ToSQL(ctx *BuildContext) string {
 // arguments (arithmetic right-hand sides, etc.).
 type litRefer struct{ v any }
 
-func (l litRefer) colRef(ctx *BuildContext) string { return ctx.Add(l.v) }
+func (l litRefer) colRef(ctx *BuildContext) (string, error) { return ctx.Add(l.v), nil }
 
 // colSelAsRef wraps a SelectableColumn as a colRefer — used internally so
 // column types can pass themselves to ArithExpr without needing to
 // expose the private colRefer interface.
 type colSelAsRef struct{ col SelectableColumn }
 
-func (c colSelAsRef) colRef(ctx *BuildContext) string {
+func (c colSelAsRef) colRef(ctx *BuildContext) (string, error) {
+	if isNilInterface(c.col) {
+		return "", NewError(CodeBuildValidation, "render_column", "column is nil")
+	}
 	if cr, ok := c.col.(colRefer); ok {
 		return cr.colRef(ctx)
 	}
@@ -62,25 +68,46 @@ type FuncExpr struct {
 }
 
 // renderCore renders the function call without the alias.
-func (f FuncExpr) renderCore(ctx *BuildContext) string {
-	parts := make([]string, len(f.args))
-	for i, a := range f.args {
-		parts[i] = a.ToSQL(ctx)
-	}
-	return f.fn + "(" + strings.Join(parts, ", ") + ")"
+func (f FuncExpr) renderCore(ctx *BuildContext) (string, error) {
+	return renderAtomically(ctx, func() (string, error) {
+		if f.fn == "" {
+			return "", NewError(CodeBuildValidation, "render_function", "function name is empty")
+		}
+		parts := make([]string, len(f.args))
+		for i, a := range f.args {
+			if isNilExpression(a) {
+				return "", NewError(CodeBuildValidation, "render_function", "function argument is nil")
+			}
+			part, err := a.RenderSQL(ctx)
+			if err != nil {
+				return "", err
+			}
+			parts[i] = part
+		}
+		return f.fn + "(" + strings.Join(parts, ", ") + ")", nil
+	})
 }
 
-// ToSQL implements Expression. Includes the AS alias when set (for SELECT).
-func (f FuncExpr) ToSQL(ctx *BuildContext) string {
-	s := f.renderCore(ctx)
-	if f.alias != "" {
-		s += " AS " + ctx.Quote(f.alias)
-	}
-	return s
+// RenderSQL implements Expression. Includes the AS alias when set (for SELECT).
+func (f FuncExpr) RenderSQL(ctx *BuildContext) (string, error) {
+	return renderAtomically(ctx, func() (string, error) {
+		s, err := f.renderCore(ctx)
+		if err != nil {
+			return "", err
+		}
+		if f.alias != "" {
+			alias, err := ctx.Quote(f.alias)
+			if err != nil {
+				return "", err
+			}
+			s += " AS " + alias
+		}
+		return s, nil
+	})
 }
 
 // colRef implements colRefer (no alias — for use inside other expressions).
-func (f FuncExpr) colRef(ctx *BuildContext) string { return f.renderCore(ctx) }
+func (f FuncExpr) colRef(ctx *BuildContext) (string, error) { return f.renderCore(ctx) }
 
 // ColumnName implements SelectableColumn.
 func (f FuncExpr) ColumnName() string {
@@ -143,21 +170,43 @@ type ArithExpr struct {
 }
 
 // renderCore renders the arithmetic expression without the alias.
-func (a ArithExpr) renderCore(ctx *BuildContext) string {
-	return "(" + a.left.colRef(ctx) + " " + a.op + " " + a.right.colRef(ctx) + ")"
+func (a ArithExpr) renderCore(ctx *BuildContext) (string, error) {
+	return renderAtomically(ctx, func() (string, error) {
+		if isNilInterface(a.left) || isNilInterface(a.right) {
+			return "", NewError(CodeBuildValidation, "render_arithmetic", "arithmetic operand is nil")
+		}
+		left, err := a.left.colRef(ctx)
+		if err != nil {
+			return "", err
+		}
+		right, err := a.right.colRef(ctx)
+		if err != nil {
+			return "", err
+		}
+		return "(" + left + " " + a.op + " " + right + ")", nil
+	})
 }
 
-// ToSQL implements Expression. Includes AS alias when set (for SELECT).
-func (a ArithExpr) ToSQL(ctx *BuildContext) string {
-	s := a.renderCore(ctx)
-	if a.alias != "" {
-		s += " AS " + ctx.Quote(a.alias)
-	}
-	return s
+// RenderSQL implements Expression. Includes AS alias when set (for SELECT).
+func (a ArithExpr) RenderSQL(ctx *BuildContext) (string, error) {
+	return renderAtomically(ctx, func() (string, error) {
+		s, err := a.renderCore(ctx)
+		if err != nil {
+			return "", err
+		}
+		if a.alias != "" {
+			alias, err := ctx.Quote(a.alias)
+			if err != nil {
+				return "", err
+			}
+			s += " AS " + alias
+		}
+		return s, nil
+	})
 }
 
 // colRef implements colRefer (no alias — for use inside other expressions).
-func (a ArithExpr) colRef(ctx *BuildContext) string { return a.renderCore(ctx) }
+func (a ArithExpr) colRef(ctx *BuildContext) (string, error) { return a.renderCore(ctx) }
 
 // ColumnName implements SelectableColumn.
 func (a ArithExpr) ColumnName() string { return a.alias }
@@ -292,7 +341,7 @@ func TsRankCd(col SelectableColumn, tsq Expression) FuncExpr {
 
 // AliasedCol wraps a SelectableColumn and adds a SELECT-list alias.
 // The AS clause is only emitted when the column appears in a SELECT list
-// (via ToSQL); colRef — used internally for ORDER BY and GROUP BY — emits
+// (via RenderSQL); colRef — used internally for ORDER BY and GROUP BY — emits
 // only the underlying column reference without the alias.
 //
 // Usage:
@@ -310,18 +359,30 @@ func ColAs(col SelectableColumn, alias string) AliasedCol {
 	return AliasedCol{col: col, alias: alias}
 }
 
-// ToSQL emits "col AS alias" — for SELECT list position.
-func (a AliasedCol) ToSQL(ctx *BuildContext) string {
-	ref := a.colRef(ctx)
-	if a.alias != "" {
-		return ref + " AS " + ctx.Quote(a.alias)
-	}
-	return ref
+// RenderSQL emits "col AS alias" — for SELECT list position.
+func (a AliasedCol) RenderSQL(ctx *BuildContext) (string, error) {
+	return renderAtomically(ctx, func() (string, error) {
+		ref, err := a.colRef(ctx)
+		if err != nil {
+			return "", err
+		}
+		if a.alias != "" {
+			alias, err := ctx.Quote(a.alias)
+			if err != nil {
+				return "", err
+			}
+			return ref + " AS " + alias, nil
+		}
+		return ref, nil
+	})
 }
 
 // colRef emits only the underlying column reference — no alias.
 // Used in ORDER BY, GROUP BY, and any other non-SELECT position.
-func (a AliasedCol) colRef(ctx *BuildContext) string {
+func (a AliasedCol) colRef(ctx *BuildContext) (string, error) {
+	if isNilInterface(a.col) {
+		return "", NewError(CodeBuildValidation, "render_column", "aliased column is nil")
+	}
 	if cr, ok := a.col.(colRefer); ok {
 		return cr.colRef(ctx)
 	}

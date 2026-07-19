@@ -23,8 +23,8 @@ Grizzle has three layers:
 | Layer | Package | What it does |
 |---|---|---|
 | Schema DSL | `schema/pg` | Declare tables and columns in Go |
-| Query builders | `query`, `expr` | Build type-safe SQL. Target API: `Build(dialect)` returns `(string, []any, error)`; current branch may still expose the older two-return shape. |
-| Driver adapter | `driver/pgx` | Target behavior: execute builders against a `pgxpool.Pool` and surface build errors before execution after the error-returning `Build` contract lands |
+| Query builders | `query`, `expr` | Build type-safe SQL. `Build(dialect)` returns `(string, []any, error)`. |
+| Driver adapter | `driver/pgx` | Execute builders against a `pgxpool.Pool` and surface build errors before execution. |
 
 Code generation bridges the first two layers: `grizzle gen` reads your `schema/pg` declarations and emits typed table handles (`UsersT`, `RealmsT`, …) that the query builders consume.
 
