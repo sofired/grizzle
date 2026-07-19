@@ -1,6 +1,7 @@
 package expr_test
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -41,6 +42,26 @@ func TestLeadWithDefault_DefaultBoundAsParam(t *testing.T) {
 	// Both should be referenced as placeholders in the SQL.
 	if !strings.Contains(sql, "$1") || !strings.Contains(sql, "$2") {
 		t.Errorf("expected $1 and $2 placeholders in SQL, got: %s", sql)
+	}
+}
+
+func TestLeadWithDefault_NumericDefaultBoundAsParams(t *testing.T) {
+	ctx := expr.NewBuildContext(dialect.Postgres)
+	w := expr.LeadWithDefault(testScoreCol, 1, 0).OrderBy(testScoreCol.Asc())
+	sql := w.ToSQL(ctx)
+
+	wantSQL := `LEAD("users"."score", $1, $2) OVER (ORDER BY "users"."score" ASC)`
+	if sql != wantSQL {
+		t.Errorf("ToSQL() = %q, want %q", sql, wantSQL)
+	}
+	if placeholderCount := strings.Count(sql, "$"); placeholderCount != 2 {
+		t.Errorf("placeholder count = %d, want 2 in SQL %q", placeholderCount, sql)
+	}
+
+	args := ctx.Args()
+	wantArgs := []any{1, 0}
+	if !reflect.DeepEqual(args, wantArgs) {
+		t.Errorf("Args() = %#v, want %#v", args, wantArgs)
 	}
 }
 
