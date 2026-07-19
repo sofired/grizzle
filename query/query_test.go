@@ -428,6 +428,16 @@ func TestUpsert_OnConflictConstraint(t *testing.T) {
 	)
 }
 
+func TestUpsert_OnConflictConstraint_SQLite_ReturnsUnsupportedFeature(t *testing.T) {
+	name := "test-realm"
+	row := ts.RealmInsert{Name: name}
+	q := query.InsertInto(ts.RealmsT).
+		Values(row).
+		OnConflictConstraint("realms_name_idx").
+		DoNothing()
+	assertBuildError(t, q, dialect.SQLite, query.ErrUnsupportedFeature)
+}
+
 func TestUpsert_MultiColConflictTarget(t *testing.T) {
 	realmID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 	username := "alice"
@@ -1757,9 +1767,34 @@ func TestSelect_ForShare_Postgres(t *testing.T) {
 
 func TestSelect_ForShare_MySQL(t *testing.T) {
 	q := query.Select().From(ts.UsersT).ForShare()
-	got, _, _ := q.Build(dialect.MySQL)
-	if !strings.Contains(got, "LOCK IN SHARE MODE") {
-		t.Errorf("expected LOCK IN SHARE MODE in: %s", got)
+	got, _, err := q.Build(dialect.MySQL)
+	if err != nil {
+		t.Fatalf("Build() error: %v", err)
+	}
+	want := "SELECT * FROM `users` FOR SHARE"
+	if got != want {
+		t.Errorf("got:  %s\nwant: %s", got, want)
+	}
+}
+
+func TestSelect_ForShareOptions_MySQL(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		opt  query.LockOption
+		want string
+	}{
+		{name: "nowait", opt: query.NoWait, want: "SELECT * FROM `users` FOR SHARE NOWAIT"},
+		{name: "skip locked", opt: query.SkipLocked, want: "SELECT * FROM `users` FOR SHARE SKIP LOCKED"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, _, err := query.Select().From(ts.UsersT).For(query.LockForShare, tc.opt).Build(dialect.MySQL)
+			if err != nil {
+				t.Fatalf("Build() error: %v", err)
+			}
+			if got != tc.want {
+				t.Errorf("got:  %s\nwant: %s", got, tc.want)
+			}
+		})
 	}
 }
 
@@ -2637,20 +2672,21 @@ func (noCTEDialect) SupportsReturning() bool    { return false }
 func (noCTEDialect) UpsertStyle() dialect.UpsertStyle {
 	return dialect.UpsertOnConflict
 }
-func (noCTEDialect) InsertIgnoreClause() string    { return "" }
-func (noCTEDialect) SupportsIgnoreConflicts() bool { return false }
-func (noCTEDialect) SupportsCTE() bool             { return false }
-func (noCTEDialect) SupportsWindowFunctions() bool { return true }
-func (noCTEDialect) SupportsDistinctOn() bool      { return false }
-func (noCTEDialect) SupportsForUpdate() bool       { return false }
-func (noCTEDialect) SupportsForNoKeyUpdate() bool  { return false }
-func (noCTEDialect) SupportsForShareOf() bool      { return false }
-func (noCTEDialect) SupportsFullJoin() bool        { return false }
-func (noCTEDialect) SupportsRightJoin() bool       { return false }
-func (noCTEDialect) ForShareClause() string        { return "" }
-func (noCTEDialect) SupportsRegexpMatch() bool     { return false }
-func (noCTEDialect) SupportsFullTextSearch() bool  { return false }
-func (noCTEDialect) SupportsLimitOnMutate() bool   { return false }
+func (noCTEDialect) SupportsOnConflictConstraint() bool { return false }
+func (noCTEDialect) InsertIgnoreClause() string         { return "" }
+func (noCTEDialect) SupportsIgnoreConflicts() bool      { return false }
+func (noCTEDialect) SupportsCTE() bool                  { return false }
+func (noCTEDialect) SupportsWindowFunctions() bool      { return true }
+func (noCTEDialect) SupportsDistinctOn() bool           { return false }
+func (noCTEDialect) SupportsForUpdate() bool            { return false }
+func (noCTEDialect) SupportsForNoKeyUpdate() bool       { return false }
+func (noCTEDialect) SupportsForShareOf() bool           { return false }
+func (noCTEDialect) SupportsFullJoin() bool             { return false }
+func (noCTEDialect) SupportsRightJoin() bool            { return false }
+func (noCTEDialect) ForShareClause() string             { return "" }
+func (noCTEDialect) SupportsRegexpMatch() bool          { return false }
+func (noCTEDialect) SupportsFullTextSearch() bool       { return false }
+func (noCTEDialect) SupportsLimitOnMutate() bool        { return false }
 
 // noWindowDialect is a test-only dialect that reports SupportsWindowFunctions() = false.
 type noWindowDialect struct{ noCTEDialect }

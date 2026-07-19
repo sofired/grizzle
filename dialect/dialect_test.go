@@ -25,6 +25,7 @@ func TestDialectFeatureMatrix(t *testing.T) {
 		supportsRegexpMatch    bool
 		supportsFullTextSearch bool
 		supportsIgnoreConflict bool
+		supportsConstraint     bool
 	}
 
 	cases := []row{
@@ -44,6 +45,7 @@ func TestDialectFeatureMatrix(t *testing.T) {
 			supportsRegexpMatch:    true,
 			supportsFullTextSearch: true,
 			supportsIgnoreConflict: true,
+			supportsConstraint:     true,
 		},
 		{
 			name:                   "mysql",
@@ -57,10 +59,11 @@ func TestDialectFeatureMatrix(t *testing.T) {
 			supportsRightJoin:      true,
 			supportsForShareOf:     false,
 			supportsLimitOnMutate:  true,
-			forShareClause:         "LOCK IN SHARE MODE",
+			forShareClause:         "FOR SHARE",
 			supportsRegexpMatch:    false,
 			supportsFullTextSearch: false,
 			supportsIgnoreConflict: true,
+			supportsConstraint:     false,
 		},
 		{
 			name:                   "sqlite",
@@ -78,6 +81,7 @@ func TestDialectFeatureMatrix(t *testing.T) {
 			supportsRegexpMatch:    false,
 			supportsFullTextSearch: false,
 			supportsIgnoreConflict: true,
+			supportsConstraint:     false,
 		},
 	}
 
@@ -108,6 +112,7 @@ func TestDialectFeatureMatrix(t *testing.T) {
 			checkBool("SupportsRegexpMatch", c.d.SupportsRegexpMatch(), c.supportsRegexpMatch)
 			checkBool("SupportsFullTextSearch", c.d.SupportsFullTextSearch(), c.supportsFullTextSearch)
 			checkBool("SupportsIgnoreConflicts", c.d.SupportsIgnoreConflicts(), c.supportsIgnoreConflict)
+			checkBool("SupportsOnConflictConstraint", c.d.SupportsOnConflictConstraint(), c.supportsConstraint)
 		})
 	}
 }

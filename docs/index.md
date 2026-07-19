@@ -24,7 +24,7 @@ features:
 
   - icon: 🗄️
     title: Multi-dialect
-    details: Dialect-aware builders target PostgreSQL, MySQL/MariaDB, and SQLite. Shared SQL stays portable; dialect-specific mutation APIs handle differences like MySQL duplicate-key updates.
+    details: Dialect-aware builders target PostgreSQL, MySQL 8.0+, and SQLite. Shared SQL stays portable; dialect-specific mutation APIs handle differences like MySQL duplicate-key updates.
 
   - icon: 🔧
     title: Migration kit

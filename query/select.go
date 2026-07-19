@@ -135,8 +135,8 @@ func (b *SelectBuilder) ForUpdate() *SelectBuilder {
 	return b.For(LockForUpdate)
 }
 
-// ForShare appends FOR SHARE (PostgreSQL) / LOCK IN SHARE MODE (MySQL) to
-// the query, locking rows for read while allowing other readers.
+// ForShare appends FOR SHARE to the query, locking rows for read while allowing
+// other readers.
 // PostgreSQL and MySQL only; unsupported dialects cause Build to return
 // ErrUnsupportedFeature.
 //
@@ -703,8 +703,8 @@ func (b *SelectBuilder) buildWith(ctx *expr.BuildContext) (string, error) {
 		case LockForShare:
 			sb.WriteString(" " + ctx.Dialect().ForShareClause())
 			// OF table list: only emitted when the dialect declares support for it
-			// (e.g. PostgreSQL FOR SHARE). MySQL's LOCK IN SHARE MODE does not
-			// accept an OF clause, so SupportsForShareOf() returns false there.
+			// (e.g. PostgreSQL FOR SHARE). Grizzle does not expose this option for
+			// MySQL, so SupportsForShareOf() returns false there.
 			if len(b.lockOf) > 0 && !ctx.Dialect().SupportsForShareOf() {
 				return "", NewError(CodeUnsupportedFeature, "build_select", "row-lock table lists are not supported by this dialect")
 			}

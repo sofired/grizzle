@@ -7,7 +7,7 @@ Grizzle's dialect system is the Go equivalent of [Drizzle's multi-dialect suppor
 | Dialect | Drizzle package | Grizzle package | Status |
 |---|---|---|---|
 | PostgreSQL | `drizzle-orm/pg-core` | `schema/pg`, `dialect.Postgres` | PARITY target with listed gaps; required initial scope |
-| MySQL / MariaDB | `drizzle-orm/mysql-core` | `schema/mysql`, `dialect.MySQL` | DEVIATION:GAP (designed) for remaining column type gaps; see [schema.md](./schema.md) |
+| MySQL 8.0+ | `drizzle-orm/mysql-core` | `schema/mysql`, `dialect.MySQL` | DEVIATION:GAP (designed) for remaining column type gaps; see [schema.md](./schema.md) |
 | SQLite | `drizzle-orm/sqlite-core` | `schema/sqlite`, `dialect.SQLite` | DEVIATION:GAP (designed) for remaining column type gaps; see [schema.md](./schema.md) |
 | CockroachDB | `drizzle-orm/cockroach-core` | Use `dialect.Postgres` where compatible only after dedicated validation | DEVIATION:GAP (not designed); file-migration support is out of initial scope |
 | Neon, Supabase | Use `pg-core` | Use `dialect.Postgres` where driver-compatible | DEVIATION:GAP (not designed); file-migration support depends on driver capability |
@@ -60,6 +60,7 @@ type Dialect interface {
     Name() string
     SupportsReturning() bool
     UpsertStyle() UpsertStyle
+    SupportsOnConflictConstraint() bool   // PostgreSQL ON CONFLICT ON CONSTRAINT only
     MySQLInsertIgnoreKeyword() string
     SQLiteOnConflictDoNothingClause() string
     SupportsCTE() bool

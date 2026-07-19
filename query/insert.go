@@ -129,6 +129,8 @@ func (b *InsertBuilder) OnConflict(cols ...string) *InsertBuilder {
 }
 
 // OnConflictConstraint sets the conflict target to a named constraint.
+// Dialects without ON CONFLICT ON CONSTRAINT support cause Build to return
+// ErrUnsupportedFeature.
 //
 //	query.InsertInto(UsersT).Values(row).
 //	    OnConflictConstraint("users_realm_username_idx").DoNothing()
@@ -247,6 +249,9 @@ func (b *InsertBuilder) Build(d dialect.Dialect) (string, []any, error) {
 	}
 	if b.ignoreConflict && b.upsert != nil {
 		return buildFailure("build_insert", NewError(CodeBuildValidation, "build_insert", "ignore conflicts cannot be combined with an upsert clause"))
+	}
+	if b.upsert != nil && b.upsert.conflictConstraint != "" && !d.SupportsOnConflictConstraint() {
+		return buildFailure("build_insert", NewError(CodeUnsupportedFeature, "build_insert", "named constraint conflict targets are not supported by this dialect"))
 	}
 	var sb strings.Builder
 

@@ -41,6 +41,11 @@ type Dialect interface {
 	// UpsertStyle returns the dialect's INSERT conflict-resolution style.
 	UpsertStyle() UpsertStyle
 
+	// SupportsOnConflictConstraint reports whether ON CONFLICT may target a
+	// named constraint with ON CONSTRAINT. PostgreSQL supports this extension;
+	// MySQL and SQLite do not.
+	SupportsOnConflictConstraint() bool
+
 	// InsertIgnoreClause returns the SQL keyword phrase that replaces "INSERT"
 	// for an ignore-on-conflict insert, e.g. "INSERT IGNORE" (MySQL) or
 	// "INSERT OR IGNORE" (SQLite). Returns "" for dialects that have no native
@@ -77,10 +82,9 @@ type Dialect interface {
 	// True for PostgreSQL and MySQL; false for SQLite, which uses file-level
 	// locking only.
 	//
-	// Note: the shared-lock syntax differs by dialect — PostgreSQL uses FOR SHARE
-	// while MySQL uses LOCK IN SHARE MODE (see ForShareClause). The query builder
-	// gates all row-level locking clauses on this flag; when false, requested
-	// locking returns an unsupported_feature build error.
+	// PostgreSQL and MySQL 8.0+ use FOR SHARE for shared row locks. The query
+	// builder gates all row-level locking clauses on this flag; when false,
+	// requested locking returns an unsupported_feature build error.
 	SupportsForUpdate() bool
 
 	// SupportsForNoKeyUpdate reports whether the dialect supports the
@@ -107,15 +111,15 @@ type Dialect interface {
 	SupportsRightJoin() bool
 
 	// ForShareClause returns the SQL keyword phrase for a shared row lock.
-	// PostgreSQL: "FOR SHARE". MySQL: "LOCK IN SHARE MODE".
+	// PostgreSQL and MySQL 8.0+: "FOR SHARE".
 	// Returns "" for dialects that do not support row-level locking (e.g. SQLite).
 	// A non-empty value is only returned when SupportsForUpdate() is true.
 	ForShareClause() string
 
 	// SupportsForShareOf reports whether the dialect supports an OF table list
-	// on the shared-lock clause (FOR SHARE … OF / LOCK IN SHARE MODE … OF).
-	// True for PostgreSQL (FOR SHARE OF …); false for MySQL (LOCK IN SHARE MODE
-	// does not accept an OF clause) and SQLite (no row-level locking at all).
+	// on the shared-lock clause (FOR SHARE … OF). True for PostgreSQL; false for
+	// MySQL (Grizzle does not expose MySQL's table-list lock option) and SQLite
+	// (no row-level locking at all).
 	SupportsForShareOf() bool
 
 	// SupportsRegexpMatch reports whether the dialect supports PostgreSQL-style
@@ -175,6 +179,8 @@ func (postgresDialect) SupportsRegexpMatch() bool     { return true }
 func (postgresDialect) SupportsFullTextSearch() bool  { return true }
 func (postgresDialect) SupportsLimitOnMutate() bool   { return false }
 
+func (postgresDialect) SupportsOnConflictConstraint() bool { return true }
+
 func (postgresDialect) Placeholder(n int) string {
 	return fmt.Sprintf("$%d", n)
 }
@@ -185,10 +191,10 @@ func (postgresDialect) QuoteIdent(name string) string {
 }
 
 // -------------------------------------------------------------------
-// MySQL / MariaDB
+// MySQL 8.0+
 // -------------------------------------------------------------------
 
-// MySQLDialect generates MySQL-compatible SQL.
+// MySQLDialect generates MySQL 8.0+-compatible SQL.
 var MySQL Dialect = mysqlDialect{}
 
 type mysqlDialect struct{}
@@ -205,11 +211,13 @@ func (mysqlDialect) SupportsForUpdate() bool       { return true }
 func (mysqlDialect) SupportsForNoKeyUpdate() bool  { return false }
 func (mysqlDialect) SupportsFullJoin() bool        { return false }
 func (mysqlDialect) SupportsRightJoin() bool       { return true }
-func (mysqlDialect) ForShareClause() string        { return "LOCK IN SHARE MODE" }
+func (mysqlDialect) ForShareClause() string        { return "FOR SHARE" }
 func (mysqlDialect) SupportsForShareOf() bool      { return false }
 func (mysqlDialect) SupportsRegexpMatch() bool     { return false }
 func (mysqlDialect) SupportsFullTextSearch() bool  { return false }
 func (mysqlDialect) SupportsLimitOnMutate() bool   { return true }
+
+func (mysqlDialect) SupportsOnConflictConstraint() bool { return false }
 
 func (mysqlDialect) Placeholder(_ int) string { return "?" }
 
@@ -243,6 +251,8 @@ func (sqliteDialect) SupportsForShareOf() bool      { return false }
 func (sqliteDialect) SupportsRegexpMatch() bool     { return false }
 func (sqliteDialect) SupportsFullTextSearch() bool  { return false }
 func (sqliteDialect) SupportsLimitOnMutate() bool   { return true }
+
+func (sqliteDialect) SupportsOnConflictConstraint() bool { return false }
 
 func (sqliteDialect) Placeholder(_ int) string { return "?" }
 
