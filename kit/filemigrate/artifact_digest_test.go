@@ -5,16 +5,21 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"io"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/sofired/grizzle/kit/filemigrate"
 )
 
-// Spec references for ArtifactDigest.CombinedSHA256:
+// Artifact digest specification and canonical vectors:
 //
-//   - docs/spec/file-migrations-api.md:363-373
-//   - docs/spec/file-migrations-artifacts.md:528-536
+//   - docs/spec/file-migrations-api.md
+//   - docs/spec/file-migrations-artifacts.md
+//   - testdata/artifact_digest_vectors.json
 //
 // The formula is:
 //
@@ -27,107 +32,95 @@ import (
 // The tests in this file pin that exact byte layout. Two independent layers of
 // conformance are exercised:
 //
-//  1. Golden hex vectors — pre-computed offline with a different language/runtime
-//     (Python's hashlib). These catch any change to the formula, including
+//  1. Canonical golden hex vectors — shared with and independently checked by
+//     Python's hashlib. These catch any change to the formula, including
 //     endianness flips, separator swaps, payload reordering, or label edits.
 //  2. Byte-assembly — re-derive the byte stream inside the test using stdlib
 //     primitives that do not share code with the implementation, then hash it
 //     and compare. This catches behavioral drift even if the goldens get
 //     updated without independent recomputation.
 
-// combinedGoldenVector is one (sql, snap, expected combined hex) triple
-// pre-computed independently of the production implementation.
-type combinedGoldenVector struct {
-	name    string
-	sql     []byte
-	snap    []byte
-	wantHex string
+// artifactDigestVectorFixture is the published, shared vector contract used
+// by both these tests and the independent Python checker.
+type artifactDigestVectorFixture struct {
+	Format  string                 `json:"format"`
+	Vectors []artifactDigestVector `json:"vectors"`
 }
 
-const (
-	normalizationSensitiveSQL  = "-- café\r\nSELECT '雪';\r\n"
-	normalizationSensitiveSnap = "{\r\n  \"note\": \"naïve 東京\"\r\n}\r\n"
-)
-
-// goldenCombinedVectors are independently computed by a Python reference
-// implementation in testdata/digest_reference.py. Run that script to
-// regenerate goldens after any deliberate, spec-amending change to the
-// digest formula; do NOT regenerate them from the Go production code, since
-// the cross-implementation match is what pins the wire format here.
-//
-// The script (and the inline formula it documents) is:
-//
-//	h = hashlib.sha256()
-//	h.update(b'grizzle-artifact-v1'); h.update(b'\x00')
-//	h.update(b'migration.sql');       h.update(b'\x00')
-//	h.update(struct.pack('>Q', len(sql))); h.update(sql)
-//	h.update(b'snapshot.json');       h.update(b'\x00')
-//	h.update(struct.pack('>Q', len(snap))); h.update(snap)
-//	h.hexdigest()
-//
-// Any change to the spec byte layout (separator byte, domain string, label
-// strings, label order, endianness, length-prefix width, or omission of any
-// component) should make at least one vector below fail loudly.
-var goldenCombinedVectors = []combinedGoldenVector{
-	{
-		name:    "both_empty",
-		sql:     []byte(""),
-		snap:    []byte(""),
-		wantHex: "a3c7cae6b5098053bcd8fec18a37d4e257278db8c4fd851dcc9d0c86cc707852",
-	},
-	{
-		name:    "small_ascii",
-		sql:     []byte("CREATE TABLE t (id INT);"),
-		snap:    []byte(`{"version":"1"}`),
-		wantHex: "0cafd83a585887b16d54263041c29c3309bd35a85068ad21a420d988a40ac95d",
-	},
-	{
-		// Valid UTF-8 SQL and JSON with a SQL comment, CRLF line endings,
-		// and trailing newlines. The golden pins those exact raw bytes so
-		// hashing cannot silently normalize text-shaped artifact content.
-		name:    "utf8_comments_crlf_trailing_newlines",
-		sql:     []byte(normalizationSensitiveSQL),
-		snap:    []byte(normalizationSensitiveSnap),
-		wantHex: "6726bbd011c3b92f787fca83aed435200df6f92552dda4f3e075e9b06fb8b26d",
-	},
-	{
-		name:    "empty_sql_with_snap",
-		sql:     []byte(""),
-		snap:    []byte("{}"),
-		wantHex: "ebd7e42d73531a9252aac54d14e4961e2ae205a0c24e73585eba36a4334fcf02",
-	},
-	{
-		name:    "empty_snap_with_sql",
-		sql:     []byte("SELECT 1;"),
-		snap:    []byte(""),
-		wantHex: "aadbc247869c70cfb56f3d7c942340cb409fe113714eac88035c7c8d66f459e6",
-	},
-	{
-		// 256-byte sequence covering every byte value, paired with a snapshot
-		// containing 0x00 and 0xFF runs. Any single-byte misencoding in the
-		// content path (e.g. mis-stripping 0x00 inside payload, treating the
-		// payload as a C string) would flip this digest.
-		name:    "full_byte_range_with_zeros_and_high_bytes",
-		sql:     fullByteRange(),
-		snap:    append(bytes.Repeat([]byte{0xff}, 100), bytes.Repeat([]byte{0x00}, 50)...),
-		wantHex: "65c1350c4e33e8986cda857b9b0bfab3643ca88694873b7de47558663dbc4d92",
-	},
-	{
-		// 1 KiB of zero bytes for both payloads exercises embedded NUL bytes
-		// together with a multi-byte big-endian length.
-		name:    "zeros_1024_each",
-		sql:     bytes.Repeat([]byte{0x00}, 1024),
-		snap:    bytes.Repeat([]byte{0x00}, 1024),
-		wantHex: "aa9060b3befac5d93f98d046517e93bebcf336c1471ae8851ff37f6042f2947b",
-	},
+type artifactDigestVector struct {
+	Name               string `json:"name"`
+	MigrationSQLHex    string `json:"migration_sql_hex"`
+	SnapshotJSONHex    string `json:"snapshot_json_hex"`
+	MigrationSQLSHA256 string `json:"migration_sql_sha256"`
+	SnapshotJSONSHA256 string `json:"snapshot_json_sha256"`
+	CombinedSHA256     string `json:"combined_sha256"`
+	migrationSQL       []byte
+	snapshotJSON       []byte
 }
 
-func fullByteRange() []byte {
-	out := make([]byte, 256)
-	for i := range out {
-		out[i] = byte(i)
+func loadArtifactDigestVectors(t *testing.T) []artifactDigestVector {
+	t.Helper()
+
+	data, err := os.ReadFile("testdata/artifact_digest_vectors.json")
+	if err != nil {
+		t.Fatalf("read canonical artifact digest vectors: %v", err)
 	}
-	return out
+
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	var fixture artifactDigestVectorFixture
+	if err := decoder.Decode(&fixture); err != nil {
+		t.Fatalf("decode canonical artifact digest vectors: %v", err)
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		t.Fatalf("canonical artifact digest vectors contain trailing JSON: %v", err)
+	}
+	if fixture.Format != "grizzle-artifact-digest-vectors-v1" {
+		t.Fatalf("fixture format = %q, want %q", fixture.Format, "grizzle-artifact-digest-vectors-v1")
+	}
+	if len(fixture.Vectors) == 0 {
+		t.Fatal("canonical artifact digest fixture has no vectors")
+	}
+
+	seenNames := make(map[string]struct{}, len(fixture.Vectors))
+	for i := range fixture.Vectors {
+		vector := &fixture.Vectors[i]
+		if vector.Name == "" {
+			t.Fatalf("vectors[%d].name must not be empty", i)
+		}
+		if _, duplicate := seenNames[vector.Name]; duplicate {
+			t.Fatalf("duplicate vector name %q", vector.Name)
+		}
+		seenNames[vector.Name] = struct{}{}
+
+		vector.migrationSQL = decodeArtifactVectorHex(t, vector.Name+".migration_sql_hex", vector.MigrationSQLHex)
+		vector.snapshotJSON = decodeArtifactVectorHex(t, vector.Name+".snapshot_json_hex", vector.SnapshotJSONHex)
+		validateArtifactVectorDigest(t, vector.Name+".migration_sql_sha256", vector.MigrationSQLSHA256)
+		validateArtifactVectorDigest(t, vector.Name+".snapshot_json_sha256", vector.SnapshotJSONSHA256)
+		validateArtifactVectorDigest(t, vector.Name+".combined_sha256", vector.CombinedSHA256)
+	}
+	return fixture.Vectors
+}
+
+func decodeArtifactVectorHex(t *testing.T, field, value string) []byte {
+	t.Helper()
+	if value != strings.ToLower(value) {
+		t.Fatalf("%s must use lowercase hexadecimal", field)
+	}
+	decoded, err := hex.DecodeString(value)
+	if err != nil {
+		t.Fatalf("decode %s: %v", field, err)
+	}
+	return decoded
+}
+
+func validateArtifactVectorDigest(t *testing.T, field, value string) {
+	t.Helper()
+	decoded := decodeArtifactVectorHex(t, field, value)
+	if len(decoded) != sha256.Size {
+		t.Fatalf("%s decoded length = %d, want %d", field, len(decoded), sha256.Size)
+	}
 }
 
 // TestArtifactDigest_CombinedGoldenVectors locks the exact CombinedSHA256
@@ -136,18 +129,19 @@ func fullByteRange() []byte {
 // digest formula and stop the build — published artifact digests must remain
 // stable across releases.
 func TestArtifactDigest_CombinedGoldenVectors(t *testing.T) {
+	vectors := loadArtifactDigestVectors(t)
 	store := filemigrate.NewMemArtifactStore()
 	root := mustResolveRoot(t, store, "/m", filemigrate.RootEnsureForWrite)
 
-	for i, v := range goldenCombinedVectors {
-		t.Run(v.name, func(t *testing.T) {
+	for i, vector := range vectors {
+		t.Run(vector.Name, func(t *testing.T) {
 			// Use a unique directory name per vector since CreateArtifact is
 			// the only public surface that exposes the populated digest.
 			name := makeTestArtifactName(i)
-			loaded := mustCreateArtifact(t, store, root, name, v.sql, v.snap)
+			loaded := mustCreateArtifact(t, store, root, name, vector.migrationSQL, vector.snapshotJSON)
 			gotHex := hex.EncodeToString(loaded.Digests.CombinedSHA256[:])
-			if gotHex != v.wantHex {
-				t.Errorf("CombinedSHA256 mismatch\n  got:  %s\n  want: %s", gotHex, v.wantHex)
+			if gotHex != vector.CombinedSHA256 {
+				t.Errorf("CombinedSHA256 mismatch\n  got:  %s\n  want: %s", gotHex, vector.CombinedSHA256)
 			}
 		})
 	}
@@ -159,29 +153,30 @@ func TestArtifactDigest_CombinedGoldenVectors(t *testing.T) {
 // the golden hex vectors: if the goldens drift, byte-assembly still pins the
 // algorithm; if the assembly drifts, the goldens still pin the digests.
 func TestArtifactDigest_CombinedByteAssembly(t *testing.T) {
+	vectors := loadArtifactDigestVectors(t)
 	store := filemigrate.NewMemArtifactStore()
 	root := mustResolveRoot(t, store, "/m", filemigrate.RootEnsureForWrite)
 
-	for i, v := range goldenCombinedVectors {
-		t.Run(v.name, func(t *testing.T) {
+	for i, vector := range vectors {
+		t.Run(vector.Name, func(t *testing.T) {
 			var buf bytes.Buffer
 			buf.WriteString("grizzle-artifact-v1")
 			buf.WriteByte(0x00)
 			buf.WriteString("migration.sql")
 			buf.WriteByte(0x00)
 			var lenBuf [8]byte
-			binary.BigEndian.PutUint64(lenBuf[:], uint64(len(v.sql)))
+			binary.BigEndian.PutUint64(lenBuf[:], uint64(len(vector.migrationSQL)))
 			buf.Write(lenBuf[:])
-			buf.Write(v.sql)
+			buf.Write(vector.migrationSQL)
 			buf.WriteString("snapshot.json")
 			buf.WriteByte(0x00)
-			binary.BigEndian.PutUint64(lenBuf[:], uint64(len(v.snap)))
+			binary.BigEndian.PutUint64(lenBuf[:], uint64(len(vector.snapshotJSON)))
 			buf.Write(lenBuf[:])
-			buf.Write(v.snap)
+			buf.Write(vector.snapshotJSON)
 			want := sha256.Sum256(buf.Bytes())
 
 			name := makeTestArtifactName(i)
-			loaded := mustCreateArtifact(t, store, root, name, v.sql, v.snap)
+			loaded := mustCreateArtifact(t, store, root, name, vector.migrationSQL, vector.snapshotJSON)
 			if loaded.Digests.CombinedSHA256 != filemigrate.Digest(want) {
 				t.Errorf("CombinedSHA256 mismatch with byte-assembly\n  got:  %s\n  want: %s",
 					hex.EncodeToString(loaded.Digests.CombinedSHA256[:]),
@@ -197,63 +192,22 @@ func TestArtifactDigest_CombinedByteAssembly(t *testing.T) {
 // what the DB history table records as `hash` for Drizzle RC.1 alignment, so
 // any drift here would break history-hash compatibility.
 func TestArtifactDigest_PerFileGoldenVectors(t *testing.T) {
-	cases := []struct {
-		name        string
-		sql         []byte
-		snap        []byte
-		wantSQLHex  string
-		wantSnapHex string
-	}{
-		{
-			name:        "small_ascii",
-			sql:         []byte("CREATE TABLE t (id INT);"),
-			snap:        []byte(`{"version":"1"}`),
-			wantSQLHex:  "f423e61fbd021a13b6ae0afb423f2da5c3cf7cc0647ddb7348266dbfd281d6fe",
-			wantSnapHex: "aa5bc61f44d5f633935d04cbccf2654c56806fc924b0083a6cb6b7545369ad64",
-		},
-		{
-			name:        "utf8_comments_crlf_trailing_newlines",
-			sql:         []byte(normalizationSensitiveSQL),
-			snap:        []byte(normalizationSensitiveSnap),
-			wantSQLHex:  "7eea9d1e2389949ca151a38a802209a7f661b78cd54f530ca585a7456d2d20e2",
-			wantSnapHex: "0eee986c58412baf4d16e1646ae79459247e7e40d4161df0a2fab705bb1b30fd",
-		},
-		{
-			name:        "select1_with_empty_obj",
-			sql:         []byte("SELECT 1;"),
-			snap:        []byte("{}"),
-			wantSQLHex:  "17db4fd369edb9244b9f91d9aeed145c3d04ad8ba6e95d06247f07a63527d11a",
-			wantSnapHex: "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
-		},
-		{
-			name:        "empty_inputs",
-			sql:         []byte(""),
-			snap:        []byte(""),
-			wantSQLHex:  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-			wantSnapHex: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-		},
-		{
-			name:        "full_byte_range_sql",
-			sql:         fullByteRange(),
-			snap:        []byte(`{"v":"1"}`),
-			wantSQLHex:  "40aff2e9d2d8922e47afd4648e6967497158785fbd1da870e7110266bf944880",
-			wantSnapHex: "b8513f1a0c28d8dd9b3b175bee09eabca97c4819614ec9a2df7442a5b4eff8d7",
-		},
-	}
+	vectors := loadArtifactDigestVectors(t)
 	store := filemigrate.NewMemArtifactStore()
 	root := mustResolveRoot(t, store, "/m", filemigrate.RootEnsureForWrite)
-	for i, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
+
+	for i, vector := range vectors {
+		t.Run(vector.Name, func(t *testing.T) {
 			name := makeTestArtifactName(i)
-			loaded := mustCreateArtifact(t, store, root, name, tc.sql, tc.snap)
+			loaded := mustCreateArtifact(t, store, root, name, vector.migrationSQL, vector.snapshotJSON)
 
 			gotSQLHex := hex.EncodeToString(loaded.Digests.MigrationSQLSHA256[:])
-			if gotSQLHex != tc.wantSQLHex {
-				t.Errorf("MigrationSQLSHA256 mismatch\n  got:  %s\n  want: %s", gotSQLHex, tc.wantSQLHex)
+			if gotSQLHex != vector.MigrationSQLSHA256 {
+				t.Errorf("MigrationSQLSHA256 mismatch\n  got:  %s\n  want: %s", gotSQLHex, vector.MigrationSQLSHA256)
 			}
-			gotSnapHex := hex.EncodeToString(loaded.Digests.SnapshotJSONSHA256[:])
-			if gotSnapHex != tc.wantSnapHex {
-				t.Errorf("SnapshotJSONSHA256 mismatch\n  got:  %s\n  want: %s", gotSnapHex, tc.wantSnapHex)
+			gotSnapshotHex := hex.EncodeToString(loaded.Digests.SnapshotJSONSHA256[:])
+			if gotSnapshotHex != vector.SnapshotJSONSHA256 {
+				t.Errorf("SnapshotJSONSHA256 mismatch\n  got:  %s\n  want: %s", gotSnapshotHex, vector.SnapshotJSONSHA256)
 			}
 		})
 	}
