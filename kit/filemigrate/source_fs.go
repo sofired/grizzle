@@ -28,7 +28,8 @@ var schemaBuildContext = func() build.Context {
 }()
 
 // FSSourceStore is the production SourceStore backed by the real filesystem.
-// All metadata checks use Lstat so symlinks are never followed.
+// Security-sensitive operations are rooted at open directory handles and
+// identity-check entries across metadata inspection and open.
 type FSSourceStore struct{}
 
 // NewFSSourceStore returns the production filesystem-backed SourceStore.
@@ -40,12 +41,9 @@ var _ SourceStore = (*FSSourceStore)(nil)
 
 const sourceOp = "source_store"
 
-// ResolveSourceRoot resolves dir as a schema source root. Honors ctx
-// cancellation before any filesystem work runs. It rejects symlinked
-// paths and non-directory entries. Existing parent components of dir
-// are walked with Lstat and rejected if any is a symlink, so a
-// configured path like `<base>/link/schema` (where `link` is a symlink)
-// cannot redirect resolution outside the intended tree.
+// ResolveSourceRoot resolves dir as a schema source root. It walks from the
+// volume root with handle-relative opens, rejecting symlinks, non-directory
+// entries, and entries whose identity changes while they are opened.
 func (s *FSSourceStore) ResolveSourceRoot(ctx context.Context, dir string) (SourceRoot, error) {
 	if err := ctx.Err(); err != nil {
 		return SourceRoot{}, err
@@ -53,7 +51,8 @@ func (s *FSSourceStore) ResolveSourceRoot(ctx context.Context, dir string) (Sour
 	if dir == "" {
 		return SourceRoot{}, newInvalidConfigError(sourceOp + ".resolve_source_root")
 	}
-	if err := assertNoSymlinkInPathChain(dir); err != nil {
+	rootHandle, real, _, err := openSecureRootPath(dir, false, 0)
+	if err != nil {
 		return SourceRoot{}, &Error{
 			Code: CodeInvalidPath,
 			Op:   sourceOp + ".resolve_source_root",
@@ -61,30 +60,7 @@ func (s *FSSourceStore) ResolveSourceRoot(ctx context.Context, dir string) (Sour
 			Err:  err,
 		}
 	}
-	fi, err := os.Lstat(dir)
-	if err != nil {
-		return SourceRoot{}, newPathError(sourceOp+".resolve_source_root", dir, err)
-	}
-	if fi.Mode()&fs.ModeSymlink != 0 {
-		return SourceRoot{}, &Error{
-			Code: CodeInvalidPath,
-			Op:   sourceOp + ".resolve_source_root",
-			Path: safeRenderPath(dir),
-			Err:  fmt.Errorf("symlink roots are not supported"),
-		}
-	}
-	if !fi.IsDir() {
-		return SourceRoot{}, &Error{
-			Code: CodeInvalidPath,
-			Op:   sourceOp + ".resolve_source_root",
-			Path: safeRenderPath(dir),
-			Err:  fmt.Errorf("not a directory"),
-		}
-	}
-	real, err := filepath.EvalSymlinks(dir)
-	if err != nil {
-		return SourceRoot{}, newPathError(sourceOp+".resolve_source_root", dir, err)
-	}
+	_ = rootHandle.Close()
 	return SourceRoot{Configured: dir, RealPath: real}, nil
 }
 
@@ -106,121 +82,107 @@ func (s *FSSourceStore) ListSourceFiles(ctx context.Context, root SourceRoot, op
 	if err := lim.Validate(sourceOp + ".list_source_files"); err != nil {
 		return nil, err
 	}
+	rootHandle, _, _, err := openSecureRootPath(root.RealPath, false, 0)
+	if err != nil {
+		return nil, &Error{Code: CodeInvalidPath, Op: sourceOp + ".list_source_files", Path: safeRenderPath(root.RealPath), Err: err}
+	}
+	defer func() { _ = rootHandle.Close() }()
+
 	var out []string
-
-	walkErr := filepath.WalkDir(root.RealPath, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return &Error{Code: CodeInvalidPath, Op: sourceOp + ".list_source_files", Path: safeRenderPath(path), Err: err}
-		}
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return ctxErr
-		}
-
-		// Use Lstat to detect symlinks WalkDir might not report.
-		fi, statErr := os.Lstat(path)
-		if statErr != nil {
-			return newPathError(sourceOp+".list_source_files", path, statErr)
-		}
-		if fi.Mode()&fs.ModeSymlink != 0 {
-			return &Error{
-				Code: CodeInvalidPath,
-				Op:   sourceOp + ".list_source_files",
-				Path: safeRenderPath(path),
-				Err:  fmt.Errorf("symlinks are not supported"),
-			}
-		}
-		if d.IsDir() {
-			// Skip root itself.
-			if path == root.RealPath {
-				return nil
-			}
-			return nil
-		}
-		if !strings.HasSuffix(path, ".go") {
-			// Non-.go files are silently skipped regardless of mode. The
-			// schema-loader contract (docs/spec/file-migrations-api.md
-			// §static schema loader) only treats unsafe metadata as fatal
-			// for discovered .go files; a non-.go sidecar that happens to
-			// be a FIFO, socket, or device entry must not break discovery
-			// of the schema root. The IsRegular() check below therefore
-			// runs only for .go files — covered by
-			// TestFSSourceStore_NonRegularNonGoSidecarIgnored. The
-			// hardlink check also comes after this return so that a
-			// hard-linked sidecar (README.md, .gitkeep, lockfiles) does
-			// not fail discovery; moving the hasExtraHardLinks call above
-			// this guard would break
-			// TestFSSourceStore_HardlinkedNonGoFileIgnored.
-			return nil
-		}
-		if !fi.Mode().IsRegular() {
-			return &Error{
-				Code: CodeInvalidPath,
-				Op:   sourceOp + ".list_source_files",
-				Path: safeRenderPath(path),
-				Err:  fmt.Errorf("not a regular file"),
-			}
-		}
-		if hasExtraHardLinks(fi) {
-			return &Error{
-				Code: CodeInvalidPath,
-				Op:   sourceOp + ".list_source_files",
-				Path: safeRenderPath(path),
-				Err:  fmt.Errorf("hard links are not supported"),
-			}
-		}
-		// Apply Go build rules to skip files the Go toolchain itself would
-		// not include in this build: _test.go (MatchFile does not exclude
-		// test files), GOOS/GOARCH suffixes for other targets, and .go files
-		// with unsatisfied //go:build or legacy // +build constraints. Per
-		// docs/spec/file-migrations-api.md:1417 the static schema loader
-		// must delegate file selection to go/build.Context.MatchFile, so the
-		// hardlink check above still fires for every discovered .go file
-		// (per spec line 1409) before inactive files are dropped here.
-		base := filepath.Base(path)
-		if strings.HasSuffix(base, "_test.go") {
-			return nil
-		}
-		match, matchErr := schemaBuildContext.MatchFile(filepath.Dir(path), base)
-		if matchErr != nil {
-			// Per spec line 1420, build-constraint parse errors fail with
-			// unsupported_schema_construct. The underlying error message
-			// can include source text from the build line, so we wrap it
-			// with a generic diagnostic to satisfy the redaction rule
-			// (spec line 1415) rather than surfacing matchErr directly.
-			return &Error{
-				Code: CodeUnsupportedSchemaConstruct,
-				Op:   sourceOp + ".list_source_files",
-				Path: safeRenderPath(path),
-				Err:  fmt.Errorf("invalid build constraint"),
-			}
-		}
-		if !match {
-			return nil
-		}
-		rel, relErr := filepath.Rel(root.RealPath, path)
-		if relErr != nil {
-			return newPathError(sourceOp+".list_source_files", path, relErr)
-		}
-		if len(out)+1 > lim.MaxSchemaFiles {
-			return &Error{
-				Code: CodeResourceLimit,
-				Op:   sourceOp + ".list_source_files",
-				Err:  fmt.Errorf("schema file count exceeds limit %d", lim.MaxSchemaFiles),
-			}
-		}
-		out = append(out, rel)
-		return nil
-	})
-	if walkErr != nil {
-		return nil, walkErr
+	if err := walkSecureSourceDir(ctx, rootHandle, root.RealPath, "", lim, &out); err != nil {
+		return nil, err
 	}
 	sort.Strings(out)
 	return out, nil
 }
 
-// ReadSourceFile reads the file at relpath under root using Lstat (no follow),
-// validates it is a regular .go file, enforces byte caps, and returns a
-// caller-owned copy. Honors ctx cancellation before any filesystem work runs.
+func walkSecureSourceDir(ctx context.Context, dir *os.Root, displayRoot, relDir string, lim ResourceLimits, out *[]string) error {
+	entries, err := readSecureDir(dir)
+	if err != nil {
+		return &Error{Code: CodeInvalidPath, Op: sourceOp + ".list_source_files", Path: safeRenderPath(filepath.Join(displayRoot, relDir)), Err: err}
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
+
+	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		name := entry.Name()
+		relpath := name
+		if relDir != "" {
+			relpath = filepath.Join(relDir, name)
+		}
+		displayPath := filepath.Join(displayRoot, relpath)
+		info, err := dir.Lstat(name)
+		if err != nil {
+			return newPathError(sourceOp+".list_source_files", displayPath, err)
+		}
+		if info.Mode()&fs.ModeSymlink != 0 {
+			return &Error{Code: CodeInvalidPath, Op: sourceOp + ".list_source_files", Path: safeRenderPath(displayPath), Err: fmt.Errorf("symlinks are not supported")}
+		}
+		if info.IsDir() {
+			child, _, err := openSecureDirFromInfo(dir, name, info, nil)
+			if err != nil {
+				return &Error{Code: CodeInvalidPath, Op: sourceOp + ".list_source_files", Path: safeRenderPath(displayPath), Err: err}
+			}
+			walkErr := walkSecureSourceDir(ctx, child, displayRoot, relpath, lim, out)
+			_ = child.Close()
+			if walkErr != nil {
+				return walkErr
+			}
+			continue
+		}
+		// Non-.go files are ignored regardless of their shape, matching the
+		// schema-loader contract and the in-memory store.
+		if !strings.HasSuffix(name, ".go") {
+			continue
+		}
+		if !info.Mode().IsRegular() {
+			return &Error{Code: CodeInvalidPath, Op: sourceOp + ".list_source_files", Path: safeRenderPath(displayPath), Err: fmt.Errorf("not a regular file")}
+		}
+		if hasExtraHardLinks(info) {
+			return &Error{Code: CodeInvalidPath, Op: sourceOp + ".list_source_files", Path: safeRenderPath(displayPath), Err: fmt.Errorf("hard links are not supported")}
+		}
+		if strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+
+		buildContext := schemaBuildContext
+		var secureOpenErr error
+		buildContext.OpenFile = func(path string) (io.ReadCloser, error) {
+			f, openedInfo, openErr := openSecureFile(dir, filepath.Base(path), nil)
+			if openErr == nil && (!openedInfo.Mode().IsRegular() || hasExtraHardLinks(openedInfo)) {
+				_ = f.Close()
+				openErr = fmt.Errorf("unsafe source file shape")
+			}
+			if openErr != nil {
+				secureOpenErr = openErr
+			}
+			return f, openErr
+		}
+		match, matchErr := buildContext.MatchFile(".", name)
+		if secureOpenErr != nil {
+			return &Error{Code: CodeInvalidPath, Op: sourceOp + ".list_source_files", Path: safeRenderPath(displayPath), Err: secureOpenErr}
+		}
+		if matchErr != nil {
+			// Build-line source text is intentionally redacted.
+			return &Error{Code: CodeUnsupportedSchemaConstruct, Op: sourceOp + ".list_source_files", Path: safeRenderPath(displayPath), Err: fmt.Errorf("invalid build constraint")}
+		}
+		if !match {
+			continue
+		}
+		if len(*out)+1 > lim.MaxSchemaFiles {
+			return &Error{Code: CodeResourceLimit, Op: sourceOp + ".list_source_files", Err: fmt.Errorf("schema file count exceeds limit %d", lim.MaxSchemaFiles)}
+		}
+		*out = append(*out, relpath)
+	}
+	return nil
+}
+
+// ReadSourceFile walks to relpath through open directory handles, validates the
+// opened entry is the same regular .go file observed by Lstat, enforces byte
+// caps, and returns a caller-owned copy. Honors ctx cancellation before any
+// filesystem work runs.
 //
 // Non-Go relpaths (those without a .go suffix) are rejected with CodeInvalidPath
 // before any filesystem work runs, matching the schema-loader contract that
@@ -246,32 +208,17 @@ func (s *FSSourceStore) ReadSourceFile(ctx context.Context, root SourceRoot, rel
 	if err := lim.Validate(sourceOp + ".read_source_file"); err != nil {
 		return nil, err
 	}
-	path := filepath.Join(root.RealPath, relpath)
-
-	// Lstat each path component under root so we reject parent-directory
-	// symlinks. A bare Lstat of the final path follows parent symlinks and
-	// would accept files outside the configured source root.
-	if err := assertNoSymlinkInChain(root.RealPath, relpath); err != nil {
-		return nil, &Error{
-			Code: CodeInvalidPath,
-			Op:   sourceOp + ".read_source_file",
-			Path: safeRenderPath(relpath),
-			Err:  err,
-		}
+	rootHandle, _, _, err := openSecureRootPath(root.RealPath, false, 0)
+	if err != nil {
+		return nil, &Error{Code: CodeInvalidPath, Op: sourceOp + ".read_source_file", Path: safeRenderPath(relpath), Err: err}
 	}
+	defer func() { _ = rootHandle.Close() }()
 
-	fi, err := os.Lstat(path)
+	f, fi, err := openSecureFilePath(rootHandle, relpath)
 	if err != nil {
 		return nil, newPathError(sourceOp+".read_source_file", relpath, err)
 	}
-	if fi.Mode()&fs.ModeSymlink != 0 {
-		return nil, &Error{
-			Code: CodeInvalidPath,
-			Op:   sourceOp + ".read_source_file",
-			Path: safeRenderPath(relpath),
-			Err:  fmt.Errorf("symlinks are not supported"),
-		}
-	}
+	defer func() { _ = f.Close() }()
 	if !fi.Mode().IsRegular() {
 		return nil, &Error{
 			Code: CodeInvalidPath,
@@ -292,12 +239,6 @@ func (s *FSSourceStore) ReadSourceFile(ctx context.Context, root SourceRoot, rel
 		return nil, &Error{Code: CodeResourceLimit, Op: sourceOp + ".read_source_file", Path: safeRenderPath(relpath)}
 	}
 
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, newPathError(sourceOp+".read_source_file", relpath, err)
-	}
-	defer func() { _ = f.Close() }()
-
 	data, err := io.ReadAll(io.LimitReader(f, lim.MaxSchemaSourceFileBytes+1))
 	if err != nil {
 		return nil, newPathError(sourceOp+".read_source_file", relpath, err)
@@ -306,40 +247,6 @@ func (s *FSSourceStore) ReadSourceFile(ctx context.Context, root SourceRoot, rel
 		return nil, &Error{Code: CodeResourceLimit, Op: sourceOp + ".read_source_file", Path: safeRenderPath(relpath)}
 	}
 	return &SourceFile{RelPath: relpath, Content: data}, nil
-}
-
-// assertNoSymlinkInChain Lstats every component of relpath under root except
-// the final one and returns an error if any is a symlink. The caller is
-// responsible for Lstating the final component (and rejecting it if it is
-// itself a symlink).
-func assertNoSymlinkInChain(root, relpath string) error {
-	clean := filepath.Clean(relpath)
-	if clean == "." {
-		return nil
-	}
-	parts := strings.Split(clean, string(filepath.Separator))
-	current := root
-	for i, part := range parts {
-		// filepath.Clean must not produce empty components from a non-absolute
-		// relpath; if one appears we fail closed rather than skip silently.
-		if part == "" {
-			return fmt.Errorf("invalid empty path component")
-		}
-		current = filepath.Join(current, part)
-		// Only check parent components here; the final component is checked by
-		// the caller (which also enforces regular-file semantics).
-		if i == len(parts)-1 {
-			return nil
-		}
-		fi, err := os.Lstat(current)
-		if err != nil {
-			return err
-		}
-		if fi.Mode()&fs.ModeSymlink != 0 {
-			return fmt.Errorf("symlinks are not supported")
-		}
-	}
-	return nil
 }
 
 // assertSourceContained verifies that relpath, when joined with root, stays
