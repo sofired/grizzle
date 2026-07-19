@@ -162,6 +162,46 @@ func TestWindowExpr_UnsupportedDialectReturnsError(t *testing.T) {
 	}
 }
 
+func TestWindowExpr_RequiredColumnsRejectNil(t *testing.T) {
+	var typedNil *expr.StringColumn
+	columns := []struct {
+		name string
+		col  expr.SelectableColumn
+	}{
+		{"plain nil", nil},
+		{"typed nil", typedNil},
+	}
+	factories := []struct {
+		name string
+		new  func(expr.SelectableColumn) expr.WindowExpr
+	}{
+		{"lead", expr.Lead},
+		{"lead with default", func(col expr.SelectableColumn) expr.WindowExpr { return expr.LeadWithDefault(col, 1, "default") }},
+		{"lag", expr.Lag},
+		{"lag with default", func(col expr.SelectableColumn) expr.WindowExpr { return expr.LagWithDefault(col, 1, "default") }},
+		{"first value", expr.FirstValue},
+		{"last value", expr.LastValue},
+		{"nth value", func(col expr.SelectableColumn) expr.WindowExpr { return expr.NthValue(col, 1) }},
+		{"sum", expr.WinSum},
+		{"avg", expr.WinAvg},
+	}
+
+	for _, column := range columns {
+		for _, factory := range factories {
+			t.Run(column.name+"/"+factory.name, func(t *testing.T) {
+				ctx := expr.NewBuildContext(dialect.Postgres)
+				got, err := factory.new(column.col).RenderSQL(ctx)
+				if got != "" || !errors.Is(err, expr.ErrBuildValidation) {
+					t.Fatalf("RenderSQL = (%q, %v), want empty SQL and ErrBuildValidation", got, err)
+				}
+				if len(ctx.Args()) != 0 {
+					t.Fatalf("Args = %v, want no orphaned arguments", ctx.Args())
+				}
+			})
+		}
+	}
+}
+
 // -------------------------------------------------------------------
 // Fix #104 — window frame sentinels are immutable
 // -------------------------------------------------------------------

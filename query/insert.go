@@ -68,20 +68,27 @@ func (b *InsertBuilder) Values(row any) *InsertBuilder {
 // ValueSlice accepts a slice of structs and adds a row for each element.
 func (b *InsertBuilder) ValueSlice(rows any) *InsertBuilder {
 	cp := *b
+	cp.rows = append([][]any(nil), b.rows...)
 	if rows == nil {
-		cp.buildErr = fmt.Errorf("insert row slice is nil")
+		if cp.buildErr == nil {
+			cp.buildErr = fmt.Errorf("insert row slice is nil")
+		}
 		return &cp
 	}
 	rv := reflect.ValueOf(rows)
 	if rv.Kind() == reflect.Ptr {
 		if rv.IsNil() {
-			cp.buildErr = fmt.Errorf("insert row slice is nil")
+			if cp.buildErr == nil {
+				cp.buildErr = fmt.Errorf("insert row slice is nil")
+			}
 			return &cp
 		}
 		rv = rv.Elem()
 	}
 	if rv.Kind() != reflect.Slice && rv.Kind() != reflect.Array {
-		cp.buildErr = fmt.Errorf("insert rows must be a slice or array")
+		if cp.buildErr == nil {
+			cp.buildErr = fmt.Errorf("insert rows must be a slice or array")
+		}
 		return &cp
 	}
 	for i := 0; i < rv.Len(); i++ {
@@ -95,7 +102,9 @@ func (b *InsertBuilder) ValueSlice(rows any) *InsertBuilder {
 		if len(cp.colNames) == 0 {
 			cp.colNames = cols
 		} else if !equalStrings(cp.colNames, cols) {
-			cp.buildErr = fmt.Errorf("insert rows have inconsistent columns")
+			if cp.buildErr == nil {
+				cp.buildErr = fmt.Errorf("insert rows have inconsistent columns")
+			}
 			return &cp
 		}
 		cp.rows = append(cp.rows, vals)

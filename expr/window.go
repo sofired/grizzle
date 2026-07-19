@@ -159,51 +159,67 @@ func Rank() WindowExpr { return WindowExpr{fn: "RANK"} }
 func DenseRank() WindowExpr { return WindowExpr{fn: "DENSE_RANK"} }
 
 // Lead returns a LEAD(col) window expression.
-func Lead(col SelectableColumn) WindowExpr { return WindowExpr{fn: "LEAD", col: col} }
+func Lead(col SelectableColumn) WindowExpr { return requiredColumnWindow("LEAD", col) }
 
 // LeadWithDefault returns a LEAD(col, offset, default) window expression.
 // The default value is bound as a parameter (Fix #93 — not interpolated directly).
 func LeadWithDefault(col SelectableColumn, offset int, defaultVal any) WindowExpr {
-	return WindowExpr{fn: "LEAD", col: col, offset: &offset, defaultVal: defaultVal, hasDefault: true}
+	w := requiredColumnWindow("LEAD", col)
+	w.offset = &offset
+	w.defaultVal = defaultVal
+	w.hasDefault = true
+	return w
 }
 
 // Lag returns a LAG(col) window expression.
-func Lag(col SelectableColumn) WindowExpr { return WindowExpr{fn: "LAG", col: col} }
+func Lag(col SelectableColumn) WindowExpr { return requiredColumnWindow("LAG", col) }
 
 // LagWithDefault returns a LAG(col, offset, default) window expression.
 // The default value is bound as a parameter (Fix #93 — not interpolated directly).
 func LagWithDefault(col SelectableColumn, offset int, defaultVal any) WindowExpr {
-	return WindowExpr{fn: "LAG", col: col, offset: &offset, defaultVal: defaultVal, hasDefault: true}
+	w := requiredColumnWindow("LAG", col)
+	w.offset = &offset
+	w.defaultVal = defaultVal
+	w.hasDefault = true
+	return w
 }
 
 // FirstValue returns a FIRST_VALUE(col) window expression.
-func FirstValue(col SelectableColumn) WindowExpr { return WindowExpr{fn: "FIRST_VALUE", col: col} }
+func FirstValue(col SelectableColumn) WindowExpr { return requiredColumnWindow("FIRST_VALUE", col) }
 
 // LastValue returns a LAST_VALUE(col) window expression.
-func LastValue(col SelectableColumn) WindowExpr { return WindowExpr{fn: "LAST_VALUE", col: col} }
+func LastValue(col SelectableColumn) WindowExpr { return requiredColumnWindow("LAST_VALUE", col) }
 
 // NthValue returns an NTH_VALUE(col, n) window expression.
 // Values below 1 produce a build-validation error when rendered.
 func NthValue(col SelectableColumn, n int) WindowExpr {
-	if n < 1 {
-		return WindowExpr{
-			fn:     "NTH_VALUE",
-			col:    col,
-			offset: &n,
-			err:    NewError(CodeBuildValidation, "render_window", "window offset must be positive"),
-		}
+	w := requiredColumnWindow("NTH_VALUE", col)
+	w.offset = &n
+	if w.err != nil {
+		return w
 	}
-	return WindowExpr{fn: "NTH_VALUE", col: col, offset: &n}
+	if n < 1 {
+		w.err = NewError(CodeBuildValidation, "render_window", "window offset must be positive")
+	}
+	return w
 }
 
 // WinSum returns a SUM(col) window expression (aggregate used as a window function).
-func WinSum(col SelectableColumn) WindowExpr { return WindowExpr{fn: "SUM", col: col} }
+func WinSum(col SelectableColumn) WindowExpr { return requiredColumnWindow("SUM", col) }
 
 // WinAvg returns an AVG(col) window expression (aggregate used as a window function).
-func WinAvg(col SelectableColumn) WindowExpr { return WindowExpr{fn: "AVG", col: col} }
+func WinAvg(col SelectableColumn) WindowExpr { return requiredColumnWindow("AVG", col) }
 
 // WinCount returns a COUNT(*) window expression.
 func WinCount() WindowExpr { return WindowExpr{fn: "COUNT"} }
+
+func requiredColumnWindow(fn string, col SelectableColumn) WindowExpr {
+	w := WindowExpr{fn: fn, col: col}
+	if isNilInterface(col) {
+		w.err = NewError(CodeBuildValidation, "render_window", "window column is nil")
+	}
+	return w
+}
 
 // -------------------------------------------------------------------
 // Window frame sentinels (Fix #104 — immutable, cannot be mutated)
