@@ -1,7 +1,7 @@
 # Mutations
 
 ::: warning Target API status
-This page describes the target mutation API for the RC.1 parity work. Some examples use APIs that are specified but not fully implemented yet, including `query.Assign[T]`, `SetStruct`, `DoUpdateSetStruct`, and optional shared conflict helpers. Check [spec/README.md](/spec/) before treating an example as current branch behavior.
+This page describes the target mutation API for the RC.1 parity work. Some examples use APIs that are specified but not fully implemented yet, including `query.Assign[T]`, `SetStruct`, `DoUpdateSetStruct`, and optional shared conflict helpers. Check [spec/README.md](../spec/README.md) before treating an example as current branch behavior.
 :::
 
 ## INSERT

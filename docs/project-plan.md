@@ -1,6 +1,6 @@
 # Grizzle Project Plan
 
-This document defines how Grizzle's roadmap is organized and how work moves from an idea to implementation. Specifications under [`docs/spec/`](./spec/) remain authoritative for behavior.
+This document defines how Grizzle's roadmap is organized and how work moves from an idea to implementation. Specifications under [`docs/spec/`](./spec/README.md) remain authoritative for behavior.
 
 _Last reviewed: 2026-07-18._
 
