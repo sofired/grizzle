@@ -129,6 +129,14 @@ func (s *FSArtifactStore) ListArtifacts(ctx context.Context, root ArtifactRoot, 
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
+		// Reserved staging entries from interrupted CreateArtifact runs are
+		// ignored before any type classification. Cleanup-free failure paths
+		// deliberately leave unverified entries behind, and a raced writer can
+		// leave a non-directory (for example a swapped-in symlink) at a
+		// reserved name; discovery must skip those rather than fail the root.
+		if isReservedStagingDir(e.Name()) {
+			continue
+		}
 		entryPath := filepath.Join(root.RealPath, e.Name())
 		if hooks, ok := ctx.Value(secureFSTestHooksKey{}).(secureFSTestHooks); ok && hooks.beforeArtifactEntryLstat != nil {
 			hooks.beforeArtifactEntryLstat(e.Name())
@@ -153,11 +161,6 @@ func (s *FSArtifactStore) ListArtifacts(ctx context.Context, root ArtifactRoot, 
 				err.Path = safeRenderPath(entryPath)
 				return nil, err
 			}
-			continue
-		}
-		// Reserved staging directories from interrupted CreateArtifact runs are
-		// ignored so they do not pollute discovery or trigger validation errors.
-		if isReservedStagingDir(e.Name()) {
 			continue
 		}
 		out = append(out, ArtifactEntry{
@@ -441,9 +444,11 @@ func classifyArtifactRootSidecar(name string, fi fs.FileInfo) *Error {
 	}
 }
 
-// isReservedStagingDir reports whether name matches the reserved staging-dir
-// pattern used by CreateArtifact (.grizzle-staging-*). Such directories may
-// be left over from interrupted writes and must not be treated as artifacts.
+// isReservedStagingDir reports whether name matches the reserved staging
+// pattern used by CreateArtifact (.grizzle-staging-*). Entries with this
+// prefix may be left over from interrupted or raced writes — as any file
+// type, since failure paths never remove unverified entries — and must
+// never be treated as artifacts.
 func isReservedStagingDir(name string) bool {
 	return strings.HasPrefix(name, ".grizzle-staging-")
 }

@@ -277,6 +277,19 @@ func TestSanitizeSecureFSError_RemovesPathAndPreservesClassification(t *testing.
 	}
 }
 
+func TestSanitizeSecureFSError_RemovesLinkErrorPathnames(t *testing.T) {
+	rawOld := "untrusted\n\x1b[31mold"
+	rawNew := "untrusted\rnew"
+	err := sanitizeSecureFSError(&os.LinkError{Op: "renameat", Old: rawOld, New: rawNew, Err: fs.ErrExist})
+	rendered := err.Error()
+	if strings.Contains(rendered, rawOld) || strings.Contains(rendered, rawNew) || strings.ContainsAny(rendered, "\n\r\x1b") {
+		t.Fatalf("sanitized link error contains untrusted pathname data: %q", rendered)
+	}
+	if !errors.Is(err, fs.ErrExist) {
+		t.Fatalf("sanitized link error lost exist classification: %v", err)
+	}
+}
+
 func TestFSStores_LstatRaceErrorsEscapeControlCharacters(t *testing.T) {
 	if err := ensureSecureFilesystemSupported(); err != nil {
 		t.Skip(err)
@@ -575,6 +588,46 @@ func TestCreateSecureTempDir_FailedOpenLeavesUnverifiedReplacement(t *testing.T)
 	}
 	if _, statErr := os.Stat(filepath.Join(rootDir, swappedName+"-original")); statErr != nil {
 		t.Fatalf("renamed-away original was unexpectedly removed: %v", statErr)
+	}
+}
+
+func TestFSArtifactStore_ListArtifacts_IgnoresLeftoverStagingEntriesOfAnyType(t *testing.T) {
+	if err := ensureSecureFilesystemSupported(); err != nil {
+		t.Skip(err)
+	}
+	store := NewFSArtifactStore()
+	root, err := store.ResolveRoot(t.Context(), t.TempDir(), ResolveArtifactRootOptions{Mode: RootEnsureForWrite})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const name = "20240101000000_real"
+	if _, err := store.CreateArtifact(t.Context(), root, NewArtifact{
+		Name:         name,
+		MigrationSQL: []byte("safe"),
+		SnapshotJSON: []byte("{}"),
+	}, CreateArtifactOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	// Failure paths never remove unverified staging entries, so discovery must
+	// tolerate leftovers of any file type at reserved names, including a
+	// swapped-in symlink and a stray regular file.
+	if err := os.WriteFile(filepath.Join(root.RealPath, ".grizzle-staging-leftoverfile"), []byte("junk"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	symlinkErr := os.Symlink(t.TempDir(), filepath.Join(root.RealPath, ".grizzle-staging-leftoverlink"))
+	if errors.Is(symlinkErr, os.ErrPermission) {
+		t.Skipf("symlinks are not available: %v", symlinkErr)
+	}
+	if symlinkErr != nil {
+		t.Fatal(symlinkErr)
+	}
+
+	entries, err := store.ListArtifacts(t.Context(), root, ListArtifactsOptions{})
+	if err != nil {
+		t.Fatalf("leftover staging entries broke discovery: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Name != name {
+		t.Fatalf("entries = %+v, want only %q", entries, name)
 	}
 }
 

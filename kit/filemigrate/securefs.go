@@ -292,7 +292,9 @@ func readSecureDir(root *os.Root) ([]fs.DirEntry, error) {
 
 // createSecureTempDir creates and opens an unpredictable private child
 // directory beneath root without ever reconstructing an absolute child path.
-// afterMkdir is used only by deterministic race regression tests.
+// afterMkdir is used only by deterministic race regression tests; unlike the
+// afterLstat hooks it receives the generated name, which the caller cannot
+// know in advance.
 func createSecureTempDir(root *os.Root, prefix string, afterMkdir func(name string)) (string, *os.Root, error) {
 	var random [16]byte
 	for range 100 {
