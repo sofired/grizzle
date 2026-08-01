@@ -277,6 +277,82 @@ func TestSanitizeSecureFSError_RemovesPathAndPreservesClassification(t *testing.
 	}
 }
 
+func TestFSStores_LstatRaceErrorsEscapeControlCharacters(t *testing.T) {
+	if err := ensureSecureFilesystemSupported(); err != nil {
+		t.Skip(err)
+	}
+
+	assertSanitized := func(t *testing.T, err error) {
+		t.Helper()
+		if !errors.Is(err, ErrInvalidPath) {
+			t.Fatalf("got %v, want invalid_path", err)
+		}
+		if !errors.Is(err, fs.ErrNotExist) {
+			t.Fatalf("got %v, want not-exist classification", err)
+		}
+		rendered := err.Error()
+		if strings.ContainsAny(rendered, "\n\r\x1b") {
+			t.Fatalf("rendered error contains raw control characters: %q", rendered)
+		}
+		if !strings.Contains(rendered, `\n`) {
+			t.Fatalf("rendered error does not contain escaped entry name: %q", rendered)
+		}
+	}
+
+	t.Run("artifact listing", func(t *testing.T) {
+		store := NewFSArtifactStore()
+		root, err := store.ResolveRoot(t.Context(), t.TempDir(), ResolveArtifactRootOptions{Mode: RootEnsureForWrite})
+		if err != nil {
+			t.Fatal(err)
+		}
+		name := "untrusted\n\x1b[31mname"
+		entryPath := filepath.Join(root.RealPath, name)
+		if err := os.Mkdir(entryPath, 0o700); err != nil {
+			t.Fatal(err)
+		}
+
+		var hookErr error
+		hooks := secureFSTestHooks{beforeArtifactEntryLstat: func(got string) {
+			if got == name {
+				hookErr = os.Remove(entryPath)
+			}
+		}}
+		ctx := context.WithValue(t.Context(), secureFSTestHooksKey{}, hooks)
+		_, err = store.ListArtifacts(ctx, root, ListArtifactsOptions{})
+		if hookErr != nil {
+			t.Fatalf("install Lstat race fixture: %v", hookErr)
+		}
+		assertSanitized(t, err)
+	})
+
+	t.Run("source listing", func(t *testing.T) {
+		store := NewFSSourceStore()
+		rootDir := t.TempDir()
+		root, err := store.ResolveSourceRoot(t.Context(), rootDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		name := "untrusted\n\x1b[31mname.go"
+		entryPath := filepath.Join(root.RealPath, name)
+		if err := os.WriteFile(entryPath, []byte("package schema\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		var hookErr error
+		hooks := secureFSTestHooks{beforeSourceEntryLstat: func(got string) {
+			if got == name {
+				hookErr = os.Remove(entryPath)
+			}
+		}}
+		ctx := context.WithValue(t.Context(), secureFSTestHooksKey{}, hooks)
+		_, err = store.ListSourceFiles(ctx, root, ListSourceFilesOptions{})
+		if hookErr != nil {
+			t.Fatalf("install Lstat race fixture: %v", hookErr)
+		}
+		assertSanitized(t, err)
+	})
+}
+
 func TestFSArtifactStore_ReadArtifact_SymlinkSwapCannotEscapeRoot(t *testing.T) {
 	if err := ensureSecureFilesystemSupported(); err != nil {
 		t.Skip(err)

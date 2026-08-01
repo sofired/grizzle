@@ -130,6 +130,9 @@ func (s *FSArtifactStore) ListArtifacts(ctx context.Context, root ArtifactRoot, 
 			return nil, err
 		}
 		entryPath := filepath.Join(root.RealPath, e.Name())
+		if hooks, ok := ctx.Value(secureFSTestHooksKey{}).(secureFSTestHooks); ok && hooks.beforeArtifactEntryLstat != nil {
+			hooks.beforeArtifactEntryLstat(e.Name())
+		}
 		fi, statErr := rootHandle.Lstat(e.Name())
 		if statErr != nil {
 			return nil, newPathError(fsOp+".list_artifacts", entryPath, statErr)

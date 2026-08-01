@@ -29,6 +29,8 @@ var (
 // so production callers cannot install hooks accidentally.
 type secureFSTestHooks struct {
 	afterArtifactFileLstat      func(name string)
+	beforeArtifactEntryLstat    func(name string)
+	beforeSourceEntryLstat      func(name string)
 	beforeArtifactStagingVerify func(stagingName string)
 	beforeArtifactPublish       func(stagingName string)
 }

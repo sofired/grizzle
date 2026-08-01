@@ -262,7 +262,7 @@ func newPathError(op, path string, cause error) *Error {
 		Code: CodeInvalidPath,
 		Op:   op,
 		Path: safeRenderPath(path),
-		Err:  cause,
+		Err:  sanitizeSecureFSError(cause),
 	}
 }
 

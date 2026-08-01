@@ -113,6 +113,9 @@ func walkSecureSourceDir(ctx context.Context, dir *os.Root, displayRoot, relDir 
 			relpath = filepath.Join(relDir, name)
 		}
 		displayPath := filepath.Join(displayRoot, relpath)
+		if hooks, ok := ctx.Value(secureFSTestHooksKey{}).(secureFSTestHooks); ok && hooks.beforeSourceEntryLstat != nil {
+			hooks.beforeSourceEntryLstat(name)
+		}
 		info, err := dir.Lstat(name)
 		if err != nil {
 			return newPathError(sourceOp+".list_source_files", displayPath, err)
