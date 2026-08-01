@@ -527,6 +527,49 @@ func TestFSArtifactStore_CreateArtifact_StagingVerificationSwapLeavesReplacement
 	}
 }
 
+func TestFSArtifactStore_CreateArtifact_IgnoresCancellationAfterPublish(t *testing.T) {
+	if err := ensureSecureFilesystemSupported(); err != nil {
+		t.Skip(err)
+	}
+	store := NewFSArtifactStore()
+	rootDir := t.TempDir()
+	root, err := store.ResolveRoot(t.Context(), rootDir, ResolveArtifactRootOptions{Mode: RootEnsureForWrite})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	hooks := secureFSTestHooks{beforeArtifactPublish: func(string) {
+		// Cancellation fires in the publish window, so every post-publish
+		// verification step observes a canceled caller context.
+		cancel()
+	}}
+	ctx = context.WithValue(ctx, secureFSTestHooksKey{}, hooks)
+	const name = "20240101000000_cancel_after_publish"
+	loaded, err := store.CreateArtifact(ctx, root, NewArtifact{
+		Name:         name,
+		MigrationSQL: []byte("safe"),
+		SnapshotJSON: []byte("{}"),
+	}, CreateArtifactOptions{})
+	if err != nil {
+		t.Fatalf("cancellation during publish window reported committed artifact as failed: %v", err)
+	}
+	if loaded == nil {
+		t.Fatal("committed artifact was not returned")
+	}
+	if !bytes.Equal(loaded.MigrationSQL, []byte("safe")) {
+		t.Fatalf("loaded bytes = %q, want verified staged bytes", loaded.MigrationSQL)
+	}
+	published, err := os.ReadFile(filepath.Join(root.RealPath, name, "migration.sql"))
+	if err != nil {
+		t.Fatalf("published artifact missing after cancellation: %v", err)
+	}
+	if !bytes.Equal(published, []byte("safe")) {
+		t.Fatalf("published bytes = %q, want staged bytes", published)
+	}
+}
+
 func TestFSArtifactStore_CreateArtifact_PublishedContentSwapRejected(t *testing.T) {
 	if err := ensureSecureFilesystemSupported(); err != nil {
 		t.Skip(err)

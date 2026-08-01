@@ -312,6 +312,12 @@ func (s *FSArtifactStore) CreateArtifact(ctx context.Context, root ArtifactRoot,
 	if err := rootHandle.Rename(tmpName, artifact.Name); err != nil {
 		return nil, &Error{Code: CodeInvalidPath, Op: fsOp + ".create_artifact", Migration: artifact.Name, Err: err}
 	}
+	// The rename above is the atomic publish point: the artifact is committed
+	// regardless of what happens next. Verification below must not abort on
+	// caller cancellation, or a deadline firing in this window would report a
+	// committed artifact as failed and push retrying callers into
+	// duplicate_migration. WithoutCancel preserves context values (test hooks).
+	ctx = context.WithoutCancel(ctx)
 	publishedDir, publishedInfo, err := openSecureDir(rootHandle, artifact.Name, nil)
 	if err != nil {
 		return nil, &Error{Code: CodeInvalidPath, Op: fsOp + ".create_artifact", Migration: artifact.Name, Err: err}
