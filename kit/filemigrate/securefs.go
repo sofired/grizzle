@@ -292,7 +292,8 @@ func readSecureDir(root *os.Root) ([]fs.DirEntry, error) {
 
 // createSecureTempDir creates and opens an unpredictable private child
 // directory beneath root without ever reconstructing an absolute child path.
-func createSecureTempDir(root *os.Root, prefix string) (string, *os.Root, error) {
+// afterMkdir is used only by deterministic race regression tests.
+func createSecureTempDir(root *os.Root, prefix string, afterMkdir func(name string)) (string, *os.Root, error) {
 	var random [16]byte
 	for range 100 {
 		if _, err := rand.Read(random[:]); err != nil {
@@ -305,9 +306,17 @@ func createSecureTempDir(root *os.Root, prefix string) (string, *os.Root, error)
 			}
 			return "", nil, sanitizeSecureFSError(err)
 		}
+		if afterMkdir != nil {
+			afterMkdir(name)
+		}
 		child, _, err := openSecureDir(root, name, nil)
 		if err != nil {
-			_ = root.RemoveAll(name)
+			// Never remove the pathname on failure. openSecureDir failing means
+			// the entry's identity was never proven to be the directory just
+			// created — another writer may have replaced it — so RemoveAll by
+			// name could delete an unverified target with this process's
+			// privileges. The entry is left for operator inspection, matching
+			// the staging cleanup policy in CreateArtifact.
 			return "", nil, err
 		}
 		return name, child, nil

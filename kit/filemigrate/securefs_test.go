@@ -527,6 +527,90 @@ func TestFSArtifactStore_CreateArtifact_StagingVerificationSwapLeavesReplacement
 	}
 }
 
+func TestCreateSecureTempDir_FailedOpenLeavesUnverifiedReplacement(t *testing.T) {
+	if err := ensureSecureFilesystemSupported(); err != nil {
+		t.Skip(err)
+	}
+	rootDir := t.TempDir()
+	outsideDir := t.TempDir()
+	root, err := os.OpenRoot(rootDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = root.Close() }()
+
+	var swapErr error
+	var swappedName string
+	name, child, err := createSecureTempDir(root, ".grizzle-staging-", func(created string) {
+		swappedName = created
+		createdPath := filepath.Join(rootDir, created)
+		if renameErr := os.Rename(createdPath, createdPath+"-original"); renameErr != nil {
+			swapErr = renameErr
+			return
+		}
+		swapErr = os.Symlink(outsideDir, createdPath)
+	})
+	if errors.Is(swapErr, os.ErrPermission) {
+		t.Skipf("symlinks are not available: %v", swapErr)
+	}
+	if swapErr != nil {
+		t.Fatalf("install race fixture: %v", swapErr)
+	}
+	if child != nil {
+		_ = child.Close()
+		t.Fatal("swapped temp directory returned an open handle")
+	}
+	if err == nil {
+		t.Fatal("swapped temp directory did not fail secure open")
+	}
+	if name != "" {
+		t.Fatalf("failed createSecureTempDir returned name %q", name)
+	}
+	replacementInfo, statErr := os.Lstat(filepath.Join(rootDir, swappedName))
+	if statErr != nil {
+		t.Fatalf("unverified replacement was unexpectedly deleted: %v", statErr)
+	}
+	if replacementInfo.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("replacement mode = %v, want symlink", replacementInfo.Mode())
+	}
+	if _, statErr := os.Stat(filepath.Join(rootDir, swappedName+"-original")); statErr != nil {
+		t.Fatalf("renamed-away original was unexpectedly removed: %v", statErr)
+	}
+}
+
+func TestFSArtifactStore_CreateArtifact_DuplicateCheckLstatErrorSanitized(t *testing.T) {
+	if err := ensureSecureFilesystemSupported(); err != nil {
+		t.Skip(err)
+	}
+	store := NewFSArtifactStore()
+	root, err := store.ResolveRoot(t.Context(), t.TempDir(), ResolveArtifactRootOptions{Mode: RootEnsureForWrite})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// An overlong single component passes validateArtifactName but makes the
+	// duplicate-check Lstat fail with a non-ENOENT error whose raw *PathError
+	// embeds the caller-controlled name, control characters included.
+	name := "20240101000000_bad\n\x1b[31mname_" + strings.Repeat("a", 300)
+	loaded, err := store.CreateArtifact(t.Context(), root, NewArtifact{
+		Name:         name,
+		MigrationSQL: []byte("safe"),
+		SnapshotJSON: []byte("{}"),
+	}, CreateArtifactOptions{})
+	if loaded != nil {
+		t.Fatalf("overlong name returned a loaded artifact: %+v", loaded)
+	}
+	if !errors.Is(err, ErrInvalidPath) {
+		t.Fatalf("got %v, want invalid_path", err)
+	}
+	rendered := err.Error()
+	if strings.ContainsAny(rendered, "\n\r\x1b") {
+		t.Fatalf("rendered error contains raw control characters: %q", rendered)
+	}
+	if !strings.Contains(rendered, `\n`) {
+		t.Fatalf("rendered error does not contain escaped migration name: %q", rendered)
+	}
+}
+
 func TestFSArtifactStore_CreateArtifact_IgnoresCancellationAfterPublish(t *testing.T) {
 	if err := ensureSecureFilesystemSupported(); err != nil {
 		t.Skip(err)

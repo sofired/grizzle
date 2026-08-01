@@ -275,11 +275,14 @@ func (s *FSArtifactStore) CreateArtifact(ctx context.Context, root ArtifactRoot,
 	if _, err := rootHandle.Lstat(artifact.Name); err == nil {
 		return nil, &Error{Code: CodeDuplicateMigration, Op: fsOp + ".create_artifact", Migration: artifact.Name}
 	} else if !errors.Is(err, fs.ErrNotExist) {
-		return nil, &Error{Code: CodeInvalidPath, Op: fsOp + ".create_artifact", Migration: artifact.Name, Err: err}
+		// Sanitize before storing: a non-ENOENT *PathError (for example
+		// ENAMETOOLONG for an overlong name) embeds the caller-controlled
+		// name verbatim, which must not reach rendered diagnostics.
+		return nil, &Error{Code: CodeInvalidPath, Op: fsOp + ".create_artifact", Migration: artifact.Name, Err: sanitizeSecureFSError(err)}
 	}
 
 	// Stage writes in a temporary sibling directory, then rename atomically.
-	tmpName, staging, err := createSecureTempDir(rootHandle, ".grizzle-staging-")
+	tmpName, staging, err := createSecureTempDir(rootHandle, ".grizzle-staging-", nil)
 	if err != nil {
 		return nil, &Error{Code: CodeInvalidPath, Op: fsOp + ".create_artifact", Migration: artifact.Name, Err: err}
 	}
@@ -314,7 +317,9 @@ func (s *FSArtifactStore) CreateArtifact(ctx context.Context, root ArtifactRoot,
 	}
 
 	if err := rootHandle.Rename(tmpName, artifact.Name); err != nil {
-		return nil, &Error{Code: CodeInvalidPath, Op: fsOp + ".create_artifact", Migration: artifact.Name, Err: err}
+		// Sanitize for the same reason as the duplicate check above: the raw
+		// *os.LinkError embeds both pathnames, including the caller name.
+		return nil, &Error{Code: CodeInvalidPath, Op: fsOp + ".create_artifact", Migration: artifact.Name, Err: sanitizeSecureFSError(err)}
 	}
 	// The rename above is the atomic publish point: the artifact is committed
 	// regardless of what happens next. Verification below must not abort on
