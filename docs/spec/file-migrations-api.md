@@ -1650,6 +1650,13 @@ Contract requirements:
 - `ReadArtifact` uses `Lstat`-style metadata checks, rejects symlinks, rejects hardlinks where platform metadata allows it, validates regular files, preserves exact raw bytes, and enforces `ReadArtifactOptions.Limits` before buffering or parsing artifact files
 - `CreateArtifact` validates `NewArtifact.Name` as a supported migration identity before any path construction; invalid names, path separators, dot segments, nested names, absolute paths, and names that would not resolve to exactly one immediate child directory under the canonical root fail with `invalid_migration_name`. It then creates a new real migration directory and writes `migration.sql` plus `snapshot.json` using observable publish invariants: failed writes must not leave a discoverable valid artifact, publish uses a private same-filesystem temporary sibling directory plus atomic rename where supported, final bytes/digests are verified after publish, and platform-specific file/parent-directory fsync behavior must be documented in adapter tests. It must enforce `CreateArtifactOptions.Limits` before staging or publishing oversized artifact bytes. If atomic publication is unavailable, it must fail closed unless a future fallback spec preserves the same invariants. Conformance tests must cover traversal, nested-name, absolute-path, duplicate-name, and overlong-name failures.
 
+Filesystem adapter portability note:
+
+- the Go filesystem adapters use `os.Root` handles, handle-relative traversal, and pre/post-open identity checks rather than path-based `Lstat` followed by a separate open
+- because Go documents `os.Root` as TOCTOU-vulnerable on `js` and as path-based across directory renames on `plan9`, filesystem-backed stores fail closed with `invalid_path` before filesystem access on those platforms
+- in-memory stores retain the same public contracts and remain available on every supported Go platform
+- this boundary prevents path traversal and symlink/rename substitution under a configured root; it assumes a trusted mount namespace and is not a sandbox against filesystem boundaries, bind mounts, or separately authorized special filesystems such as `/proc`
+
 Managed source store requirements:
 
 - `ResolveSourceRoot` applies the same root containment posture to `schema-out`: `Lstat` existing roots, reject symlinked roots unless a future opt-in is designed, canonicalize absent-root parents before creation, and canonicalize the created root before writing

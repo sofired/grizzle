@@ -18,7 +18,7 @@ import (
 // If fi.Sys() does not yield a *syscall.Stat_t (for example, when fi comes
 // from a synthetic fs.FS in tests, such as fstest.MapFS), the function
 // conservatively returns false rather than panicking. Real filesystem
-// readers in this package go through os.Lstat, so they always populate
+// readers in this package use os.Root Lstat/Stat operations, so they populate
 // *syscall.Stat_t under the unix build tag.
 func hasExtraHardLinks(fi fs.FileInfo) bool {
 	st, ok := fi.Sys().(*syscall.Stat_t)

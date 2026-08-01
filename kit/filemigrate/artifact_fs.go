@@ -14,7 +14,8 @@ import (
 )
 
 // FSArtifactStore is the production ArtifactStore backed by the real filesystem.
-// All metadata checks use Lstat so symlinks are never followed.
+// Security-sensitive operations are rooted at open directory handles and
+// identity-check entries across metadata inspection and open.
 type FSArtifactStore struct{}
 
 // NewFSArtifactStore returns the production filesystem-backed ArtifactStore.
@@ -26,12 +27,9 @@ var _ ArtifactStore = (*FSArtifactStore)(nil)
 
 const fsOp = "artifact_store"
 
-// ResolveRoot resolves dir against the real filesystem.
-// It rejects symlinks, non-directory entries, and paths with unsafe components.
-// Existing parent components of dir are walked with Lstat and rejected if any
-// is a symlink, so a configured path like `<base>/link/migrations` (where
-// `link` is a symlink) cannot redirect resolution outside the intended tree.
-// Non-existent components are tolerated for the RootEnsureForWrite case.
+// ResolveRoot resolves dir against the real filesystem. It walks from the
+// volume root with handle-relative opens, rejecting symlinks, non-directory
+// entries, and entries whose identity changes while they are opened.
 func (s *FSArtifactStore) ResolveRoot(ctx context.Context, dir string, opts ResolveArtifactRootOptions) (ArtifactRoot, error) {
 	if err := ctx.Err(); err != nil {
 		return ArtifactRoot{}, err
@@ -40,17 +38,8 @@ func (s *FSArtifactStore) ResolveRoot(ctx context.Context, dir string, opts Reso
 		return ArtifactRoot{}, newInvalidConfigError(fsOp + ".resolve_root")
 	}
 
-	if err := assertNoSymlinkInPathChain(dir); err != nil {
-		return ArtifactRoot{}, &Error{
-			Code: CodeInvalidPath,
-			Op:   fsOp + ".resolve_root",
-			Path: safeRenderPath(dir),
-			Err:  err,
-		}
-	}
-
-	fi, err := os.Lstat(dir)
-	if os.IsNotExist(err) {
+	rootHandle, real, _, err := openSecureRootPath(dir, false, 0)
+	if errors.Is(err, fs.ErrNotExist) {
 		switch opts.Mode {
 		case RootReadForCheck:
 			return ArtifactRoot{Configured: dir, RealPath: dir, State: RootAbsent}, nil
@@ -61,46 +50,35 @@ func (s *FSArtifactStore) ResolveRoot(ctx context.Context, dir string, opts Reso
 				Path: safeRenderPath(dir),
 			}
 		case RootEnsureForWrite:
-			if mkErr := os.MkdirAll(dir, 0o750); mkErr != nil {
+			var created bool
+			rootHandle, real, created, err = openSecureRootPath(dir, true, 0o750)
+			if err != nil {
 				return ArtifactRoot{}, &Error{
 					Code: CodeInvalidPath,
 					Op:   fsOp + ".resolve_root",
 					Path: safeRenderPath(dir),
-					Err:  fmt.Errorf("mkdir: %w", mkErr),
+					Err:  fmt.Errorf("secure mkdir: %w", err),
 				}
 			}
-			real, realErr := filepath.EvalSymlinks(dir)
-			if realErr != nil {
-				return ArtifactRoot{}, newPathError(fsOp+".resolve_root", dir, realErr)
+			_ = rootHandle.Close()
+			state := RootExisting
+			if created {
+				state = RootCreated
 			}
-			return ArtifactRoot{Configured: dir, RealPath: real, State: RootCreated}, nil
+			return ArtifactRoot{Configured: dir, RealPath: real, State: state}, nil
 		default:
 			return ArtifactRoot{}, newInvalidConfigError(fsOp + ".resolve_root")
 		}
 	}
 	if err != nil {
-		return ArtifactRoot{}, newPathError(fsOp+".resolve_root", dir, err)
-	}
-	if fi.Mode()&fs.ModeSymlink != 0 {
 		return ArtifactRoot{}, &Error{
 			Code: CodeInvalidPath,
 			Op:   fsOp + ".resolve_root",
 			Path: safeRenderPath(dir),
-			Err:  fmt.Errorf("symlink roots are not supported"),
+			Err:  err,
 		}
 	}
-	if !fi.IsDir() {
-		return ArtifactRoot{}, &Error{
-			Code: CodeInvalidPath,
-			Op:   fsOp + ".resolve_root",
-			Path: safeRenderPath(dir),
-			Err:  fmt.Errorf("not a directory"),
-		}
-	}
-	real, realErr := filepath.EvalSymlinks(dir)
-	if realErr != nil {
-		return ArtifactRoot{}, newPathError(fsOp+".resolve_root", dir, realErr)
-	}
+	_ = rootHandle.Close()
 	return ArtifactRoot{Configured: dir, RealPath: real, State: RootExisting}, nil
 }
 
@@ -118,7 +96,18 @@ func (s *FSArtifactStore) ListArtifacts(ctx context.Context, root ArtifactRoot, 
 	if err := lim.Validate(fsOp + ".list_artifacts"); err != nil {
 		return nil, err
 	}
-	entries, err := os.ReadDir(root.RealPath)
+	rootHandle, _, _, err := openSecureRootPath(root.RealPath, false, 0)
+	if err != nil {
+		return nil, &Error{
+			Code: CodeInvalidPath,
+			Op:   fsOp + ".list_artifacts",
+			Path: safeRenderPath(root.RealPath),
+			Err:  err,
+		}
+	}
+	defer func() { _ = rootHandle.Close() }()
+
+	entries, err := readSecureDir(rootHandle)
 	if err != nil {
 		return nil, &Error{
 			Code: CodeInvalidPath,
@@ -140,8 +129,19 @@ func (s *FSArtifactStore) ListArtifacts(ctx context.Context, root ArtifactRoot, 
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
+		// Reserved staging entries from interrupted CreateArtifact runs are
+		// ignored before any type classification. Cleanup-free failure paths
+		// deliberately leave unverified entries behind, and a raced writer can
+		// leave a non-directory (for example a swapped-in symlink) at a
+		// reserved name; discovery must skip those rather than fail the root.
+		if isReservedStagingDir(e.Name()) {
+			continue
+		}
 		entryPath := filepath.Join(root.RealPath, e.Name())
-		fi, statErr := os.Lstat(entryPath)
+		if hooks, ok := ctx.Value(secureFSTestHooksKey{}).(secureFSTestHooks); ok && hooks.beforeArtifactEntryLstat != nil {
+			hooks.beforeArtifactEntryLstat(e.Name())
+		}
+		fi, statErr := rootHandle.Lstat(e.Name())
 		if statErr != nil {
 			return nil, newPathError(fsOp+".list_artifacts", entryPath, statErr)
 		}
@@ -163,11 +163,6 @@ func (s *FSArtifactStore) ListArtifacts(ctx context.Context, root ArtifactRoot, 
 			}
 			continue
 		}
-		// Reserved staging directories from interrupted CreateArtifact runs are
-		// ignored so they do not pollute discovery or trigger validation errors.
-		if isReservedStagingDir(e.Name()) {
-			continue
-		}
 		out = append(out, ArtifactEntry{
 			Name: e.Name(),
 			Path: entryPath,
@@ -186,8 +181,8 @@ func (s *FSArtifactStore) ListArtifacts(ctx context.Context, root ArtifactRoot, 
 }
 
 // ReadArtifact reads migration.sql and snapshot.json from the named migration
-// directory. It uses Lstat for all metadata, rejects symlinks, enforces byte
-// caps, and returns caller-owned copies.
+// directory. It securely opens and identity-checks each entry, rejects
+// symlinks, enforces byte caps, and returns caller-owned copies.
 func (s *FSArtifactStore) ReadArtifact(ctx context.Context, root ArtifactRoot, name string, opts ReadArtifactOptions) (*LoadedArtifact, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -204,39 +199,28 @@ func (s *FSArtifactStore) ReadArtifact(ctx context.Context, root ArtifactRoot, n
 		return nil, err
 	}
 	dir := filepath.Join(root.RealPath, name)
-
-	// Lstat the artifact directory entry itself before reading children.
-	// readArtifactFile only Lstats the final file path, so a directory entry
-	// that is a symlink (pointing outside the configured root) would be
-	// silently followed when opening migration.sql / snapshot.json.
-	dirInfo, err := os.Lstat(dir)
+	rootHandle, _, _, err := openSecureRootPath(root.RealPath, false, 0)
 	if err != nil {
-		return nil, &Error{Code: CodeInvalidPath, Op: fsOp + ".read_artifact", Migration: name, Path: safeRenderPath(dir), Err: err}
+		return nil, &Error{Code: CodeInvalidPath, Op: fsOp + ".read_artifact", Migration: name, Path: safeRenderPath(root.RealPath), Err: err}
 	}
-	if dirInfo.Mode()&fs.ModeSymlink != 0 {
+	defer func() { _ = rootHandle.Close() }()
+	artifactDir, _, err := openSecureDir(rootHandle, name, nil)
+	if err != nil {
 		return nil, &Error{
 			Code:      CodeInvalidPath,
 			Op:        fsOp + ".read_artifact",
 			Migration: name,
 			Path:      safeRenderPath(dir),
-			Err:       fmt.Errorf("symlink artifact directories are not supported"),
+			Err:       err,
 		}
 	}
-	if !dirInfo.IsDir() {
-		return nil, &Error{
-			Code:      CodeInvalidPath,
-			Op:        fsOp + ".read_artifact",
-			Migration: name,
-			Path:      safeRenderPath(dir),
-			Err:       fmt.Errorf("not a directory"),
-		}
-	}
+	defer func() { _ = artifactDir.Close() }()
 
-	sql, err := readArtifactFile(ctx, dir, "migration.sql", lim.MaxMigrationSQLBytes)
+	sql, err := readArtifactFile(ctx, artifactDir, "migration.sql", lim.MaxMigrationSQLBytes)
 	if err != nil {
 		return nil, &Error{Code: artifactReadErrorCode(err), Op: fsOp + ".read_artifact", Migration: name, Err: err}
 	}
-	snap, err := readArtifactFile(ctx, dir, "snapshot.json", lim.MaxSnapshotJSONBytes)
+	snap, err := readArtifactFile(ctx, artifactDir, "snapshot.json", lim.MaxSnapshotJSONBytes)
 	if err != nil {
 		return nil, &Error{Code: artifactReadErrorCode(err), Op: fsOp + ".read_artifact", Migration: name, Err: err}
 	}
@@ -256,7 +240,11 @@ func (s *FSArtifactStore) ReadArtifact(ctx context.Context, root ArtifactRoot, n
 }
 
 // CreateArtifact atomically creates a new migration artifact directory under
-// root using a temporary sibling + rename approach.
+// root using a temporary sibling + rename approach. Once the rename publishes
+// the artifact, caller cancellation is no longer honored: post-publish
+// verification runs to completion and a successful publish is reported even
+// if ctx is canceled during that window, so retrying callers never treat a
+// committed artifact as failed.
 func (s *FSArtifactStore) CreateArtifact(ctx context.Context, root ArtifactRoot, artifact NewArtifact, opts CreateArtifactOptions) (*LoadedArtifact, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -280,39 +268,92 @@ func (s *FSArtifactStore) CreateArtifact(ctx context.Context, root ArtifactRoot,
 	}
 
 	target := filepath.Join(root.RealPath, artifact.Name)
-	// Fail if a directory already exists with this name.
-	if _, err := os.Lstat(target); err == nil {
-		return nil, &Error{Code: CodeDuplicateMigration, Op: fsOp + ".create_artifact", Migration: artifact.Name}
-	}
-
-	// Stage writes in a temporary sibling directory, then rename atomically.
-	tmp, err := os.MkdirTemp(root.RealPath, ".grizzle-staging-*")
+	rootHandle, _, _, err := openSecureRootPath(root.RealPath, false, 0)
 	if err != nil {
 		return nil, &Error{Code: CodeInvalidPath, Op: fsOp + ".create_artifact", Migration: artifact.Name, Err: err}
 	}
-	// Clean up the temp dir on any failure path.
-	committed := false
-	defer func() {
-		if !committed {
-			_ = os.RemoveAll(tmp)
-		}
-	}()
+	defer func() { _ = rootHandle.Close() }()
 
-	if err := writeFile(filepath.Join(tmp, "migration.sql"), artifact.MigrationSQL); err != nil {
-		return nil, &Error{Code: CodeInvalidPath, Op: fsOp + ".create_artifact", Migration: artifact.Name, Err: err}
-	}
-	if err := writeFile(filepath.Join(tmp, "snapshot.json"), artifact.SnapshotJSON); err != nil {
-		return nil, &Error{Code: CodeInvalidPath, Op: fsOp + ".create_artifact", Migration: artifact.Name, Err: err}
+	// Fail if a directory already exists with this name.
+	if _, err := rootHandle.Lstat(artifact.Name); err == nil {
+		return nil, &Error{Code: CodeDuplicateMigration, Op: fsOp + ".create_artifact", Migration: artifact.Name}
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		// Sanitize before storing: a non-ENOENT *PathError (for example
+		// ENAMETOOLONG for an overlong name) embeds the caller-controlled
+		// name verbatim, which must not reach rendered diagnostics.
+		return nil, &Error{Code: CodeInvalidPath, Op: fsOp + ".create_artifact", Migration: artifact.Name, Err: sanitizeSecureFSError(err)}
 	}
 
-	if err := os.Rename(tmp, target); err != nil {
+	// Stage writes in a temporary sibling directory, then rename atomically.
+	tmpName, staging, err := createSecureTempDir(rootHandle, ".grizzle-staging-", nil)
+	if err != nil {
 		return nil, &Error{Code: CodeInvalidPath, Op: fsOp + ".create_artifact", Migration: artifact.Name, Err: err}
 	}
-	committed = true
+	// Never recursively remove a failed staging pathname. Another writer may
+	// have replaced it after creation, so cleanup by name could delete an
+	// unverified target with this process's privileges. Successful publication
+	// consumes tmpName; failures leave it for operator inspection.
+	defer func() { _ = staging.Close() }()
 
-	digests := computeArtifactDigest(artifact.MigrationSQL, artifact.SnapshotJSON)
-	sql := bytes.Clone(artifact.MigrationSQL)
-	snap := bytes.Clone(artifact.SnapshotJSON)
+	if err := writeSecureNewFile(staging, "migration.sql", artifact.MigrationSQL); err != nil {
+		return nil, &Error{Code: CodeInvalidPath, Op: fsOp + ".create_artifact", Migration: artifact.Name, Err: err}
+	}
+	if err := writeSecureNewFile(staging, "snapshot.json", artifact.SnapshotJSON); err != nil {
+		return nil, &Error{Code: CodeInvalidPath, Op: fsOp + ".create_artifact", Migration: artifact.Name, Err: err}
+	}
+	stagingInfo, err := staging.Stat(".")
+	if err != nil {
+		return nil, &Error{Code: CodeInvalidPath, Op: fsOp + ".create_artifact", Migration: artifact.Name, Err: err}
+	}
+	if hooks, ok := ctx.Value(secureFSTestHooksKey{}).(secureFSTestHooks); ok && hooks.beforeArtifactStagingVerify != nil {
+		// The test hook intentionally runs after capturing the opened staging
+		// identity and before verifying the parent-relative pathname.
+		hooks.beforeArtifactStagingVerify(tmpName)
+	}
+	if err := verifySecureDirIdentity(rootHandle, tmpName, stagingInfo); err != nil {
+		return nil, &Error{Code: CodeInvalidPath, Op: fsOp + ".create_artifact", Migration: artifact.Name, Err: err}
+	}
+	if hooks, ok := ctx.Value(secureFSTestHooksKey{}).(secureFSTestHooks); ok && hooks.beforeArtifactPublish != nil {
+		// The test hook intentionally runs in the last pathname race window:
+		// after staging identity verification and before the atomic rename.
+		hooks.beforeArtifactPublish(tmpName)
+	}
+
+	if err := rootHandle.Rename(tmpName, artifact.Name); err != nil {
+		// Sanitize for the same reason as the duplicate check above: the raw
+		// *os.LinkError embeds both pathnames, including the caller name.
+		return nil, &Error{Code: CodeInvalidPath, Op: fsOp + ".create_artifact", Migration: artifact.Name, Err: sanitizeSecureFSError(err)}
+	}
+	// The rename above is the atomic publish point: the artifact is committed
+	// regardless of what happens next. Verification below must not abort on
+	// caller cancellation, or a deadline firing in this window would report a
+	// committed artifact as failed and push retrying callers into
+	// duplicate_migration. WithoutCancel preserves context values (test hooks).
+	ctx = context.WithoutCancel(ctx)
+	publishedDir, publishedInfo, err := openSecureDir(rootHandle, artifact.Name, nil)
+	if err != nil {
+		return nil, &Error{Code: CodeInvalidPath, Op: fsOp + ".create_artifact", Migration: artifact.Name, Err: err}
+	}
+	defer func() { _ = publishedDir.Close() }()
+	if !os.SameFile(stagingInfo, publishedInfo) {
+		return nil, &Error{Code: CodeInvalidPath, Op: fsOp + ".create_artifact", Migration: artifact.Name, Err: errSecurePathChanged}
+	}
+	sql, err := readArtifactFile(ctx, publishedDir, "migration.sql", lim.MaxMigrationSQLBytes)
+	if err != nil {
+		return nil, &Error{Code: CodeInvalidPath, Op: fsOp + ".create_artifact", Migration: artifact.Name, Err: err}
+	}
+	snap, err := readArtifactFile(ctx, publishedDir, "snapshot.json", lim.MaxSnapshotJSONBytes)
+	if err != nil {
+		return nil, &Error{Code: CodeInvalidPath, Op: fsOp + ".create_artifact", Migration: artifact.Name, Err: err}
+	}
+	if !bytes.Equal(sql, artifact.MigrationSQL) || !bytes.Equal(snap, artifact.SnapshotJSON) {
+		return nil, &Error{Code: CodeInvalidPath, Op: fsOp + ".create_artifact", Migration: artifact.Name, Err: errSecureContentChanged}
+	}
+	if err := verifySecureDirIdentity(rootHandle, artifact.Name, publishedInfo); err != nil {
+		return nil, &Error{Code: CodeInvalidPath, Op: fsOp + ".create_artifact", Migration: artifact.Name, Err: err}
+	}
+
+	digests := computeArtifactDigest(sql, snap)
 	return &LoadedArtifact{
 		Name:                 artifact.Name,
 		Dir:                  target,
@@ -323,20 +364,22 @@ func (s *FSArtifactStore) CreateArtifact(ctx context.Context, root ArtifactRoot,
 	}, nil
 }
 
-// readArtifactFile reads path using Lstat (no follow), validates it is a
-// regular file, and reads at most maxBytes bytes. Returns a caller-owned copy.
-func readArtifactFile(ctx context.Context, dir, name string, maxBytes int64) ([]byte, error) {
+// readArtifactFile securely opens name relative to dir, validates the opened
+// handle is the same regular file observed by Lstat, and reads at most
+// maxBytes bytes. Returns a caller-owned copy.
+func readArtifactFile(ctx context.Context, dir *os.Root, name string, maxBytes int64) ([]byte, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	path := filepath.Join(dir, name)
-	fi, err := os.Lstat(path)
+	var afterLstat func()
+	if hooks, ok := ctx.Value(secureFSTestHooksKey{}).(secureFSTestHooks); ok && hooks.afterArtifactFileLstat != nil {
+		afterLstat = func() { hooks.afterArtifactFileLstat(name) }
+	}
+	f, fi, err := openSecureFile(dir, name, afterLstat, nil)
 	if err != nil {
-		return nil, fmt.Errorf("lstat %s: %w", name, err)
+		return nil, fmt.Errorf("secure open %s: %w", name, err)
 	}
-	if fi.Mode()&fs.ModeSymlink != 0 {
-		return nil, fmt.Errorf("%s: symlinks are not supported", name)
-	}
+	defer func() { _ = f.Close() }()
 	if !fi.Mode().IsRegular() {
 		return nil, fmt.Errorf("%s: not a regular file", name)
 	}
@@ -346,12 +389,6 @@ func readArtifactFile(ctx context.Context, dir, name string, maxBytes int64) ([]
 	if fi.Size() > maxBytes {
 		return nil, fmt.Errorf("%s: file size %d exceeds limit %d: %w", name, fi.Size(), maxBytes, ErrResourceLimit)
 	}
-
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, fmt.Errorf("open %s: %w", name, err)
-	}
-	defer func() { _ = f.Close() }()
 
 	data, err := io.ReadAll(io.LimitReader(f, maxBytes+1))
 	if err != nil {
@@ -372,20 +409,6 @@ func artifactReadErrorCode(err error) ErrorCode {
 		return CodeResourceLimit
 	}
 	return CodeInvalidPath
-}
-
-// writeFile writes data to path, creating or truncating the file.
-func writeFile(path string, data []byte) error {
-	f, err := os.Create(path)
-	if err != nil {
-		return err
-	}
-	_, werr := f.Write(data)
-	cerr := f.Close()
-	if werr != nil {
-		return werr
-	}
-	return cerr
 }
 
 // allowedRootSidecars lists the only root-level sidecar regular files that are
@@ -421,9 +444,11 @@ func classifyArtifactRootSidecar(name string, fi fs.FileInfo) *Error {
 	}
 }
 
-// isReservedStagingDir reports whether name matches the reserved staging-dir
-// pattern used by CreateArtifact (.grizzle-staging-*). Such directories may
-// be left over from interrupted writes and must not be treated as artifacts.
+// isReservedStagingDir reports whether name matches the reserved staging
+// pattern used by CreateArtifact (.grizzle-staging-*). Entries with this
+// prefix may be left over from interrupted or raced writes — as any file
+// type, since failure paths never remove unverified entries — and must
+// never be treated as artifacts.
 func isReservedStagingDir(name string) bool {
 	return strings.HasPrefix(name, ".grizzle-staging-")
 }
@@ -465,53 +490,6 @@ func assertContained(root, name string) error {
 	}
 	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return fmt.Errorf("path escapes root")
-	}
-	return nil
-}
-
-// assertNoSymlinkInPathChain Lstats every existing component of dir from the
-// filesystem root down. It returns an error if any existing component is a
-// symlink. Components that do not exist (ENOENT) are tolerated — the walk
-// stops there because only existing components can be symlinks. This is the
-// configured-path equivalent of [assertNoSymlinkInChain] (which works on
-// relative paths under a trusted root).
-func assertNoSymlinkInPathChain(dir string) error {
-	abs, err := filepath.Abs(dir)
-	if err != nil {
-		return err
-	}
-	abs = filepath.Clean(abs)
-
-	// Walk from the path itself up to the volume root, then iterate from root
-	// downward. filepath.Dir terminates when parent == self (e.g., "/" or "C:\").
-	var paths []string
-	cur := abs
-	for {
-		paths = append(paths, cur)
-		parent := filepath.Dir(cur)
-		if parent == cur {
-			break
-		}
-		cur = parent
-	}
-
-	// paths is now [abs, parent, ..., root]; iterate from root down, skipping
-	// the volume root itself (which is conceptually outside the user-controlled
-	// tree and on Unix is just "/").
-	for i := len(paths) - 2; i >= 0; i-- {
-		p := paths[i]
-		fi, statErr := os.Lstat(p)
-		if errors.Is(statErr, fs.ErrNotExist) {
-			// Remaining (deeper) components cannot exist either, so they
-			// cannot be symlinks. Permit creation by callers that mkdir.
-			return nil
-		}
-		if statErr != nil {
-			return statErr
-		}
-		if fi.Mode()&fs.ModeSymlink != 0 {
-			return fmt.Errorf("symlink in path component %q is not supported", p)
-		}
 	}
 	return nil
 }

@@ -186,14 +186,16 @@ type CreateArtifactOptions struct {
 // tests may use the in-memory implementation returned by NewMemArtifactStore.
 //
 // All implementations must:
-//   - use Lstat (no symlink follow) when checking file/directory metadata
-//   - reject symlinked roots, artifact directories, and artifact files
 //   - reject paths that escape the configured root (containment)
 //   - return caller-owned defensive byte copies from ReadArtifact
 //   - enforce the ResourceLimits carried by each operation's Options
+//
+// Filesystem-backed implementations must additionally use handle-relative
+// traversal and Lstat/open identity checks, and reject symlinked roots,
+// artifact directories, and artifact files.
 type ArtifactStore interface {
 	// ResolveRoot resolves the configured migrations directory.
-	// It must Lstat the path and reject symlinked roots.
+	// It must securely open the path and reject symlinked roots.
 	ResolveRoot(ctx context.Context, dir string, opts ResolveArtifactRootOptions) (ArtifactRoot, error)
 
 	// ListArtifacts returns the names of the immediate-child migration
@@ -203,12 +205,15 @@ type ArtifactStore interface {
 
 	// ReadArtifact reads and validates the migration.sql and snapshot.json
 	// files inside the named migration directory. It must Lstat both files,
-	// reject non-regular/symlinked files, and enforce opts.Limits byte caps.
+	// reject non-regular/symlinked files without a validate/open race, and
+	// enforce opts.Limits byte caps.
 	ReadArtifact(ctx context.Context, root ArtifactRoot, name string, opts ReadArtifactOptions) (*LoadedArtifact, error)
 
 	// CreateArtifact writes a new migration artifact directory using atomic
 	// publish semantics. It must validate the name before constructing any
 	// path, and must enforce opts.Limits byte caps before staging writes.
+	// Implementations with a distinct publish point must not surface caller
+	// cancellation as a failure once the artifact is durably committed.
 	CreateArtifact(ctx context.Context, root ArtifactRoot, artifact NewArtifact, opts CreateArtifactOptions) (*LoadedArtifact, error)
 }
 
