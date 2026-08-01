@@ -237,7 +237,11 @@ func (s *FSArtifactStore) ReadArtifact(ctx context.Context, root ArtifactRoot, n
 }
 
 // CreateArtifact atomically creates a new migration artifact directory under
-// root using a temporary sibling + rename approach.
+// root using a temporary sibling + rename approach. Once the rename publishes
+// the artifact, caller cancellation is no longer honored: post-publish
+// verification runs to completion and a successful publish is reported even
+// if ctx is canceled during that window, so retrying callers never treat a
+// committed artifact as failed.
 func (s *FSArtifactStore) CreateArtifact(ctx context.Context, root ArtifactRoot, artifact NewArtifact, opts CreateArtifactOptions) (*LoadedArtifact, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err

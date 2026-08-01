@@ -212,6 +212,8 @@ type ArtifactStore interface {
 	// CreateArtifact writes a new migration artifact directory using atomic
 	// publish semantics. It must validate the name before constructing any
 	// path, and must enforce opts.Limits byte caps before staging writes.
+	// Implementations with a distinct publish point must not surface caller
+	// cancellation as a failure once the artifact is durably committed.
 	CreateArtifact(ctx context.Context, root ArtifactRoot, artifact NewArtifact, opts CreateArtifactOptions) (*LoadedArtifact, error)
 }
 
