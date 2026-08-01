@@ -60,7 +60,7 @@ func TestOpenSecureFile_SymlinkSwapCannotEscapeRoot(t *testing.T) {
 			return
 		}
 		swapErr = os.Symlink(outside, victim)
-	})
+	}, nil)
 	if errors.Is(swapErr, os.ErrPermission) {
 		t.Skipf("symlinks are not available: %v", swapErr)
 	}
@@ -149,7 +149,7 @@ func TestOpenSecureFile_IdentityReplacementRejected(t *testing.T) {
 		if renameErr := os.Rename(replacement, victim); renameErr != nil {
 			t.Fatalf("replace race target: %v", renameErr)
 		}
-	})
+	}, nil)
 	if f != nil {
 		_ = f.Close()
 	}
@@ -182,7 +182,7 @@ func TestOpenSecureFile_SymlinkSwapToSameFileRejected(t *testing.T) {
 			return
 		}
 		swapErr = os.Symlink("original.sql", victim)
-	})
+	}, nil)
 	if errors.Is(swapErr, os.ErrPermission) {
 		t.Skipf("symlinks are not available: %v", swapErr)
 	}
@@ -195,6 +195,47 @@ func TestOpenSecureFile_SymlinkSwapToSameFileRejected(t *testing.T) {
 	}
 	if !errors.Is(err, errSecureSymlink) {
 		t.Fatalf("got %v, want symlink error", err)
+	}
+}
+
+func TestOpenSecureFile_HardLinkAddedAfterOpenIsVisibleToCallers(t *testing.T) {
+	if err := ensureSecureFilesystemSupported(); err != nil {
+		t.Skip(err)
+	}
+	rootDir := t.TempDir()
+	victim := filepath.Join(rootDir, "migration.sql")
+	if err := os.WriteFile(victim, []byte("safe"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	root, err := os.OpenRoot(rootDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = root.Close() }()
+
+	// The link lands in the fstat -> final-Lstat window, so only the final
+	// Lstat snapshot can expose the raised link count to callers.
+	var linkErr error
+	f, fi, err := openSecureFile(root, "migration.sql", nil, func() {
+		linkErr = os.Link(victim, filepath.Join(rootDir, "alias.sql"))
+	})
+	if linkErr != nil {
+		t.Skipf("hard links are not available: %v", linkErr)
+	}
+	if err != nil {
+		t.Fatalf("openSecureFile: %v", err)
+	}
+	defer func() { _ = f.Close() }()
+
+	probe, err := root.Lstat("migration.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasExtraHardLinks(probe) {
+		t.Skip("hard-link counts are not detectable on this platform")
+	}
+	if !hasExtraHardLinks(fi) {
+		t.Fatal("hard link added after open is invisible in the returned FileInfo; callers would accept an aliased file")
 	}
 }
 

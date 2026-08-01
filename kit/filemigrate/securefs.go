@@ -179,9 +179,11 @@ func openSecureDirFromInfo(parent *os.Root, name string, info fs.FileInfo, after
 }
 
 // openSecureFile opens a single file entry without a validate-then-open race.
-// The returned FileInfo describes the opened handle, not a stale path lookup.
-// afterLstat is used only by deterministic race regression tests.
-func openSecureFile(parent *os.Root, name string, afterLstat func()) (*os.File, fs.FileInfo, error) {
+// The returned FileInfo is the final post-open Lstat snapshot, identity-checked
+// against the opened handle, so caller policy checks such as hard-link counts
+// run on metadata no staler than the last verification step. afterLstat and
+// afterOpen are used only by deterministic race regression tests.
+func openSecureFile(parent *os.Root, name string, afterLstat, afterOpen func()) (*os.File, fs.FileInfo, error) {
 	info, err := parent.Lstat(name)
 	if err != nil {
 		return nil, nil, sanitizeSecureFSError(err)
@@ -216,6 +218,9 @@ func openSecureFile(parent *os.Root, name string, afterLstat func()) (*os.File, 
 		_ = f.Close()
 		return nil, nil, errSecurePathChanged
 	}
+	if afterOpen != nil {
+		afterOpen()
+	}
 	currentInfo, err := parent.Lstat(name)
 	if err != nil {
 		_ = f.Close()
@@ -233,7 +238,10 @@ func openSecureFile(parent *os.Root, name string, afterLstat func()) (*os.File, 
 		_ = f.Close()
 		return nil, nil, errSecurePathChanged
 	}
-	return f, openedInfo, nil
+	// Return the post-Lstat snapshot rather than openedInfo: a hard link added
+	// between f.Stat() and the final Lstat is visible only in currentInfo, and
+	// callers run hasExtraHardLinks on the returned value.
+	return f, currentInfo, nil
 }
 
 func verifySecureDirIdentity(parent *os.Root, name string, want fs.FileInfo) error {
@@ -277,7 +285,7 @@ func openSecureFilePath(root *os.Root, relpath string) (*os.File, fs.FileInfo, e
 		current = next
 		currentOwned = true
 	}
-	return openSecureFile(current, parts[len(parts)-1], nil)
+	return openSecureFile(current, parts[len(parts)-1], nil, nil)
 }
 
 func readSecureDir(root *os.Root) ([]fs.DirEntry, error) {

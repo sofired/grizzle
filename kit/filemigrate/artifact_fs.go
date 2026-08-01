@@ -375,7 +375,7 @@ func readArtifactFile(ctx context.Context, dir *os.Root, name string, maxBytes i
 	if hooks, ok := ctx.Value(secureFSTestHooksKey{}).(secureFSTestHooks); ok && hooks.afterArtifactFileLstat != nil {
 		afterLstat = func() { hooks.afterArtifactFileLstat(name) }
 	}
-	f, fi, err := openSecureFile(dir, name, afterLstat)
+	f, fi, err := openSecureFile(dir, name, afterLstat, nil)
 	if err != nil {
 		return nil, fmt.Errorf("secure open %s: %w", name, err)
 	}

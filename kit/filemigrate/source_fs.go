@@ -153,7 +153,7 @@ func walkSecureSourceDir(ctx context.Context, dir *os.Root, displayRoot, relDir 
 		buildContext := schemaBuildContext
 		var secureOpenErr error
 		buildContext.OpenFile = func(path string) (io.ReadCloser, error) {
-			f, openedInfo, openErr := openSecureFile(dir, filepath.Base(path), nil)
+			f, openedInfo, openErr := openSecureFile(dir, filepath.Base(path), nil, nil)
 			if openErr == nil && (!openedInfo.Mode().IsRegular() || hasExtraHardLinks(openedInfo)) {
 				_ = f.Close()
 				openErr = fmt.Errorf("unsafe source file shape")
